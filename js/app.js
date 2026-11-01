@@ -576,7 +576,8 @@
   let RECON = [];
   P.files = () => {
     const list = Object.values(models).sort((a, b) => b.updated.localeCompare(a.updated));
-    return `<div><h1>Saved models & Excel</h1><p class="lead">Each company is a separate model. Models save automatically in this browser as you type. To move work between computers, save a model file or export to Excel.</p></div>
+    const preview = window.DCF_PREVIEW ? `<div class="notice">This is the preview copy of the site. Your models save in this browser, but file downloads (model file, Excel export) are blocked here. Use the full website for those.</div>` : '';
+    return `<div><h1>Saved models & Excel</h1><p class="lead">Each company is a separate model. Models save automatically in this browser as you type. To move work between computers, save a model file or export to Excel.</p></div>${preview}
     <section class="panel"><div class="panel-head"><h2>Your models</h2><div class="btns"><button class="btn primary" id="new-blank">New blank model</button><button class="btn" id="new-sample">New from Amazon example</button><button class="btn" id="dup">Duplicate current</button></div></div>
       <div class="tbl-wrap"><table class="fin"><thead><tr><th>Model</th><th>Method</th><th>Last saved</th><th></th></tr></thead><tbody>
       ${list.map(m => `<tr><td>${m.id === cur.id ? '<b>' + esc(m.name) + '</b> (open)' : esc(m.name)}</td><td>${m.mode === 'corrected' ? 'Corrected' : 'Original'}</td><td>${new Date(m.updated).toLocaleString()}</td><td>
