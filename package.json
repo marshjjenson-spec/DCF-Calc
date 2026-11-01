@@ -1,0 +1,10 @@
+{
+  "name": "dcf-calc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Guided DCF valuation calculator rebuilt from the dcf-model-amzn-CMGs6046.xlsx teaching workbook.",
+  "scripts": {
+    "test": "node tests/engine.test.js && node tests/model-excel.test.js",
+    "start": "python3 -m http.server 8000"
+  }
+}

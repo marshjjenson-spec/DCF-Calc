@@ -1,0 +1,312 @@
+{
+ "g1": {
+  "Base": 0.14,
+  "Bear": 0.1,
+  "Bull": 0.17
+ },
+ "g2": {
+  "Base": 0.1,
+  "Bear": 0.07,
+  "Bull": 0.13
+ },
+ "g3": {
+  "Base": 0.06,
+  "Bear": 0.04,
+  "Bull": 0.08
+ },
+ "em1": {
+  "Base": 0.215,
+  "Bear": 0.205,
+  "Bull": 0.225
+ },
+ "em5": {
+  "Base": 0.25,
+  "Bear": 0.22,
+  "Bull": 0.275
+ },
+ "em10": {
+  "Base": 0.27,
+  "Bear": 0.23,
+  "Bull": 0.3
+ },
+ "da": {
+  "Base": 0.1,
+  "Bear": 0.105,
+  "Bull": 0.095
+ },
+ "tax": {
+  "Base": 0.21,
+  "Bear": 0.24,
+  "Bull": 0.18
+ },
+ "nol": {
+  "Base": 0.01,
+  "Bear": 0,
+  "Bull": 0.02
+ },
+ "capex1": {
+  "Base": 0.2,
+  "Bear": 0.22,
+  "Bull": 0.18
+ },
+ "capex2": {
+  "Base": 0.125,
+  "Bear": 0.16,
+  "Bull": 0.12
+ },
+ "capex3": {
+  "Base": 0.1,
+  "Bear": 0.12,
+  "Bull": 0.085
+ },
+ "nwc": {
+  "Base": 0.03,
+  "Bear": 0.05,
+  "Bull": 0
+ },
+ "acq": {
+  "Base": 0.005,
+  "Bear": 0,
+  "Bull": 0.01
+ },
+ "s2c": {
+  "Base": 0.942,
+  "Bear": 1.341,
+  "Bull": 0.621
+ },
+ "rf": {
+  "Base": 0.0445,
+  "Bear": 0.0445,
+  "Bull": 0.0445
+ },
+ "erp": {
+  "Base": 0.0423,
+  "Bear": 0.046,
+  "Bull": 0.04
+ },
+ "beta": {
+  "Base": 1.3,
+  "Bear": 1.45,
+  "Bull": 1.15
+ },
+ "scp": {
+  "Base": 0,
+  "Bear": 0,
+  "Bull": 0
+ },
+ "csrp": {
+  "Base": 0,
+  "Bear": 0.005,
+  "Bull": 0
+ },
+ "kd": {
+  "Base": 0.049,
+  "Bear": 0.053,
+  "Bull": 0.046
+ },
+ "we": {
+  "Base": 0.97,
+  "Bear": 0.95,
+  "Bull": 0.98
+ },
+ "tg": {
+  "Base": 0.03,
+  "Bear": 0.025,
+  "Bull": 0.035
+ },
+ "tem": {
+  "Base": 0.28,
+  "Bear": 0.23,
+  "Bull": 0.3
+ },
+ "tcapex": {
+  "Base": 0.105,
+  "Bear": 0.12,
+  "Bull": 0.095
+ },
+ "troic": {
+  "Base": 0.18,
+  "Bear": 0.12,
+  "Bull": 0.22
+ },
+ "tvMethod": {
+  "Base": "Gordon Growth",
+  "Bear": "Gordon Growth",
+  "Bull": "Gordon Growth"
+ },
+ "exitMult": {
+  "Base": 16,
+  "Bear": 12,
+  "Bull": 20
+ },
+ "prob": {
+  "Base": 0.55,
+  "Bear": 0.2,
+  "Bull": 0.25
+ },
+ "price": 241.75,
+ "hi52": 278.56,
+ "lo52": 196,
+ "basic": 10731,
+ "options": 222,
+ "treasury": 0,
+ "rev0": 716924,
+ "cash": 86810,
+ "sti": 36219,
+ "debt": 89295,
+ "pension": 0,
+ "leases": 87339,
+ "minority": 0,
+ "stakes": 0,
+ "dtl": 0,
+ "optVal": 0,
+ "midYear": "Y",
+ "company": {
+  "name": "Amazon.com, Inc.",
+  "ticker": "AMZN US",
+  "industry": "Internet Retail & Cloud Computing",
+  "currency": "USD",
+  "valDate": "2026-07-01",
+  "analyst": "Ian Teh"
+ },
+ "hist": {
+  "years": [
+   "2021",
+   "2022",
+   "2023",
+   "2024",
+   2025
+  ],
+  "rev": [
+   469822,
+   513983,
+   574785,
+   637959,
+   716924
+  ],
+  "gp": [
+   197478,
+   225152,
+   270046,
+   311671,
+   360510
+  ],
+  "opex": [
+   138166,
+   170983,
+   184531,
+   190283,
+   214779
+  ],
+  "da": [
+   34433,
+   41921,
+   48663,
+   52795,
+   65756
+  ],
+  "interest": [
+   1809,
+   2367,
+   3182,
+   2406,
+   2274
+  ],
+  "sbc": [
+   12757,
+   19621,
+   24023,
+   22011,
+   19467
+  ],
+  "dnwc": [
+   -19611,
+   -20886,
+   -11541,
+   -15541,
+   -19969
+  ],
+  "capex": [
+   -61053,
+   -63645,
+   -52729,
+   -82999,
+   -131819
+  ]
+ },
+ "wb": {
+  "bei": 0.023,
+  "crp": 0,
+  "histErp": 0.057,
+  "rawBeta": 1.46,
+  "unlevBeta": 1.05
+ },
+ "tranches": [
+  {
+   "name": "2017 Senior Notes (Whole Foods)",
+   "face": 16000,
+   "coupon": 0.0315,
+   "maturity": 2027,
+   "note": "2.40%-4.05% coupons"
+  },
+  {
+   "name": "2020 Senior Notes",
+   "face": 10000,
+   "coupon": 0.015,
+   "maturity": 2031,
+   "note": "0.40%-2.70% coupons"
+  },
+  {
+   "name": "2021 Senior Notes",
+   "face": 18500,
+   "coupon": 0.0165,
+   "maturity": 2041,
+   "note": "0.45%-3.25% coupons"
+  },
+  {
+   "name": "2022 Senior Notes",
+   "face": 12750,
+   "coupon": 0.0395,
+   "maturity": 2032,
+   "note": "2.73%-4.70% coupons"
+  },
+  {
+   "name": "2025 Senior Notes",
+   "face": 13000,
+   "coupon": 0.048,
+   "maturity": 2035,
+   "note": "~4.5%-5.1% coupons"
+  },
+  {
+   "name": "Finance Lease Obligations",
+   "face": 0,
+   "coupon": 0.04,
+   "maturity": 2030,
+   "note": "ASC 842 finance leases"
+  }
+ ],
+ "street": {
+  "mean": 309.1,
+  "median": 315,
+  "high": 360,
+  "low": 207,
+  "rec": 1.78,
+  "ltg": 0.205,
+  "asOf": "LSEG, 1 Jul 2026"
+ },
+ "gm1": {
+  "Base": 0.51,
+  "Bear": 0.49,
+  "Bull": 0.52
+ },
+ "gm5": {
+  "Base": 0.53,
+  "Bear": 0.5,
+  "Bull": 0.55
+ },
+ "gm10": {
+  "Base": 0.55,
+  "Bear": 0.51,
+  "Bull": 0.58
+ }
+}
