@@ -110,9 +110,11 @@
     if (/api ?key|apikey|invalid/i.test(m)) return `${prov} did not accept the API key. Check it in Data source. (${m})`;
     return m;
   }
+  // the analyst's name is remembered on this computer and filled into new models
+  function withAnalyst(m) { let a = null; try { a = localStorage.getItem('dcfcalc.analyst'); } catch (e) {} if (a && !m.inputs.company.analyst) m.inputs.company.analyst = a; return m; }
   function targetModelFor(match) {
     if (match(cur) || pristine(cur)) return cur;
-    const m = DCFModel.blank(); return m;
+    return withAnalyst(DCFModel.blank());
   }
   async function importSymbol(sym) {
     sym = String(sym || '').trim().toUpperCase();
@@ -353,7 +355,9 @@
     else if (f.unit === 'text') control = `<input type="text" class="txt" ${data} value="${esc(val || '')}" placeholder="Enter">`;
     else control = `<input type="text" inputmode="decimal" ${data} value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(val, f.unit))}" placeholder="Enter"><span class="unit">${f.unit === 'pct' ? '%' : f.unit === 'x' ? '×' : f.unit === 'usd' ? '$' : f.unit === 'usd_mm' ? '$mm' : f.unit === 'shares' ? 'mm' : ''}</span>`;
     const empty = (val === null || val === undefined || val === '') && !parseErrors[id];
-    return `<div class="inwrap ${err ? 'err' : ''} ${empty && f.required ? 'empty' : ''}">${control}</div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}`;
+    const ik = s ? f.key + '.' + s : f.key, iv = cur.imported && cur.imported[ik];
+    const impCls = iv && !empty ? (JSON.stringify(iv.v) === JSON.stringify(val) ? 'imp' : 'ovr') : '';
+    return `<div class="inwrap ${err ? 'err' : ''} ${empty && f.required ? 'empty' : ''} ${impCls}" ${impCls ? `title="${esc(impCls === 'imp' ? srcTitle(f.key) : 'Changed from the imported value')}"` : ''}>${control}</div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}`;
   }
   function labelCell(f, note) {
     return `<div class="flabel"><div class="name"><button class="help" data-help="${f.key}" aria-label="How to fill in ${esc(f.label)}">?</button>${esc(f.label)}</div>${tagsFor(f)}${note ? `<div class="footnote">${note}</div>` : ''}</div>`;
@@ -1054,7 +1058,7 @@
     let field, s = el.dataset.s || null, from;
     if (t === 'in') {
       const k = el.dataset.k; field = k;
-      if (k.startsWith('company.')) { const c = k.split('.')[1]; from = cur.inputs.company[c]; cur.inputs.company[c] = v; if (c === 'name' && v) { if (cur.name === 'New company' || cur.sample) cur.name = v; } }
+      if (k.startsWith('company.')) { const c = k.split('.')[1]; from = cur.inputs.company[c]; cur.inputs.company[c] = v; if (c === 'analyst' && v) { try { localStorage.setItem('dcfcalc.analyst', v); } catch (x) {} } if (c === 'name' && v) { if (cur.name === 'New company' || cur.sample) cur.name = v; } }
       else if (s) { from = cur.inputs[k][s]; cur.inputs[k][s] = v; }
       else { from = cur.inputs[k]; cur.inputs[k] = v; }
     } else if (t === 'hist') { const k = el.dataset.k, i = +el.dataset.i; field = 'hist.' + k; s = cur.hist.years[i] ? 'FY' + cur.hist.years[i] : 'year ' + (i + 1); from = cur.hist[k][i]; cur.hist[k][i] = v; }
@@ -1160,7 +1164,7 @@
   }
   function newDcf() {
     persist();
-    cur = DCFModel.blank(); persist(); setCurrent(); importStatus = null; dashTab = 'key';
+    cur = withAnalyst(DCFModel.blank()); persist(); setCurrent(); importStatus = null; dashTab = 'key';
     if (page() !== 'dashboard') location.hash = 'dashboard'; else render();
     toast('New DCF started. Your other models are kept in the Saved models library.');
     setTimeout(() => { const i = $('#co-search'); if (i) i.focus(); }, 50);

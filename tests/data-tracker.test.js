@@ -25,6 +25,8 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('FMP: bridge items', fm.values.cash.v === 50000 && fm.values.sti.v === 20000 && fm.values.debt.v === 70000 && fm.values.dtl.v === 3000);
   ok('FMP: debt flagged for review', fm.values.debt.review === true);
   ok('FMP: beta and Treasury are references, not inputs', fm.ref.beta.v === 1.31 && near(fm.ref.rf.v, 0.0445) && !fm.values.beta && !fm.values.rf);
+  const fmd = D.mapFMP('X', { profile: [{ symbol: 'X', companyName: 'X' }], income: [{ date: '2025-12-31', fiscalYear: '2025', revenue: 1e9, weightedAverageShsOut: 10.5e9, weightedAverageShsOutDil: 10.72e9 }] });
+  ok('FMP: options = diluted − basic shares, treasury 0, flagged', near(fmd.values.options.v, 220) && fmd.values.treasury.v === 0 && fmd.values.options.review);
   ok('FMP: effective tax is calculated', near(fm.ref.effTax.v, 0.2) && fm.ref.effTax.calculated);
   ok('FMP: every historical has a source with period', ['rev', 'gp', 'opex', 'da', 'interest', 'sbc', 'dnwc', 'capex'].every(k => fm.histSrc[k] && fm.histSrc[k].period === 'FY2021–FY2025'));
   // missing statements stay missing, never zero
@@ -73,6 +75,11 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('SEC: cover-page shares', sec.values.basic.v === 10700);
   ok('SEC: filing URL points at the accession folder', /Archives\/edgar\/data\/1018724\/000126000002\//.test(sec.values.cash.url));
   ok('SEC: no price imported', !sec.values.price);
+  const f2 = JSON.parse(JSON.stringify(facts)); f2.facts['us-gaap'].IncrementalCommonSharesAttributableToShareBasedPaymentArrangements = { units: { shares: [dur(2024, 150e6), dur(2025, 180e6)] } };
+  const sec2 = D.mapSEC(f2);
+  ok('SEC: options from incremental dilutive shares (latest year)', near(sec2.values.options.v, 180) && sec2.values.treasury.v === 0);
+  const ms = M.blank(); D.applyImport(ms, sec);
+  ok('SEC: valuation date set to the import date when there is no price', ms.inputs.company.valDate === sec.retrieved.slice(0, 10));
   let bad = false; try { D.mapSEC({ foo: 1 }); } catch (e) { bad = /not an SEC company facts file/.test(e.message); }
   ok('SEC: rejects other JSON', bad);
   // ---------- applying an import ----------
@@ -81,7 +88,10 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('apply: fills company and market data', m.inputs.company.name === 'Amazon.com, Inc.' && m.inputs.price === 241.75 && m.inputs.basic === 10731);
   ok('apply: sets valuation date from the price date', m.inputs.company.valDate === '2026-07-01');
   ok('apply: fills historicals', m.hist.rev[4] === 140000 && m.hist.years[4] === 2025);
-  ok('apply: never fills forecast assumptions', m.inputs.beta.Base === null && m.inputs.rf.Base === null && m.inputs.tax.Base === null);
+  ok('apply: never fills forecast assumptions', m.inputs.tax.Base === null && m.inputs.g1.Base === null && m.inputs.erp.Base === null && m.inputs.kd.Base === null);
+  ok('apply: 10-year Treasury fills every scenario', ['Base', 'Bear', 'Bull'].every(x => near(m.inputs.rf[x], 0.0445)) && m.sources.rf.auto);
+  ok('apply: provider beta starts the Base case only', m.inputs.beta.Base === 1.31 && m.inputs.beta.Bear === null && m.inputs.beta.Bull === null && m.sources.beta.review);
+  ok('apply: options from reported dilution, treasury 0', m.inputs.options === null || m.inputs.treasury === 0);
   ok('apply: source with period and retrieval time', m.sources.price.auto && m.sources.price.retrieved === fm.retrieved && /2026-07-01/.test(m.sources.price.period));
   ok('apply: change log records the provider', m.log.some(l => l.field === 'price' && l.by === fm.provider));
   ok('apply: provenance imported', D.provenance(m, 'price', m.inputs.price) === 'imported' && D.provenance(m, 'hist.rev', m.hist.rev) === 'imported');

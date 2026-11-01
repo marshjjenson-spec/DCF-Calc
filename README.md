@@ -20,11 +20,12 @@ model completion tracker. Light and dark mode are remembered per computer.
 ## Company data import
 
 Search a company or ticker in the top bar. The import fills **reported figures and market data only**: company
-details, share price, 52-week range, shares outstanding, five years of historicals, cash, short-term investments,
-debt, minority interest and deferred tax. Each figure is saved with its source, reporting period and retrieval time,
+details, valuation date, share price, 52-week range, shares outstanding, dilutive options and RSUs (as reported, with
+treasury shares at 0), the 10-year Treasury yield for every scenario, the provider beta for the Base case (flagged
+for review), five years of historicals, cash, short-term investments, debt, minority interest and deferred tax. The
+analyst's name is remembered on the computer and filled into new models. Each figure is saved with its source, reporting period and retrieval time,
 and shown as Imported, Overridden (changed by the analyst) or Analyst-entered. Forecast assumptions are never filled
-in; provider beta, the 10-year Treasury yield, the effective tax rate and historical ratios appear as references the
-analyst can choose to use. A re-import keeps any value the analyst typed over.
+in; the effective tax rate and historical ratios appear as references the analyst can choose to use. A re-import keeps any value the analyst typed over.
 
 Sources (set up under **Data source**, keys stay on the analyst's computer):
 

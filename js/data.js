@@ -21,7 +21,7 @@ const DCFData = (() => {
   // ---- a normalised import ----
   // { provider, providerId, retrieved, symbol, company:{...}, values:{key:{v,...}}, hist:{years:[], rev:[], ...}, histSrc:{key:{...}}, ref:{key:{v,...}}, notes:[] }
   function blankImport(providerId, providerName, symbol) {
-    return { providerId, provider: providerName, retrieved: new Date().toISOString(), symbol, company: {}, values: {}, hist: null, histSrc: {}, ref: {}, notes: [] };
+    return { providerId, provider: providerName, retrieved: new Date().toISOString(), symbol, company: {}, values: {}, tri: {}, hist: null, histSrc: {}, ref: {}, notes: [] };
   }
   function put(imp, key, v, meta) { if (!isNum(v) && typeof v !== 'string') return; if (typeof v === 'string' && !v.trim()) return; imp.values[key] = Object.assign({ v }, meta); }
   function putRef(imp, key, v, meta) { if (!isNum(v)) return; imp.ref[key] = Object.assign({ v }, meta); }
@@ -39,6 +39,13 @@ const DCFData = (() => {
     return { hist, src };
   }
   function periodText(years, vals) { const ys = years.filter((y, i) => isNum(y) && isNum(vals[i])); return ys.length ? (ys.length > 1 ? `FY${ys[0]}–FY${ys[ys.length - 1]}` : `FY${ys[0]}`) : ''; }
+  // Options and RSUs in the money: the dilutive shares the company itself reports (diluted − basic weighted-average
+  // shares, already after the treasury stock method), so treasury shares are set to 0 to avoid counting the buyback twice.
+  function putDilution(imp, dilutive, meta) {
+    if (!isNum(dilutive) || dilutive < 0) return;
+    put(imp, 'options', dilutive, Object.assign({}, meta, { review: true, notes: 'Dilutive shares from options and RSUs as reported for the year (diluted − basic weighted-average shares). The company has already applied the treasury stock method, so treasury shares are set to 0. Replace both with the 10-K equity note figures if you prefer the workbook\'s gross method.' }));
+    put(imp, 'treasury', 0, Object.assign({}, meta, { review: true, notes: 'Set to 0 because the imported options figure is already net of shares repurchased under the treasury stock method.' }));
+  }
   // EBITDA = operating income + D&A, so operating expenses excluding D&A = gross profit − EBITDA.
   function opexExDA(gp, opInc, da) { return isNum(gp) && isNum(opInc) && isNum(da) ? gp - (opInc + da) : null; }
 
@@ -63,6 +70,8 @@ const DCFData = (() => {
     const incSorted = inc.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
     if (isNum(num(sf.outstandingShares))) put(imp, 'basic', mm(num(sf.outstandingShares)), { source: `${PROVIDERS.fmp.name} shares float`, type: 'Market data provider', url: PROVIDERS.fmp.home, period: 'as of ' + (sf.date ? String(sf.date).slice(0, 10) : qDate), notes: 'Shares outstanding reported by the provider. Check against the 10-K / 10-Q cover page.' });
     else if (incSorted[0] && isNum(num(incSorted[0].weightedAverageShsOut))) put(imp, 'basic', mm(num(incSorted[0].weightedAverageShsOut)), { source: `${PROVIDERS.fmp.name} income statement`, type: '10-K annual report', url: filings, period: 'FY' + yearOf(incSorted[0].date, incSorted[0].fiscalYear), notes: 'Weighted-average basic shares for the year, not the latest count. Replace with the cover-page count if you can.', review: true });
+    const dl = incSorted.find(r => isNum(num(r.weightedAverageShsOutDil)) && isNum(num(r.weightedAverageShsOut)));
+    if (dl) putDilution(imp, mm(num(dl.weightedAverageShsOutDil) - num(dl.weightedAverageShsOut)), { source: `${PROVIDERS.fmp.name} income statement (share counts)`, type: '10-K annual report', url: filings, period: 'FY' + yearOf(dl.date, dl.fiscalYear) });
     putRef(imp, 'marketCap', mm(num(q.marketCap) ?? num(p.marketCap)), Object.assign({}, mkt, { label: 'Market capitalisation ($ mm)' }));
     putRef(imp, 'beta', num(p.beta), { source: `${PROVIDERS.fmp.name} company profile`, type: 'Market data provider', url: PROVIDERS.fmp.home, period: 'as of ' + qDate, label: 'Provider beta', notes: 'Regression beta from the provider (usually 5 years of monthly returns against the S&P 500).' });
     // statements
@@ -263,6 +272,10 @@ const DCFData = (() => {
     if (ol) putI('leases', ol);
     else { const nc = inst('leasesNC'), c = inst('leasesC'); if (nc) put(imp, 'leases', mm(sumIf(nc.v, c && c.meta.end === nc.meta.end ? c.v : null)), Object.assign(nc.meta, { notes: 'Current + non-current operating lease liabilities.' })); }
     putI('minority', inst('minority'));
+    const inc = secSeries(facts, ['IncrementalCommonSharesAttributableToShareBasedPaymentArrangements', 'IncrementalCommonSharesAttributableToDilutiveEffectOfShareBasedPaymentArrangements'], 'shares');
+    const dil = secSeries(facts, ['WeightedAverageNumberOfDilutedSharesOutstanding'], 'shares'), bas = secSeries(facts, ['WeightedAverageNumberOfSharesOutstandingBasic'], 'shares');
+    if (inc) { const e = Object.keys(inc.byEnd).sort().pop(), x = inc.byEnd[e]; putDilution(imp, mm(x.val), { source: `SEC EDGAR XBRL (10-K, ${inc.tag})`, type: '10-K annual report', url: filingUrl(cik, x.accn), period: 'FY ended ' + e }); }
+    else if (dil && bas) { const e = Object.keys(dil.byEnd).filter(k => bas.byEnd[k]).sort().pop(); if (e) putDilution(imp, mm(dil.byEnd[e].val - bas.byEnd[e].val), { source: 'SEC EDGAR XBRL (10-K, diluted − basic weighted shares)', type: '10-K annual report', url: filingUrl(cik, dil.byEnd[e].accn), period: 'FY ended ' + e }); }
     const sh = secInstant(facts, ['EntityCommonStockSharesOutstanding'], 'shares', 'dei');
     if (sh) put(imp, 'basic', mm(sh.val), { source: `SEC EDGAR cover page (${sh.form})`, type: /^10-Q/.test(sh.form) ? '10-Q quarterly report' : '10-K annual report', url: filingUrl(cik, sh.accn), period: 'as of ' + sh.end, notes: 'Shares outstanding from the filing cover page.' });
     imp.notes.push('SEC files hold reported figures only. Enter the share price and 52-week range from a quote, and check the change in working capital on the cash flow statement.');
@@ -279,6 +292,9 @@ const DCFData = (() => {
   }
   function titleCase(s) { return String(s).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()); }
   function finishNotes(imp) {
+    // market inputs: the 10-year Treasury applies to every scenario; the provider beta starts the Base case only
+    if (imp.ref.rf) imp.tri.rf = { scen: ['Base', 'Bear', 'Bull'], v: imp.ref.rf.v, meta: imp.ref.rf };
+    if (imp.ref.beta) imp.tri.beta = { scen: ['Base'], v: Math.round(imp.ref.beta.v * 100) / 100, meta: Object.assign({}, imp.ref.beta, { review: true, notes: 'Provider regression beta, used as the Base case starting point. Set the Bear and Bull betas yourself, and compare with an industry beta.' }) };
     if (!imp.hist) imp.notes.push('No annual statements were returned, so historicals must be entered by hand.');
     if (imp.company.currency && imp.company.currency !== 'USD') imp.notes.push(`Figures are in ${imp.company.currency}. The model's labels say $; keep every input in the same currency.`);
   }
@@ -286,7 +302,7 @@ const DCFData = (() => {
   // ---------- apply to a model ----------
   // Writes reported and market figures only. A value the analyst has typed over is kept unless replace is true.
   // Returns a list of what changed.
-  const SINGLE_KEYS = ['price', 'hi52', 'lo52', 'basic', 'cash', 'sti', 'debt', 'leases', 'minority', 'dtl'];
+  const SINGLE_KEYS = ['price', 'hi52', 'lo52', 'basic', 'options', 'treasury', 'cash', 'sti', 'debt', 'leases', 'minority', 'dtl'];
   function applyImport(model, imp, opts = {}) {
     const replace = !!opts.replace, at = imp.retrieved;
     model.imported = model.imported || {};
@@ -310,7 +326,9 @@ const DCFData = (() => {
     });
     if (!C.valDate) {
       const p = imp.values.price; const d = p && /(\d{4}-\d{2}-\d{2})/.exec(p.period || '');
-      if (d) { log('company.valDate', null, d[1]); C.valDate = d[1]; model.imported['company.valDate'] = { v: d[1], at }; model.sources['company.valDate'] = srcRec({ source: 'Set to the date of the imported share price', type: 'Own judgment', period: d[1], notes: 'Change it if you value the company as of another date.' }); }
+      const vd = d ? d[1] : at.slice(0, 10);
+      log('company.valDate', null, vd); C.valDate = vd; model.imported['company.valDate'] = { v: vd, at };
+      model.sources['company.valDate'] = srcRec({ source: d ? 'Set to the date of the imported share price' : 'Set to the import date', type: 'Own judgment', period: vd, notes: 'Change it if you value the company as of another date.' });
     }
     model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || null, exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
     // single values
@@ -320,6 +338,18 @@ const DCFData = (() => {
       log(key, model.inputs[key], x.v); model.inputs[key] = x.v; model.imported[key] = { v: x.v, at };
       model.sources[key] = srcRec(x);
       if (model.reviewed) delete model.reviewed[key];
+    });
+    // market inputs that have scenario columns
+    Object.entries(imp.tri || {}).forEach(([key, x]) => {
+      if (!model.inputs[key]) return;
+      let wrote = false;
+      x.scen.forEach(sc => {
+        const ik = key + '.' + sc;
+        if (!canWrite(ik, model.inputs[key][sc])) { kept.push(ik); return; }
+        if (JSON.stringify(model.inputs[key][sc]) !== JSON.stringify(x.v)) { model.log.unshift({ at, field: key, s: sc, from: model.inputs[key][sc], to: x.v, by: imp.provider }); changed.push(ik); }
+        model.inputs[key][sc] = x.v; model.imported[ik] = { v: x.v, at }; wrote = true;
+      });
+      if (wrote) { model.sources[key] = srcRec(x.meta); if (model.reviewed) delete model.reviewed[key]; }
     });
     // historicals: replace the whole block when the import has statements and nothing typed over would be lost
     if (imp.hist) {

@@ -390,3 +390,5 @@ table.kv tr.hl td { background: var(--blue); }
 
 #toasts { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 8px; align-items: center; width: max-content; max-width: calc(100% - 32px); }
 #toasts .toast { position: static; transform: none; }
+.inwrap.imp { border-color: var(--imp); background: var(--imp-bg); }
+.inwrap.ovr { border-color: var(--ovr); background: var(--ovr-bg); }
