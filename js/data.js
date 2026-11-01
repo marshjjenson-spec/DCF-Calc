@@ -67,6 +67,9 @@ const DCFData = (() => {
     if (wa) putRef(imp, 'basicWA', mm(num(wa.weightedAverageShsOut)), { source: `${PROVIDERS.fmp.name} income statement`, type: '10-K annual report', url: filings, period: 'FY' + yearOf(wa.date, wa.fiscalYear) + ' average', label: 'Basic weighted-average shares', notes: 'An average for the fiscal year. Reference only: not a current share count.' });
     const dl = incSorted.find(r => isNum(num(r.weightedAverageShsOutDil)));
     if (dl) putRef(imp, 'dilutedWA', mm(num(dl.weightedAverageShsOutDil)), { source: `${PROVIDERS.fmp.name} income statement`, type: '10-K annual report', url: filings, period: 'FY' + yearOf(dl.date, dl.fiscalYear) + ' average', label: 'Diluted weighted-average shares', notes: 'An average for the fiscal year that excludes anti-dilutive awards. Reference only: not a current diluted count.' });
+    imp.shareData = {};
+    if (wa) imp.shareData.waBasicFY = { value: mm(num(wa.weightedAverageShsOut)), periodText: 'fiscal year ' + yearOf(wa.date, wa.fiscalYear) + ' (provider)', form: '10-K' };
+    if (dl) imp.shareData.waDilFY = { value: mm(num(dl.weightedAverageShsOutDil)), periodText: 'fiscal year ' + yearOf(dl.date, dl.fiscalYear) + ' (provider)', form: '10-K' };
     putRef(imp, 'marketCap', mm(num(q.marketCap) ?? num(p.marketCap)), Object.assign({}, mkt, { label: 'Market capitalisation ($ mm)' }));
     putRef(imp, 'beta', num(p.beta), { source: `${PROVIDERS.fmp.name} company profile`, type: 'Market data provider', url: PROVIDERS.fmp.home, period: 'as of ' + qDate, label: 'Provider beta', notes: 'Regression beta from the provider (usually 5 years of monthly returns against the S&P 500).' });
     // statements
@@ -93,6 +96,7 @@ const DCFData = (() => {
     const t = Array.isArray(d.treasury) ? d.treasury.slice().sort((x, y) => String(y.date).localeCompare(String(x.date)))[0] : null;
     if (t && isNum(num(t.year10))) putRef(imp, 'rf', num(t.year10) / 100, { source: `${PROVIDERS.fmp.name} Treasury rates`, type: 'Market data provider', url: 'https://fred.stlouisfed.org/series/DGS10', period: 'as of ' + t.date, label: '10-year Treasury yield' });
     finishNotes(imp);
+    imp.flags = validateImport(imp);
     return imp;
   }
   async function fetchFMP(symbol, key, fetchFn = fetch) {
@@ -161,6 +165,7 @@ const DCFData = (() => {
     if (ty) putRef(imp, 'rf', num(ty.value) / 100, { source: `${PROVIDERS.av.name} Treasury yield`, type: 'Market data provider', url: 'https://fred.stlouisfed.org/series/DGS10', period: 'as of ' + ty.date, label: '10-year Treasury yield' });
     imp.notes.push('Alpha Vantage does not provide stock-based compensation or the change in working capital. Enter them from the cash flow statement.');
     finishNotes(imp);
+    imp.flags = validateImport(imp);
     return imp;
   }
   async function fetchAV(symbol, key, fetchFn = fetch) {
@@ -191,91 +196,120 @@ const DCFData = (() => {
   }
 
   // ---------- SEC company facts file (data.sec.gov/api/xbrl/companyfacts/CIK##########.json) ----------
-  const SEC_TAGS = {
-    rev: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'SalesRevenueNet', 'RevenueFromContractWithCustomerIncludingAssessedTax'],
-    cogs: ['CostOfRevenue', 'CostOfGoodsAndServicesSold', 'CostOfGoodsSold'],
-    gp: ['GrossProfit'],
-    opInc: ['OperatingIncomeLoss'],
-    da: ['DepreciationDepletionAndAmortization', 'DepreciationAmortizationAndAccretionNet', 'DepreciationAndAmortization', 'DepreciationDepletionAndAmortizationPropertyPlantAndEquipment'],
-    interest: ['InterestExpense', 'InterestExpenseNonoperating', 'InterestExpenseDebt'],
-    sbc: ['ShareBasedCompensation', 'AllocatedShareBasedCompensationExpense'],
-    capex: ['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'],
-    tax: ['IncomeTaxExpenseBenefit'],
-    ebt: ['IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest', 'IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments'],
-    cash: ['CashAndCashEquivalentsAtCarryingValue'],
-    sti: ['MarketableSecuritiesCurrent', 'ShortTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent'],
-    debtLT: ['LongTermDebtNoncurrent', 'LongTermDebt'],
-    debtCur: ['LongTermDebtCurrent'],
-    stDebt: ['ShortTermBorrowings', 'CommercialPaper'],
-    leases: ['OperatingLeaseLiability'],
-    leasesNC: ['OperatingLeaseLiabilityNoncurrent'],
-    leasesC: ['OperatingLeaseLiabilityCurrent'],
-    minority: ['MinorityInterest'],
+  // Uses DCFSec to pick the newest appropriate disclosure for each metric. Every value carries a full source record.
+  const Sec = (typeof DCFSec !== 'undefined') ? DCFSec : (typeof require !== 'undefined' ? require('./sec.js') : null);
+  const filingUrl = (cik, accn) => accn ? Sec.indexUrl(cik, accn) : edgarFilings(cik);
+  const BS = {
+    cash: { c: ['CashAndCashEquivalentsAtCarryingValue'], label: 'Cash & equivalents' },
+    sti: { c: ['MarketableSecuritiesCurrent', 'ShortTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent'], label: 'Short-term investments' },
+    debtLT: { c: ['LongTermDebt'], label: 'Long-term debt incl. current portion' },
+    debtNC: { c: ['LongTermDebtNoncurrent'], label: 'Long-term debt, non-current' },
+    debtCur: { c: ['LongTermDebtCurrent'], label: 'Current portion of long-term debt' },
+    stDebt: { c: ['ShortTermBorrowings', 'CommercialPaper'], label: 'Short-term borrowings' },
+    leases: { c: ['OperatingLeaseLiability'], label: 'Operating lease liabilities' },
+    leasesNC: { c: ['OperatingLeaseLiabilityNoncurrent'], label: 'Operating lease liabilities, non-current' },
+    leasesC: { c: ['OperatingLeaseLiabilityCurrent'], label: 'Operating lease liabilities, current' },
+    minority: { c: ['MinorityInterest'], label: 'Non-controlling interests' },
   };
-  const days = (a, b) => (new Date(b) - new Date(a)) / 864e5;
-  function secSeries(facts, tags, unit = 'USD') {
-    // first tag that has annual (10-K, about one year) data
-    for (const t of tags) {
-      const f = facts['us-gaap'] && facts['us-gaap'][t];
-      const list = f && f.units && f.units[unit];
-      if (!list) continue;
-      const ann = list.filter(x => /^10-K/.test(x.form || '') && x.start && x.end && days(x.start, x.end) > 340 && days(x.start, x.end) < 390);
-      if (!ann.length) continue;
-      const byEnd = {};
-      ann.forEach(x => { if (!byEnd[x.end] || String(x.filed) > String(byEnd[x.end].filed)) byEnd[x.end] = x; });
-      return { tag: t, byEnd };
-    }
-    return null;
+  function secMeta(rec, extra) {
+    return Object.assign({ rec, cls: rec.cat === 'calc' ? 'calc' : 'filing', asOf: rec.end, source: `SEC EDGAR XBRL: ${rec.form} ${rec.accn}`, type: /^10-Q/.test(rec.form || '') ? '10-Q quarterly report' : '10-K annual report', url: rec.url, period: rec.periodText, notes: rec.method && rec.method !== 'Reported' ? rec.method : '' }, extra || {});
   }
-  function secInstant(facts, tags, unit = 'USD', ns = 'us-gaap') {
-    for (const t of tags) {
-      const f = facts[ns] && facts[ns][t];
-      const list = f && f.units && f.units[unit];
-      if (!list || !list.length) continue;
-      const best = list.filter(x => !x.start && /^10-[KQ]/.test(x.form || '')).sort((a, b) => String(b.end).localeCompare(String(a.end)) || String(b.filed).localeCompare(String(a.filed)))[0];
-      if (best) return Object.assign({ tag: t }, best);
-    }
-    return null;
-  }
-  const filingUrl = (cik, accn) => accn ? `https://www.sec.gov/Archives/edgar/data/${String(cik).replace(/^0+/, '')}/${String(accn).replace(/-/g, '')}/` : edgarFilings(cik);
-  function mapSEC(json) {
+  function mapSEC(json, subs) {
     if (!json || !json.facts || !json.facts['us-gaap']) throw new Error('This is not an SEC company facts file. Download it from data.sec.gov/api/xbrl/companyfacts/.');
-    const facts = json.facts, cik = String(json.cik || '').padStart(10, '0');
+    const cik = String(json.cik || '').padStart(10, '0');
     const imp = blankImport('sec', 'SEC EDGAR company facts', null);
     imp.company = { name: json.entityName || null, cik, ticker: null, industry: null, currency: 'USD' };
-    const ser = {}; ['rev', 'cogs', 'gp', 'opInc', 'da', 'interest', 'sbc', 'capex', 'tax', 'ebt'].forEach(k => ser[k] = secSeries(facts, SEC_TAGS[k]));
-    if (!ser.rev) throw new Error('No annual revenue was found in this file.');
-    const ends = Object.keys(ser.rev.byEnd).sort().slice(-5);
-    const val = (k, end) => ser[k] && ser[k].byEnd[end] ? ser[k].byEnd[end].val : null;
-    const rows = ends.map(end => {
-      const rev = val('rev', end), gp = isNum(val('gp', end)) ? val('gp', end) : (isNum(rev) && isNum(val('cogs', end)) ? rev - val('cogs', end) : null);
-      const da = val('da', end), capex = val('capex', end);
-      const fy = ser.rev.byEnd[end].fy;
-      return { year: +String(end).slice(0, 4), end, fy, rev: mm(rev), gp: mm(gp), opex: mm(opexExDA(gp, val('opInc', end), da)), da: mm(da), interest: mm(val('interest', end)), sbc: mm(val('sbc', end)), dnwc: null, capex: isNum(capex) ? mm(-Math.abs(capex)) : null, tax: val('tax', end), ebt: val('ebt', end) };
-    });
-    const last = ser.rev.byEnd[ends[ends.length - 1]];
-    const h = histFrom(rows, { source: 'SEC EDGAR XBRL company facts (10-K)', type: '10-K annual report', url: filingUrl(cik, last.accn), derived: {
-      gp: ser.gp ? `XBRL tag ${ser.gp.tag}.` : 'Calculated: revenue − cost of revenue.', opex: 'Calculated: gross profit − (operating income + D&A).', capex: `XBRL tag ${ser.capex ? ser.capex.tag : '—'}, shown as a negative cash outflow.`, rev: `XBRL tag ${ser.rev.tag}.`, da: ser.da ? `XBRL tag ${ser.da.tag}.` : '', interest: ser.interest ? `XBRL tag ${ser.interest.tag}.` : '', sbc: ser.sbc ? `XBRL tag ${ser.sbc.tag}.` : '' } });
-    imp.hist = h.hist; imp.histSrc = h.src;
-    const eff = effectiveTax(rows); if (eff) putRef(imp, 'effTax', eff.v, { source: 'Calculated from imported statements', type: 'Calculated', period: eff.period, label: 'Effective tax rate (3-year average)', calculated: true });
-    const inst = (k, label) => { const x = secInstant(facts, SEC_TAGS[k]); return x ? { v: x.val, meta: { cls: 'filing', source: `SEC EDGAR XBRL (${x.form}, ${x.tag})`, type: /^10-Q/.test(x.form) ? '10-Q quarterly report' : '10-K annual report', url: filingUrl(cik, x.accn), period: 'as of ' + x.end, end: x.end } } : null; };
-    const putI = (key, x, extra) => { if (x) put(imp, key, mm(x.v), Object.assign(x.meta, extra || {})); };
-    putI('cash', inst('cash')); putI('sti', inst('sti'));
-    const lt = inst('debtLT'), cur = inst('debtCur'), st = inst('stDebt');
-    if (lt) { const sameEnd = x => x && x.meta.end === lt.meta.end ? x.v : null; const parts = [lt.v, lt.meta.source.includes('LongTermDebtNoncurrent') ? sameEnd(cur) : null, sameEnd(st)]; put(imp, 'debt', mm(sumIf(...parts)), Object.assign(lt.meta, { notes: 'Sum of long-term debt, its current portion and short-term borrowings where tagged. Check the 10-K debt note.', review: true })); }
+    const L = Sec.latest(json, subs);
+    imp.filings = { newest: L.newest, q: L.q, k: L.k, amendments: L.amendments };
+    const F = Sec.financials(json, { L });
+    if (!F.years.length) throw new Error('No annual revenue was found in this file.');
+    imp.fin = F;
+    // historicals: the model stores oldest first
+    const ys = F.years.slice().reverse();
+    while (ys.length < 5) ys.unshift({ values: {}, recs: {}, fy: null });
+    const H = { years: ys.map(y => y.fy) };
+    const v = (y, k) => y.values[k] == null ? null : y.values[k];
+    H.rev = ys.map(y => v(y, 'rev'));
+    H.gp = ys.map(y => v(y, 'gp'));
+    H.opex = ys.map(y => v(y, 'gp') != null && v(y, 'ebitda') != null ? v(y, 'gp') - v(y, 'ebitda') : null);
+    H.da = ys.map(y => v(y, 'da'));
+    H.interest = ys.map(y => v(y, 'interest'));
+    H.sbc = ys.map(y => v(y, 'sbc'));
+    H.dnwc = ys.map(y => v(y, 'dnwc'));
+    H.capex = ys.map(y => v(y, 'capex') == null ? null : -v(y, 'capex'));
+    imp.hist = H; imp.histSrc = {};
+    const newestY = F.years[0];
+    const concept = k => F.conceptUsed[k] ? `XBRL tag us-gaap:${F.conceptUsed[k]}. ` : '';
+    const notes = { rev: concept('rev'), gp: newestY.recs.gp && newestY.recs.gp.cat === 'calc' ? 'Calculated: revenue − cost of revenue.' : concept('gp'), opex: 'Calculated: gross profit − (operating income + D&A).', da: concept('da'), interest: concept('interest'), sbc: concept('sbc'), dnwc: concept('dnwc') + (Sec.CONCEPT_NOTES.IncreaseDecreaseInOperatingCapital || ''), capex: concept('capex') + (Sec.CONCEPT_NOTES[F.conceptUsed.capex] || '') + ' Shown as a negative cash outflow.' };
+    Object.keys(notes).forEach(k => { if (H[k].some(isNum)) imp.histSrc[k] = { source: `SEC EDGAR XBRL (10-K annual periods)`, type: '10-K annual report', cls: 'filing', url: newestY.recs.rev ? newestY.recs.rev.url : filingUrl(cik), period: periodText(H.years, H[k]), notes: notes[k], rec: newestY.recs[k] || null }; });
+    imp.ttm = F.ttm; imp.quarter = F.quarter; imp.ttmPrior = F.ttmPrior;
+    const rows = F.years.map(y => ({ year: y.fy, tax: y.values.tax == null ? null : y.values.tax * 1e6, ebt: y.values.ebt == null ? null : y.values.ebt * 1e6 }));
+    const eff = effectiveTax(rows); if (eff) putRef(imp, 'effTax', eff.v, { source: 'Calculated from SEC 10-K figures', type: 'Calculated', period: eff.period, label: 'Effective tax rate (3-year average)', calculated: true });
+    // balance sheet: the newest instant for each item
+    const inst = k => { const x = Sec.pick(json, BS[k].c, 'USD', 'instant'); return x ? Sec.record(json, x, { L, metric: BS[k].label, unit: '$ millions' }) : null; };
+    const putR = (key, r, extra) => { if (r) put(imp, key, r.value, secMeta(r, extra)); };
+    putR('cash', inst('cash')); putR('sti', inst('sti'));
+    const lt = inst('debtLT'), nc = inst('debtNC'), dc = inst('debtCur'), st = inst('stDebt');
+    const same = (a, b) => a && b && a.end === b.end;
+    let debt = null;
+    if (lt) debt = Object.assign({}, lt, { value: lt.value + (same(st, lt) ? st.value : 0), method: `Long-term debt including current portion (${lt.concept})${same(st, lt) ? ' + short-term borrowings' : ''}.` });
+    else if (nc) debt = Object.assign({}, nc, { value: nc.value + (same(dc, nc) ? dc.value : 0) + (same(st, nc) ? st.value : 0), method: 'Non-current + current long-term debt' + (same(st, nc) ? ' + short-term borrowings' : '') + '.' });
+    if (debt) putR('debt', Object.assign(debt, { cat: debt.method ? 'calc' : 'sec' }), { notes: debt.method + ' Excludes lease liabilities. Check the debt note for finance leases and other borrowings.', review: true });
     const ol = inst('leases');
-    if (ol) putI('leases', ol);
-    else { const nc = inst('leasesNC'), c = inst('leasesC'); if (nc) put(imp, 'leases', mm(sumIf(nc.v, c && c.meta.end === nc.meta.end ? c.v : null)), Object.assign(nc.meta, { notes: 'Current + non-current operating lease liabilities.' })); }
-    putI('minority', inst('minority'));
-    const inc = secSeries(facts, ['IncrementalCommonSharesAttributableToShareBasedPaymentArrangements', 'IncrementalCommonSharesAttributableToDilutiveEffectOfShareBasedPaymentArrangements'], 'shares');
-    const dil = secSeries(facts, ['WeightedAverageNumberOfDilutedSharesOutstanding'], 'shares'), bas = secSeries(facts, ['WeightedAverageNumberOfSharesOutstandingBasic'], 'shares');
-    if (inc) { const e = Object.keys(inc.byEnd).sort().pop(), x = inc.byEnd[e]; putRef(imp, 'incrementalWA', mm(x.val), { source: `SEC EDGAR XBRL (10-K, ${inc.tag})`, type: '10-K annual report', url: filingUrl(cik, x.accn), period: 'FY ended ' + e + ' average', label: 'Incremental dilutive shares (weighted average)', notes: 'Average dilution for the fiscal year from share-based awards. Reference only: not a current count.' }); }
-    if (dil) { const e = Object.keys(dil.byEnd).sort().pop(); putRef(imp, 'dilutedWA', mm(dil.byEnd[e].val), { source: 'SEC EDGAR XBRL (10-K, WeightedAverageNumberOfDilutedSharesOutstanding)', type: '10-K annual report', url: filingUrl(cik, dil.byEnd[e].accn), period: 'FY ended ' + e + ' average', label: 'Diluted weighted-average shares', notes: 'An average for the fiscal year. Reference only: not a current diluted count.' }); }
-    const sh = secInstant(facts, ['EntityCommonStockSharesOutstanding'], 'shares', 'dei');
-    if (sh) put(imp, 'basic', mm(sh.val), { cls: 'filing', asOf: sh.end, source: `SEC EDGAR cover page (${sh.form})`, type: /^10-Q/.test(sh.form) ? '10-Q quarterly report' : '10-K annual report', url: filingUrl(cik, sh.accn), period: 'as of ' + sh.end, notes: 'Shares outstanding from the filing cover page.' });
-    imp.notes.push('SEC files hold reported figures only. Enter the share price and 52-week range from a quote, and check the change in working capital on the cash flow statement.');
+    if (ol) putR('leases', ol);
+    else { const lnc = inst('leasesNC'), lc = inst('leasesC'); if (lnc) putR('leases', Object.assign({}, lnc, { value: lnc.value + (same(lc, lnc) ? lc.value : 0), method: 'Current + non-current operating lease liabilities', cat: 'calc' })); }
+    putR('minority', inst('minority'));
+    // shares: separate types
+    const SH = Sec.shares(json, { L });
+    imp.shareData = SH;
+    if (SH.actual && !SH.actual.multiClass) putR('basic', SH.actual, { asOf: SH.actual.end, notes: 'Actual shares outstanding from the filing cover page (raw ' + SH.actual.raw.toLocaleString('en-US') + ' shares).' });
+    else if (SH.actual && SH.actual.multiClass) { imp.notes.push('The cover page lists more than one share class. Their sum is offered as a reference only: check each class and enter the total yourself.'); putRef(imp, 'basicMulti', SH.actual.value, { label: 'Sum of share classes on the cover page', source: 'SEC cover page', period: SH.actual.periodText }); }
+    else imp.notes.push('The SEC file has no cover-page share count for this company (common for companies with several share classes). Enter actual shares outstanding from the cover page of the latest 10-Q or 10-K. Weighted-average shares are not used as a substitute.');
+    Object.entries(SH).forEach(([k, r]) => { if (k !== 'actual') putRef(imp, 'sh.' + k, r.value, { label: r.metric, source: `SEC EDGAR XBRL: ${r.form} ${r.accn}`, period: r.periodText, notes: r.definition + (r.method && r.method !== 'Reported' ? ' ' + r.method : ''), rec: r }); });
+    if (SH.waDilQ) putRef(imp, 'dilutedWA', SH.waDilQ.value, { label: 'Diluted weighted-average shares (latest quarter)', source: `SEC EDGAR XBRL: ${SH.waDilQ.form} ${SH.waDilQ.accn}`, period: SH.waDilQ.periodText, notes: SHARE_REF_NOTE });
+    // base-year candidates
+    imp.base = { fy: F.years[0] && F.years[0].values.rev != null ? { value: F.years[0].values.rev, end: F.years[0].end, label: F.years[0].label } : null, ttm: F.ttm.items.rev && F.ttm.items.rev.value != null ? { value: F.ttm.items.rev.value, end: F.ttm.items.rev.end, isFY: F.ttm.isFY } : null };
+    imp.flags = validateImport(imp);
+    imp.notes.push('SEC files hold reported figures only. Enter the share price and 52-week range from a quote.');
     finishNotes(imp);
     return imp;
+  }
+  const SHARE_REF_NOTE = 'A quarterly weighted average used for diluted EPS. Reference only: not a current diluted share count.';
+
+  // ---------- checks before anything is written ----------
+  function validateImport(imp, model) {
+    const flags = [];
+    const V = imp.values;
+    const add = (key, level, text) => flags.push({ key, level, text });
+    if (V.basic && Sec) Sec.checkActualShares(V.basic.v, imp.shareData || {}, 'The imported share count').forEach(f => add('basic', f.level, f.text));
+    if (V.price && !(V.price.v > 0 && V.price.v < 1e6)) add('price', 'bad', `The share price ${V.price.v} is not plausible.`);
+    ['cash', 'sti', 'debt', 'leases', 'minority'].forEach(k => { if (V[k] && V[k].v < 0) add(k, 'bad', `${k} is negative (${V[k].v}). Balance-sheet amounts should be positive.`); });
+    ['cash', 'sti', 'debt', 'leases', 'minority', 'dtl'].forEach(k => { const r = V[k] && V[k].rec; if (r && r.stale) add(k, 'warn', `${r.metric}: ${r.staleNote} This figure is as of ${r.end}.`); });
+    const sd = imp.shareData || {};
+    if (sd.optionsK && V.price && sd.optionsK.value > V.price.v * 20) add('sh.optionsK', 'warn', `The weighted-average option exercise price in the XBRL data ($${sd.optionsK.value.toLocaleString('en-US')}) is more than 20 times the share price. It may be tagged with the wrong scale: check the stock-based compensation note in the filing.`);
+    if (sd.options && sd.options.stale) add('sh.options', 'warn', `Options outstanding come from an older filing (${sd.options.periodText}). Awards exercised or granted since then are not reflected.`);
+    if (model && model.inputs.company.ticker && imp.symbol && !String(model.inputs.company.ticker).toUpperCase().startsWith(String(imp.symbol).toUpperCase())) add('company.ticker', 'bad', `This model is for ${model.inputs.company.ticker}, but the import is for ${imp.symbol}.`);
+    if (model && model.meta && model.meta.cik && imp.company.cik && String(+model.meta.cik) !== String(+imp.company.cik)) add('company.name', 'bad', `This model belongs to CIK ${+model.meta.cik}, but the file is for CIK ${+imp.company.cik} (${imp.company.name}).`);
+    return flags;
+  }
+
+  // ---------- SEC filing list (data.sec.gov/submissions is readable from a browser) ----------
+  async function fetchFilings(cik, fetchFn = fetch) {
+    const c = String(cik || '').replace(/^0+/, '').padStart(10, '0');
+    const res = await fetchFn(`https://data.sec.gov/submissions/CIK${c}.json`);
+    if (!res.ok) throw new Error(`SEC filing list: HTTP ${res.status}`);
+    const j = await res.json();
+    const L = Sec.latest({ cik: c, facts: {} }, j);
+    return { cik: c, name: j.name, tickers: j.tickers || [], newest: L.newest, q: L.q, k: L.k, amendments: L.amendments.slice(0, 5), checked: new Date().toISOString() };
+  }
+  // Is the provider's data older than the newest filing?
+  function compareToFilings(imp, filings) {
+    const out = [];
+    if (!filings || !filings.newest) return out;
+    const n = filings.newest;
+    const lastFY = imp.hist && imp.hist.years.filter(isNum).slice(-1)[0];
+    if (/^10-Q/.test(n.form) && n.periodEnd && lastFY && n.periodEnd.slice(0, 4) >= String(lastFY)) out.push({ level: 'warn', text: `A newer filing exists: ${n.form} for the period ended ${n.periodEnd}, filed ${n.filed} (accession ${n.accn}). The provider's annual statements stop at FY${lastFY}. Load the SEC company facts file to get the TTM figures and the latest balance sheet.` });
+    return out;
   }
 
   // ---------- helpers ----------
@@ -295,73 +329,125 @@ const DCFData = (() => {
   }
 
   // ---------- apply to a model ----------
-  // Writes reported and market figures only. A value the analyst has typed over is kept unless replace is true.
-  // Returns a list of what changed.
+  // Empty fields are filled. A field that already holds a value is never overwritten here: the new value
+  // goes to model.pending with both values and their dates, for the analyst to approve (applyPending).
+  // A value the analyst typed is marked as an override and needs explicit confirmation.
   const SINGLE_KEYS = ['price', 'hi52', 'lo52', 'basic', 'cash', 'sti', 'debt', 'leases', 'minority', 'dtl'];
+  const LABELS = { price: 'Share price', hi52: '52-week high', lo52: '52-week low', basic: 'Actual common shares outstanding', cash: 'Cash & equivalents', sti: 'Short-term investments', debt: 'Total debt', leases: 'Operating lease liabilities', minority: 'Minority interest', dtl: 'Deferred tax liability', hist: 'Historical financials (five fiscal years)', 'company.name': 'Company name', 'company.ticker': 'Ticker', 'company.industry': 'Industry', 'company.currency': 'Currency', rf: 'Risk-free rate', beta: 'Beta' };
+  function srcRecord(imp, meta) {
+    const r = meta.rec || {};
+    const cat = meta.cls === 'market' ? 'market' : r.cat === 'calc' || meta.calculated ? 'calc' : imp.providerId === 'sec' ? 'sec' : 'provider';
+    return { name: meta.source, type: meta.type, cls: meta.cls || (cat === 'market' ? 'market' : cat === 'sec' ? 'filing' : null), cat, verified: cat === 'sec' || (cat === 'calc' && imp.providerId === 'sec'),
+      asOf: meta.asOf || r.end || null, period: meta.period || '', url: meta.url || '', notes: meta.notes || '', retrieved: imp.retrieved, provider: imp.provider, auto: true, review: !!meta.review,
+      company: imp.company.name || null, ticker: imp.symbol || imp.company.ticker || null, metric: r.metric || null, raw: r.raw == null ? null : r.raw, rawUnit: r.rawUnit || null, unit: r.unit || null, scale: r.scale || null,
+      form: r.form || null, accn: r.accn || null, fp: r.fp || null, fy: r.fy || null, start: r.start || null, end: r.end || null, filed: r.filed || null, concept: r.concept || null, method: r.method || null, stale: !!r.stale };
+  }
   function applyImport(model, imp, opts = {}) {
-    const replace = !!opts.replace, at = imp.retrieved;
+    const at = imp.retrieved, fresh = !!opts.fresh;
     model.imported = model.imported || {};
-    const changed = [], kept = [];
-    const srcRec = (meta) => ({ name: meta.source, type: meta.type, cls: meta.cls || (/Market data/.test(meta.type || '') ? 'market' : /10-[KQ]|filing/i.test(meta.type || '') ? 'filing' : null), asOf: meta.asOf || null, period: meta.period || '', url: meta.url || '', notes: meta.notes || '', retrieved: at, provider: imp.provider, auto: true, review: !!meta.review });
-    const canWrite = (key, curVal) => {
-      if (curVal === null || curVal === undefined || curVal === '') return true;
-      if (replace) return true;
-      const prev = model.imported[key];
-      return !!prev && JSON.stringify(prev.v) === JSON.stringify(curVal); // still the earlier imported value
+    const changed = [], kept = [], pending = [];
+    const log = (key, from, to, s) => { if (JSON.stringify(from) !== JSON.stringify(to)) { model.log.unshift({ at, field: key, s: s || null, from: from == null ? null : from, to, by: imp.provider }); changed.push(key + (s ? '.' + s : '')); } };
+    const empty = v => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.some(x => x !== null && x !== undefined));
+    const flagFor = key => (imp.flags || []).filter(f => f.key === key && f.level === 'bad');
+    // decide: write now, or propose
+    const offer = (key, curVal, newVal, meta, write, s) => {
+      if (flagFor(key).length) { kept.push(key); pending.push({ key, s: s || null, label: LABELS[key] || key, from: curVal, to: newVal, toDate: meta && (meta.asOf || meta.period), kind: 'blocked', reason: flagFor(key).map(f => f.text).join(' '), meta }); return; }
+      if (empty(curVal) || fresh) { write(); return; }
+      if (JSON.stringify(curVal) === JSON.stringify(newVal)) { write(true); return; }
+      const ik = s ? key + '.' + s : key;
+      const pv = model.imported[ik] && JSON.stringify(model.imported[ik].v) === JSON.stringify(curVal) ? 'imported' : 'user';
+      const old = model.sources[key] || {};
+      pending.push({ key, s: s || null, label: (LABELS[key] || key) + (s ? ` (${s})` : ''), from: curVal, to: newVal, fromDate: old.asOf || old.period || null, toDate: meta && (meta.asOf || meta.period) || null, kind: pv === 'imported' ? 'update' : 'override', meta });
+      kept.push(ik);
     };
-    const log = (key, from, to) => { if (JSON.stringify(from) !== JSON.stringify(to)) { model.log.unshift({ at, field: key, s: null, from: from == null ? null : from, to, by: imp.provider }); changed.push(key); } };
-    // company info
     const C = model.inputs.company;
     ['name', 'ticker', 'industry', 'currency'].forEach(k => {
       const v = imp.company[k]; if (!v) return;
       const key = 'company.' + k;
-      if (!canWrite(key, C[k]) && !(k === 'currency' && C[k] === 'USD' && !model.imported[key])) { kept.push(key); return; }
-      log(key, C[k], v); C[k] = v; model.imported[key] = { v, at };
-      model.sources[key] = srcRec({ source: imp.provider + (imp.providerId === 'sec' ? '' : ' company profile'), type: imp.providerId === 'sec' ? '10-K annual report' : 'Market data provider', url: edgarFilings(imp.company.cik), period: 'as of ' + at.slice(0, 10) });
+      const meta = { source: imp.provider + (imp.providerId === 'sec' ? '' : ' company profile'), type: imp.providerId === 'sec' ? '10-K annual report' : 'Market data provider', url: edgarFilings(imp.company.cik), period: 'as of ' + at.slice(0, 10) };
+      if (k === 'currency' && C[k] === 'USD' && !model.imported[key] && v !== 'USD') { offer(key, C[k], v, meta, () => {}); return; }
+      offer(key, C[k], v, meta, (same) => { if (!same) log(key, C[k], v); C[k] = v; model.imported[key] = { v, at }; model.sources[key] = srcRecord(imp, meta); });
     });
     if (!C.valDate) {
       const p = imp.values.price; const d = p && /(\d{4}-\d{2}-\d{2})/.exec(p.period || '');
       const vd = d ? d[1] : at.slice(0, 10);
       log('company.valDate', null, vd); C.valDate = vd; model.imported['company.valDate'] = { v: vd, at };
-      model.sources['company.valDate'] = srcRec({ source: d ? 'Set to the date of the imported share price' : 'Set to the import date', type: 'Own judgment', period: vd, notes: 'Change it if you value the company as of another date.' });
+      model.sources['company.valDate'] = { name: d ? 'Set to the date of the imported share price' : 'Set to the import date', type: 'Own judgment', cat: 'analyst', period: vd, notes: 'Change it if you value the company as of another date.', retrieved: at };
     }
-    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || null, exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
-    // single values
+    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || (model.meta && model.meta.cik) || null, exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
     SINGLE_KEYS.forEach(key => {
       const x = imp.values[key]; if (!x) return;
-      if (!canWrite(key, model.inputs[key])) { kept.push(key); return; }
-      log(key, model.inputs[key], x.v); model.inputs[key] = x.v; model.imported[key] = { v: x.v, at };
-      model.sources[key] = srcRec(x);
-      const ak = { price: 'price', hi52: 'range', lo52: 'range', basic: 'basic' }[key];
-      if (ak) { model.asOf = model.asOf || {}; model.asOf[ak] = x.asOf || null; }
-      if (model.reviewed) delete model.reviewed[key];
+      offer(key, model.inputs[key], x.v, x, (same) => {
+        if (!same) log(key, model.inputs[key], x.v);
+        model.inputs[key] = x.v; model.imported[key] = { v: x.v, at };
+        model.sources[key] = srcRecord(imp, x);
+        const ak = { price: 'price', hi52: 'range', lo52: 'range', basic: 'basic' }[key];
+        if (ak) { model.asOf = model.asOf || {}; model.asOf[ak] = x.asOf || null; }
+        if (!same && model.reviewed) delete model.reviewed[key];
+      });
     });
-    // market inputs that have scenario columns
     Object.entries(imp.tri || {}).forEach(([key, x]) => {
       if (!model.inputs[key]) return;
-      let wrote = false;
-      x.scen.forEach(sc => {
-        const ik = key + '.' + sc;
-        if (!canWrite(ik, model.inputs[key][sc])) { kept.push(ik); return; }
-        if (JSON.stringify(model.inputs[key][sc]) !== JSON.stringify(x.v)) { model.log.unshift({ at, field: key, s: sc, from: model.inputs[key][sc], to: x.v, by: imp.provider }); changed.push(ik); }
-        model.inputs[key][sc] = x.v; model.imported[ik] = { v: x.v, at }; wrote = true;
-      });
-      if (wrote) { model.sources[key] = srcRec(x.meta); if (model.reviewed) delete model.reviewed[key]; }
+      x.scen.forEach(sc => offer(key, model.inputs[key][sc], x.v, x.meta, (same) => {
+        if (!same) log(key, model.inputs[key][sc], x.v, sc);
+        model.inputs[key][sc] = x.v; model.imported[key + '.' + sc] = { v: x.v, at }; model.sources[key] = srcRecord(imp, x.meta);
+      }, sc));
     });
-    // historicals: replace the whole block when the import has statements and nothing typed over would be lost
     if (imp.hist) {
       const H = model.hist;
-      const typed = Object.keys(imp.histSrc).some(k => H[k].some((v, i) => isNum(v) && !(model.imported['hist.' + k] && JSON.stringify(model.imported['hist.' + k].v) === JSON.stringify(H[k]))));
-      if (!typed || replace) {
+      const anyTyped = Object.keys(imp.histSrc).some(k => !empty(H[k]));
+      const write = () => {
         if (JSON.stringify(H.years) !== JSON.stringify(imp.hist.years)) { log('hist.years', H.years.join(', '), imp.hist.years.join(', ')); H.years = imp.hist.years.slice(); }
-        Object.keys(imp.histSrc).forEach(k => { log('hist.' + k, null, imp.hist[k].map(v => isNum(v) ? Math.round(v) : '—').join(', ')); H[k] = imp.hist[k].slice(); model.imported['hist.' + k] = { v: H[k].slice(), at }; model.sources['hist.' + k] = srcRec(imp.histSrc[k]); if (model.reviewed) delete model.reviewed['hist.' + k]; });
-      } else kept.push('hist');
+        Object.keys(imp.histSrc).forEach(k => { log('hist.' + k, null, imp.hist[k].map(v => isNum(v) ? Math.round(v) : '—').join(', ')); H[k] = imp.hist[k].slice(); model.imported['hist.' + k] = { v: H[k].slice(), at }; model.sources['hist.' + k] = srcRecord(imp, imp.histSrc[k]); if (model.reviewed) delete model.reviewed['hist.' + k]; });
+      };
+      if (!anyTyped || fresh) write();
+      else {
+        const same = Object.keys(imp.histSrc).every(k => JSON.stringify(H[k]) === JSON.stringify(imp.hist[k])) && JSON.stringify(H.years) === JSON.stringify(imp.hist.years);
+        if (same) write();
+        else { const user = Object.keys(imp.histSrc).some(k => !empty(H[k]) && !(model.imported['hist.' + k] && JSON.stringify(model.imported['hist.' + k].v) === JSON.stringify(H[k])));
+          pending.push({ key: 'hist', label: LABELS.hist, from: 'FY' + H.years.filter(isNum).join(', FY'), to: 'FY' + imp.hist.years.filter(isNum).join(', FY'), fromDate: null, toDate: imp.histSrc.rev && imp.histSrc.rev.period, kind: user ? 'override' : 'update', meta: { hist: imp.hist, histSrc: imp.histSrc } }); kept.push('hist'); }
+      }
     }
+    // calculated and reference data are refreshed: they never replace an input
+    if (imp.ttm) model.ttm = { end: imp.ttm.end, isFY: imp.ttm.isFY, items: imp.ttm.items, quarter: imp.quarter || null, prior: imp.ttmPrior || null, at, provider: imp.provider };
+    if (imp.fin) model.fin = { years: imp.fin.years.map(y => ({ label: y.label, end: y.end, fy: y.fy, form: y.form, accn: y.accn, filed: y.filed, values: y.values, recs: y.recs })), at };
+    if (imp.shareData) model.shareData = Object.assign({ at }, imp.shareData);
+    if (imp.filings) model.filings = Object.assign({ checked: at }, imp.filings);
+    if (imp.base) model.baseCandidates = imp.base;
     model.ref = Object.assign({}, model.ref || {}, Object.fromEntries(Object.entries(imp.ref).map(([k, x]) => [k, Object.assign({ retrieved: at, provider: imp.provider }, x)])));
     model.importNotes = imp.notes.slice();
+    model.importFlags = (imp.flags || []).slice();
+    model.pending = pending.length ? { at, provider: imp.provider, items: pending.map(p => Object.assign({ id: p.key + (p.s ? '.' + p.s : '') }, p)) } : null;
     if (model.inputs.company.name && (model.name === 'New company' || !model.name)) model.name = model.inputs.company.name;
-    return { changed, kept, notes: imp.notes };
+    return { changed, kept, pending, notes: imp.notes, flags: imp.flags || [] };
   }
+  // Apply the pending items the analyst approved (ids). Overrides need confirmOverrides.
+  function applyPending(model, ids, confirmOverrides) {
+    const P = model.pending; if (!P) return [];
+    const done = [];
+    const imp = { retrieved: P.at, provider: P.provider, providerId: /SEC/.test(P.provider) ? 'sec' : 'x', company: { name: model.inputs.company.name }, symbol: model.meta && model.meta.symbol };
+    P.items.filter(p => ids.includes(p.id) && p.kind !== 'blocked' && (p.kind !== 'override' || confirmOverrides)).forEach(p => {
+      const at = new Date().toISOString();
+      if (p.key === 'hist') {
+        const H = model.hist, h = p.meta.hist;
+        H.years = h.years.slice();
+        Object.keys(p.meta.histSrc).forEach(k => { model.log.unshift({ at, field: 'hist.' + k, s: null, from: (H[k] || []).map(v => isNum(v) ? Math.round(v) : '—').join(', '), to: h[k].map(v => isNum(v) ? Math.round(v) : '—').join(', '), by: P.provider + ' (approved)' }); H[k] = h[k].slice(); model.imported['hist.' + k] = { v: H[k].slice(), at: P.at }; model.sources['hist.' + k] = srcRecord(imp, p.meta.histSrc[k]); });
+      } else if (p.key.startsWith('company.')) {
+        const c = p.key.split('.')[1]; model.log.unshift({ at, field: p.key, s: null, from: model.inputs.company[c], to: p.to, by: P.provider + ' (approved)' }); model.inputs.company[c] = p.to; model.imported[p.key] = { v: p.to, at: P.at };
+      } else if (p.s) {
+        model.log.unshift({ at, field: p.key, s: p.s, from: model.inputs[p.key][p.s], to: p.to, by: P.provider + ' (approved)' }); model.inputs[p.key][p.s] = p.to; model.imported[p.key + '.' + p.s] = { v: p.to, at: P.at }; model.sources[p.key] = srcRecord(imp, p.meta);
+      } else {
+        model.log.unshift({ at, field: p.key, s: null, from: model.inputs[p.key], to: p.to, by: P.provider + ' (approved)' }); model.inputs[p.key] = p.to; model.imported[p.key] = { v: p.to, at: P.at }; model.sources[p.key] = srcRecord(imp, p.meta);
+        const ak = { price: 'price', hi52: 'range', lo52: 'range', basic: 'basic' }[p.key]; if (ak) { model.asOf = model.asOf || {}; model.asOf[ak] = p.meta.asOf || null; }
+      }
+      done.push(p.id);
+    });
+    P.items = P.items.filter(p => !done.includes(p.id));
+    if (!P.items.length) model.pending = null;
+    return done;
+  }
+  function dismissPending(model, ids) { if (!model.pending) return; model.pending.items = model.pending.items.filter(p => !ids.includes(p.id)); if (!model.pending.items.length) model.pending = null; }
+
   // A field's provenance: 'imported', 'overridden' (imported then changed by the analyst), 'manual', or null when empty
   function provenance(model, key, value) {
     const imp = model.imported && model.imported[key];
@@ -371,6 +457,6 @@ const DCFData = (() => {
     return JSON.stringify(imp.v) === JSON.stringify(value) ? 'imported' : 'overridden';
   }
 
-  return { PROVIDERS, mapFMP, fetchFMP, searchFMP, mapAV, fetchAV, searchAV, mapSEC, applyImport, provenance, edgarFilings, SINGLE_KEYS };
+  return { PROVIDERS, mapFMP, fetchFMP, searchFMP, mapAV, fetchAV, searchAV, mapSEC, applyImport, applyPending, dismissPending, validateImport, fetchFilings, compareToFilings, provenance, edgarFilings, SINGLE_KEYS, srcRecord };
 })();
 if (typeof module !== 'undefined') module.exports = DCFData;
