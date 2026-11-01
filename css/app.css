@@ -691,3 +691,44 @@ table.cx-sens td.base { background: var(--accent-soft); font-weight: 600; }
   .cx-import { grid-template-columns: 1fr; }
 }
 table.fin td button, table.fin td .btn { font-family: var(--font-ui); }
+
+/* ---- Change in NWC guide and worksheets ---- */
+.drawer.wide { width: min(1020px, 100%); }
+.nw-status { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--surface-2); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+.nw-status .btn { margin-left: auto; }
+.nsec-open h3, details.nsec > summary { font-size: 15px; }
+.nsec-open p, .nsec-open li { font-size: 13.5px; line-height: 1.5; }
+details.nsec > div h4 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+details.nsec p, details.nsec li { line-height: 1.5; }
+details.dsec3 { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+details.dsec3 > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+details.dsec3 > div { padding: 6px 0 2px; font-size: 13px; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 8px 0; }
+.three > div { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); }
+.three > div span { font-size: 12px; color: var(--muted); }
+.three > div b { font: 600 18px var(--font-num); }
+.three > div small { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.three > div.ok { border-color: var(--good); } .three > div.warn { border-color: var(--warn); }
+.nw-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+table.nwws td { vertical-align: top; font-size: 12.5px; }
+table.nwws td.nw-d { min-width: 220px; max-width: 320px; white-space: normal; }
+table.nwws input[type="text"] { width: 100%; min-width: 90px; box-sizing: border-box; }
+table.nwws select { max-width: 170px; }
+table.nwws td.ctr { text-align: center; }
+table.nwws tr.nw-rev td { background: var(--warn-bg); }
+table.nwws tr.nw-fixed td { color: var(--muted); }
+table.nwws tr.nw-adj td { background: var(--accent-soft); }
+table.sgn td { white-space: normal; font-size: 12.5px; } table.sgn td.neg { color: var(--bad); }
+.nw-sel { border: 1px solid var(--line-strong); border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
+.nw-sel h4 { margin: 0 0 6px; }
+.nw-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; padding: 3px 0; }
+.nw-pick b { font-family: var(--font-num); } .nw-pick small { color: var(--warn); }
+.nw-steps { padding-left: 20px; } .nw-steps li { margin: 6px 0; font-size: 13px; }
+.nw-say li { font-size: 13px; margin: 4px 0; }
+input.nw-sm { width: 90px; display: inline-block; }
+.fcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0; }
+.fcgrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.fcgrid label small { font-size: 11px; }
+.fcgrid label.wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .nw-status .btn { margin-left: 0; } table.nwws td.nw-d { min-width: 180px; } }
+table.nwws td, table.nwws td.num { font-family: var(--font-ui); } table.nwws td.num { white-space: nowrap; }

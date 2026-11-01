@@ -96,6 +96,26 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
   CapEx), sales-to-capital explained, research notes per input and scenario, consistency checks, and a scenario
   overview. Guides can be hidden with one switch.
 
+## Change in NWC guide
+
+The **?** on Historical financials → Change in NWC opens an 11-section guide: what NWC is and why analysts calculate it,
+each component with worked examples, the sign rules, operating NWC and the balance-sheet method, the ten steps to find
+the lines in a 10-K, Amazon's FY2025 lines (sum of all lines −19,969; receivables + inventory + payables +896, a partial
+subset), FCFF with working capital, forecasting (incremental ratio and % of revenue), a filing worksheet, a learning
+calculator, common mistakes and research notes saved with the model.
+
+- **Importer** (`js/nwc.js`): reads every working-capital change line of the cash flow statement, keeps its sign,
+  period, filing and link, classifies it (operating, mixed, not operating, reported total), never adds a part of a
+  combined line twice, and takes each period's lines from one filing. A year is filled in only when every material line
+  is clearly operating; otherwise it is left blank and marked for review. Nothing is guessed or set to zero.
+- **Worksheet**: three separate outputs (all reported lines, clearly operating lines, analyst-adjusted), complete or
+  incomplete status, adjustments with reasons and links, and an explicit choice of the value to use, confirmed before
+  it replaces anything.
+- **History and forecast**: operating NWC, balance-sheet and cash flow changes, NWC % of revenue and the incremental
+  ratio for five years and TTM; a forecasting worksheet that applies to "Change in NWC % of change in revenue" only after
+  confirmation, with a check for the common sign error.
+- **EDGAR links** search only the selected company's filings (by CIK); without a CIK no cross-company search is shown.
+
 Limitations: browsers cannot read the SEC company facts file directly (no CORS), so it is downloaded and loaded by
 hand; facts tagged with dimensions (for example Amazon's RSU count) and company-specific tags are not in that file;
 some companies do not tag D&A or working-capital totals, and those lines are left blank rather than estimated.

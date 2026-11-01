@@ -696,6 +696,47 @@ table.cx-sens td.base { background: var(--accent-soft); font-weight: 600; }
   .cx-import { grid-template-columns: 1fr; }
 }
 table.fin td button, table.fin td .btn { font-family: var(--font-ui); }
+
+/* ---- Change in NWC guide and worksheets ---- */
+.drawer.wide { width: min(1020px, 100%); }
+.nw-status { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--surface-2); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+.nw-status .btn { margin-left: auto; }
+.nsec-open h3, details.nsec > summary { font-size: 15px; }
+.nsec-open p, .nsec-open li { font-size: 13.5px; line-height: 1.5; }
+details.nsec > div h4 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+details.nsec p, details.nsec li { line-height: 1.5; }
+details.dsec3 { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+details.dsec3 > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+details.dsec3 > div { padding: 6px 0 2px; font-size: 13px; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 8px 0; }
+.three > div { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); }
+.three > div span { font-size: 12px; color: var(--muted); }
+.three > div b { font: 600 18px var(--font-num); }
+.three > div small { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.three > div.ok { border-color: var(--good); } .three > div.warn { border-color: var(--warn); }
+.nw-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+table.nwws td { vertical-align: top; font-size: 12.5px; }
+table.nwws td.nw-d { min-width: 220px; max-width: 320px; white-space: normal; }
+table.nwws input[type="text"] { width: 100%; min-width: 90px; box-sizing: border-box; }
+table.nwws select { max-width: 170px; }
+table.nwws td.ctr { text-align: center; }
+table.nwws tr.nw-rev td { background: var(--warn-bg); }
+table.nwws tr.nw-fixed td { color: var(--muted); }
+table.nwws tr.nw-adj td { background: var(--accent-soft); }
+table.sgn td { white-space: normal; font-size: 12.5px; } table.sgn td.neg { color: var(--bad); }
+.nw-sel { border: 1px solid var(--line-strong); border-radius: 6px; padding: 8px 12px; margin-top: 8px; }
+.nw-sel h4 { margin: 0 0 6px; }
+.nw-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; padding: 3px 0; }
+.nw-pick b { font-family: var(--font-num); } .nw-pick small { color: var(--warn); }
+.nw-steps { padding-left: 20px; } .nw-steps li { margin: 6px 0; font-size: 13px; }
+.nw-say li { font-size: 13px; margin: 4px 0; }
+input.nw-sm { width: 90px; display: inline-block; }
+.fcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0; }
+.fcgrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.fcgrid label small { font-size: 11px; }
+.fcgrid label.wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .nw-status .btn { margin-left: 0; } table.nwws td.nw-d { min-width: 180px; } }
+table.nwws td, table.nwws td.num { font-family: var(--font-ui); } table.nwws td.num { white-space: nowrap; }
 </style></head><body>
 <div class="app"><header class="topbar" id="topbar"></header><nav class="rail" id="rail" aria-label="Model sections"></nav><main class="main" id="main"></main></div>
 <div id="drawer-root"></div><div id="modal-root"></div>
@@ -2916,6 +2957,372 @@ const DCFSec = (() => {
 })();
 if (typeof module !== 'undefined') module.exports = DCFSec;
 
+// ===== OPERATING WORKING CAPITAL (no UI, no network) =====
+// Reads the working-capital lines a company reports in its cash flow statement ("Changes in operating assets and
+// liabilities") from an SEC company facts file, keeps each line's reported cash flow sign and source, classifies
+// it, and adds up three separate figures:
+//   1. the sum of every reported change line,
+//   2. the sum of lines clearly classified as operating working capital,
+//   3. the analyst-adjusted DCF cash flow effect (lines the analyst includes, plus their own adjustments).
+// It also measures operating NWC on the balance sheet at two dates, builds the history table, and holds the
+// arithmetic for the learning calculator and the forecasting worksheet. Nothing here guesses: a line that is not
+// in the file is missing (null), never zero.
+const DCFNwc = (() => {
+  const isNum = v => typeof v === 'number' && isFinite(v);
+  const days = (a, b) => (new Date(b) - new Date(a)) / 864e5;
+  const sum = xs => xs.reduce((a, b) => a + b, 0);
+  const Sec = () => (typeof DCFSec !== 'undefined' ? DCFSec : require('./sec.js'));
+
+  // ---- the tags companies use for working-capital change lines ----
+  // side: A = an asset (XBRL reports an increase as positive, which used cash: cash flow sign = −value)
+  //       L = a liability (an increase is positive and provided cash: cash flow sign = +value)
+  //       N = net operating capital (assets − liabilities; an increase used cash: −value)
+  // cls:  core = clearly operating working capital; review = mixed or uncertain, the analyst decides;
+  //       exclude = not operating working capital for a DCF; total = a reported total of the other lines.
+  const TAGS = {
+    IncreaseDecreaseInAccountsReceivable: { label: 'Accounts receivable', side: 'A', cls: 'core', why: 'Money customers owe for sales already made: operating working capital.' },
+    IncreaseDecreaseInAccountsAndOtherReceivables: { label: 'Accounts and other receivables', side: 'A', cls: 'core', check: 'The label includes "other" receivables. Check the receivables note for non-operating items (for example tax refunds or loans).', why: 'Mainly customer receivables.' },
+    IncreaseDecreaseInAccountsReceivableAndOtherOperatingAssets: { label: 'Accounts receivable and other', side: 'A', cls: 'core', check: 'The label includes "other". Amazon\'s line is "Accounts receivable, net and other". Check the note for anything that is not a customer or vendor receivable.', why: 'Mainly customer and vendor receivables.' },
+    IncreaseDecreaseInReceivables: { label: 'Receivables', side: 'A', cls: 'core', why: 'Customer receivables.' },
+    IncreaseDecreaseInOtherReceivables: { label: 'Other receivables', side: 'A', cls: 'review', why: 'Can be vendor (non-trade) receivables, which are operating, or tax, loan and other items, which are not. Read the note.' },
+    IncreaseDecreaseInInventories: { label: 'Inventories', side: 'A', cls: 'core', why: 'Goods bought or made and not yet sold: operating working capital.' },
+    IncreaseDecreaseInRetailRelatedInventories: { label: 'Inventories (retail)', side: 'A', cls: 'core', why: 'Merchandise inventory: operating working capital.' },
+    IncreaseDecreaseInPrepaidExpense: { label: 'Prepaid expenses', side: 'A', cls: 'core', why: 'Operating costs paid in advance (rent, insurance, licences).' },
+    IncreaseDecreaseInContractWithCustomerAsset: { label: 'Contract assets', side: 'A', cls: 'core', why: 'Revenue earned but not yet billable: operating.' },
+    IncreaseDecreaseInAccountsPayable: { label: 'Accounts payable', side: 'L', cls: 'core', why: 'Money owed to suppliers: operating financing of working capital.' },
+    IncreaseDecreaseInAccountsPayableTrade: { label: 'Trade accounts payable', side: 'L', cls: 'core', why: 'Money owed to suppliers.' },
+    IncreaseDecreaseInAccruedLiabilities: { label: 'Accrued liabilities', side: 'L', cls: 'core', check: 'Accrued interest is a financing item. Check the accrued liabilities note if interest accruals are large.', why: 'Operating expenses recognised but not yet paid (wages, utilities, services).' },
+    IncreaseDecreaseInEmployeeRelatedLiabilities: { label: 'Accrued compensation', side: 'L', cls: 'core', why: 'Wages and benefits earned by employees and not yet paid.' },
+    IncreaseDecreaseInAccruedSalaries: { label: 'Accrued salaries', side: 'L', cls: 'core', why: 'Wages earned and not yet paid.' },
+    IncreaseDecreaseInAccountsPayableAndAccruedLiabilities: { label: 'Accounts payable and accrued liabilities', side: 'L', cls: 'core', check: 'A combined line. Do not add separate payables or accruals for the same period as well.', why: 'Supplier payables and operating accruals together.' },
+    IncreaseDecreaseInContractWithCustomerLiability: { label: 'Deferred (unearned) revenue', side: 'L', cls: 'core', why: 'Cash customers paid before the company delivered: operating.' },
+    IncreaseDecreaseInDeferredRevenue: { label: 'Deferred revenue', side: 'L', cls: 'core', why: 'Cash received before the revenue is earned: operating.' },
+    // mixed or uncertain
+    IncreaseDecreaseInOtherOperatingAssets: { label: 'Other operating assets', side: 'A', cls: 'review', why: 'A grouped line. It can hold current and noncurrent items, some not working capital. Read the note.' },
+    IncreaseDecreaseInOtherCurrentAssets: { label: 'Other current assets', side: 'A', cls: 'review', why: 'Current, but grouped: prepaid items are operating, derivative or tax assets usually are not.' },
+    IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets: { label: 'Prepaid expenses and other assets', side: 'A', cls: 'review', why: 'Prepaid expenses are operating; "other assets" may be long-term or non-operating.' },
+    IncreaseDecreaseInInventoriesAndOtherOperatingAssets: { label: 'Inventories and other operating assets', side: 'A', cls: 'review', why: 'Inventory is operating; "other" must be checked.' },
+    IncreaseDecreaseInOtherNoncurrentAssets: { label: 'Other assets (noncurrent)', side: 'A', cls: 'review', noncurrent: true, why: 'Tagged as noncurrent. Long-term items are usually not working capital, though some (long-term prepaid or capitalised contract costs) are operating. Read the "Other assets" note.' },
+    IncreaseDecreaseInOtherOperatingLiabilities: { label: 'Other operating liabilities', side: 'L', cls: 'review', why: 'A grouped line that can include lease, tax and other items. Read the note.' },
+    IncreaseDecreaseInOtherCurrentLiabilities: { label: 'Other current liabilities', side: 'L', cls: 'review', why: 'Current, but grouped. Check for interest, dividends or debt-like items.' },
+    IncreaseDecreaseInOperatingLiabilities: { label: 'Operating liabilities', side: 'L', cls: 'review', why: 'A grouped operating liabilities line.' },
+    IncreaseDecreaseInAccruedLiabilitiesAndOtherOperatingLiabilities: { label: 'Accrued expenses and other', side: 'L', cls: 'review', why: 'Operating accruals mixed with other liabilities. Amazon\'s line includes items such as current lease liabilities and other accruals that need classifying.' },
+    IncreaseDecreaseInAccountsPayableAndOtherOperatingLiabilities: { label: 'Accounts payable and other liabilities', side: 'L', cls: 'review', why: 'Payables are operating; "other" liabilities must be checked.' },
+    IncreaseDecreaseInOtherNoncurrentLiabilities: { label: 'Other liabilities (noncurrent)', side: 'L', cls: 'review', noncurrent: true, why: 'Tagged as noncurrent. Long-term items are usually not working capital.' },
+    IncreaseDecreaseInOtherOperatingCapitalNet: { label: 'Other operating assets and liabilities, net', side: 'N', cls: 'review', why: 'Several assets and liabilities netted into one line. Read the note before including it.' },
+    IncreaseDecreaseInSelfInsuranceReserve: { label: 'Self-insurance reserves', side: 'L', cls: 'review', why: 'An operating accrual for some, a long-term reserve for others.' },
+    IncreaseDecreaseInAccruedIncomeTaxesPayable: { label: 'Accrued income taxes', side: 'L', cls: 'review', why: 'Taxes are taken off NOPAT at a tax rate in the forecast. Including tax payables in working capital can count the timing of tax twice; many analysts leave them out.' },
+    IncreaseDecreaseInAccruedTaxesPayable: { label: 'Accrued taxes', side: 'L', cls: 'review', why: 'Taxes: decide whether your tax rate already covers their timing.' },
+    IncreaseDecreaseInIncomeTaxesPayable: { label: 'Income taxes payable', side: 'L', cls: 'review', why: 'Taxes: decide whether your tax rate already covers their timing.' },
+    IncreaseDecreaseInIncomeTaxesReceivable: { label: 'Income taxes receivable', side: 'A', cls: 'review', why: 'Taxes: decide whether your tax rate already covers their timing.' },
+    // not operating working capital
+    IncreaseDecreaseInFinanceReceivables: { label: 'Finance receivables', side: 'A', cls: 'exclude', why: 'Loans made by a finance arm (for example Ford Credit). A financing business, valued separately, not operating working capital.' },
+    IncreaseDecreaseInInterestPayableNet: { label: 'Interest payable', side: 'L', cls: 'exclude', why: 'Interest is paid to lenders: a financing item. FCFF is before interest.' },
+    IncreaseDecreaseInPensionPlanObligations: { label: 'Pension obligations', side: 'L', cls: 'exclude', why: 'A debt-like claim handled in the equity bridge, not working capital.' },
+    // reported totals
+    IncreaseDecreaseInOperatingCapital: { label: 'Total change in operating assets and liabilities (reported total)', side: 'N', cls: 'total', why: 'The company\'s own total of its working-capital lines. Shown as a check; it may use a wider definition than operating NWC.' },
+  };
+  // Tags that look like working capital but are not changes in operating assets and liabilities
+  const SKIP = { IncreaseDecreaseInDeferredIncomeTaxes: 'a noncash adjustment, not working capital', IncreaseDecreaseInOutstandingChecksFinancingActivities: 'a financing activity', IncreaseDecreaseInRestrictedCash: 'cash, not working capital' };
+  // combined lines and the lines they contain: when both appear for one period, the parts are details (not added again)
+  const PARENTS = {
+    IncreaseDecreaseInAccountsPayableAndAccruedLiabilities: ['IncreaseDecreaseInAccountsPayable', 'IncreaseDecreaseInAccountsPayableTrade', 'IncreaseDecreaseInAccruedLiabilities', 'IncreaseDecreaseInEmployeeRelatedLiabilities', 'IncreaseDecreaseInAccruedSalaries'],
+    IncreaseDecreaseInAccruedLiabilitiesAndOtherOperatingLiabilities: ['IncreaseDecreaseInAccruedLiabilities', 'IncreaseDecreaseInOtherOperatingLiabilities', 'IncreaseDecreaseInEmployeeRelatedLiabilities', 'IncreaseDecreaseInAccruedSalaries'],
+    IncreaseDecreaseInAccountsPayableAndOtherOperatingLiabilities: ['IncreaseDecreaseInAccountsPayable', 'IncreaseDecreaseInAccountsPayableTrade', 'IncreaseDecreaseInOtherOperatingLiabilities', 'IncreaseDecreaseInAccruedLiabilities'],
+    IncreaseDecreaseInReceivables: ['IncreaseDecreaseInAccountsReceivable', 'IncreaseDecreaseInOtherReceivables'],
+    IncreaseDecreaseInAccountsAndOtherReceivables: ['IncreaseDecreaseInAccountsReceivable', 'IncreaseDecreaseInOtherReceivables'],
+    IncreaseDecreaseInAccountsReceivableAndOtherOperatingAssets: ['IncreaseDecreaseInAccountsReceivable', 'IncreaseDecreaseInOtherOperatingAssets'],
+    IncreaseDecreaseInPrepaidDeferredExpenseAndOtherAssets: ['IncreaseDecreaseInPrepaidExpense', 'IncreaseDecreaseInOtherCurrentAssets'],
+    IncreaseDecreaseInInventoriesAndOtherOperatingAssets: ['IncreaseDecreaseInInventories', 'IncreaseDecreaseInOtherOperatingAssets'],
+  };
+  const CLS_TXT = { core: 'Operating working capital', review: 'Mixed or uncertain: needs review', exclude: 'Not operating working capital', total: 'Reported total (check only)', detail: 'Part of a combined line (not added again)', adj: 'Analyst adjustment' };
+  const SUBSET = /^IncreaseDecreaseIn(AccountsReceivable|AccountsAndOtherReceivables|AccountsReceivableAndOtherOperatingAssets|Receivables|Inventories|RetailRelatedInventories|AccountsPayable|AccountsPayableTrade)$/;
+  const cfSign = (side, val) => side === 'L' ? val : -val;
+
+  // every IncreaseDecrease* fact in the file with a duration
+  function wcFacts(json) {
+    const g = (json && json.facts && json.facts['us-gaap']) || {}, out = [];
+    Object.keys(g).forEach(c => {
+      if (!/^IncreaseDecrease/.test(c) || SKIP[c]) return;
+      (g[c].units && g[c].units.USD || []).forEach(x => { if (x.start && /^10-[KQ]/.test(x.form || '') && isNum(x.val)) out.push(Object.assign({ concept: c, pt: Sec().periodType(x) }, x)); });
+    });
+    return out;
+  }
+
+  // Lines for one period, all from ONE filing, so a tag the company has since replaced is not added twice.
+  function buildLines(facts, accn, start, end, L, cik, extra) {
+    const xs = facts.filter(x => x.accn === accn && x.end === end && x.start === start);
+    const by = {};
+    xs.forEach(x => { if (!by[x.concept] || String(x.filed) > String(by[x.concept].filed)) by[x.concept] = x; });
+    const f = (L && L.all.find(y => y.accn === accn)) || {};
+    const url = f.url || Sec().indexUrl(cik, accn);
+    const lines = Object.values(by).map(x => {
+      const t = TAGS[x.concept];
+      const raw = x.val / 1e6;
+      return {
+        id: x.concept, concept: 'us-gaap:' + x.concept, label: t ? t.label : x.concept.replace(/^IncreaseDecreaseIn/, '').replace(/([a-z])([A-Z])/g, '$1 $2'),
+        raw, cf: t ? cfSign(t.side, raw) : null, side: t ? t.side : null, cls: t ? t.cls : 'review', autoCls: t ? t.cls : 'review',
+        why: t ? t.why : 'This tag is not one the calculator recognises, so its cash flow sign is not verified. Read the line in the filing and type the amount with its cash flow sign as an adjustment.',
+        check: t && t.check || '', noncurrent: !!(t && t.noncurrent), unknown: !t,
+        statement: 'Consolidated statements of cash flows: operating activities, changes in operating assets and liabilities',
+        form: x.form, accn, filed: x.filed, start, end, url, extra: extra || null,
+      };
+    });
+    // a combined line and its parts in the same period: keep the combined line, mark the parts as details
+    lines.forEach(l => { const kids = PARENTS[l.id]; if (!kids) return; lines.forEach(k => { if (k !== l && kids.includes(k.id) && k.cls !== 'total') { k.cls = k.autoCls = 'detail'; k.parent = l.id; k.why = `Included in "${l.label}" for the same period. Adding it again would count it twice.`; } }); });
+    const order = { core: 0, review: 1, exclude: 2, detail: 3, total: 4 };
+    lines.sort((a, b) => (order[a.cls] - order[b.cls]) || Math.abs(b.cf || 0) - Math.abs(a.cf || 0));
+    return lines;
+  }
+
+  // ---- from an SEC company facts file: every fiscal year the file covers, and TTM ----
+  function fromSec(json, o = {}) {
+    const S = Sec(), L = o.L || S.latest(json), cik = json && json.cik;
+    const facts = wcFacts(json);
+    const periods = {};
+    // fiscal years: for each fiscal-year end, the most recent 10-K that reports working-capital lines for it
+    const fy = facts.filter(x => x.pt === 'FY' && /^10-K/.test(x.form));
+    const ends = [...new Set(fy.map(x => x.end))].sort().reverse();
+    const want = o.ends && o.ends.length ? o.ends : ends.slice(0, 5);
+    want.forEach(end => {
+      const xs = fy.filter(x => x.end === end); if (!xs.length) return;
+      const top = xs.slice().sort((a, b) => String(b.filed).localeCompare(String(a.filed)))[0];
+      const start = top.start;
+      const lines = buildLines(facts, top.accn, start, end, L, cik);
+      periods['FY' + end.slice(0, 4)] = { key: 'FY' + end.slice(0, 4), kind: 'FY', label: 'Fiscal year ended ' + end, start, end, form: top.form, accn: top.accn, filed: top.filed, url: lines[0] ? lines[0].url : S.indexUrl(cik, top.accn), lines };
+    });
+    // TTM: a reported twelve-month column in the latest 10-Q if the company shows one (Amazon does),
+    // otherwise latest fiscal year + year to date − prior year to date, line by line, with all three parts shown
+    const q = facts.filter(x => /^10-Q/.test(x.form));
+    const latestEnd = q.length ? q.map(x => x.end).sort().reverse()[0] : null;
+    const fyLatest = ends[0];
+    if (latestEnd && fyLatest && latestEnd > fyLatest) {
+      const qx = q.filter(x => x.end === latestEnd);
+      const accn = qx.slice().sort((a, b) => String(b.filed).localeCompare(String(a.filed)))[0].accn;
+      const t12 = qx.filter(x => x.accn === accn && x.pt === 'T12');
+      const fyKey = 'FY' + fyLatest.slice(0, 4), FYP = periods[fyKey] || (() => { const xs = fy.filter(x => x.end === fyLatest); const top = xs.sort((a, b) => String(b.filed).localeCompare(String(a.filed)))[0]; return { lines: buildLines(facts, top.accn, top.start, fyLatest, L, cik), end: fyLatest, accn: top.accn, url: '' }; })();
+      if (t12.length) {
+        const start = t12[0].start;
+        const lines = buildLines(facts, accn, start, latestEnd, L, cik);
+        periods.TTM = { key: 'TTM', kind: 'TTM', reported: true, label: 'Twelve months ended ' + latestEnd + ' (reported in the 10-Q)', start, end: latestEnd, form: qx[0].form, accn, filed: qx[0].filed, url: lines[0] ? lines[0].url : S.indexUrl(cik, accn), lines,
+          method: 'The 10-Q reports a twelve-month cash flow column, so these are reported figures, not calculated.' };
+      } else {
+        const ytd = qx.filter(x => x.accn === accn && ['Q', 'H1', '9M'].includes(x.pt) && Math.abs(days(fyLatest, x.start)) <= 10);
+        if (ytd.length) {
+          const ys = ytd[0].start, pt = ytd[0].pt;
+          const prior = q.filter(x => x.accn === accn && x.pt === pt && Math.abs(days(x.end, latestEnd) - 365) <= 8 && Math.abs(days(x.start, ys) - 365) <= 8);
+          const cur = buildLines(facts, accn, ys, latestEnd, L, cik);
+          const pr = prior.length ? buildLines(facts, accn, prior[0].start, prior[0].end, L, cik) : [];
+          const lines = cur.map(l => {
+            const f = FYP.lines.find(x => x.id === l.id), p = pr.find(x => x.id === l.id);
+            const ok = f && p && isNum(l.cf) && isNum(f.cf) && isNum(p.cf);
+            return Object.assign({}, l, { raw: ok ? f.raw + l.raw - p.raw : null, cf: ok ? f.cf + l.cf - p.cf : null, calc: true, parts: [f ? { what: 'Fiscal year', end: FYP.end, cf: f.cf, accn: f.accn, url: f.url } : null, { what: S.PT_TEXT[pt] + ' ' + latestEnd, end: latestEnd, cf: l.cf, accn, url: l.url }, p ? { what: S.PT_TEXT[pt] + ' ' + p.end, end: p.end, cf: p.cf, accn, url: p.url } : null],
+              missingPart: !ok, why: l.why + (ok ? '' : ' One of the three figures is not in the file for this tag, so the TTM amount is left blank.') });
+          });
+          periods.TTM = { key: 'TTM', kind: 'TTM', reported: false, label: 'Twelve months ended ' + latestEnd + ' (calculated)', start: null, end: latestEnd, form: qx[0].form, accn, filed: qx[0].filed, url: cur[0] ? cur[0].url : '', lines,
+            method: `TTM = fiscal year ended ${fyLatest} + ${S.PT_TEXT[pt]} ${latestEnd} − the same period a year earlier, for each line. Calculated, not reported.` };
+        }
+      }
+    }
+    const bs = {};
+    const bsEnds = new Set();
+    Object.values(periods).forEach(p => { bsEnds.add(p.end); const b = priorEnd(json, p.end, p.kind === 'TTM'); if (b) bsEnds.add(b); });
+    bsEnds.forEach(e => { const r = balanceSheet(json, e, L); if (r) bs[e] = r; });
+    return { cik: cik || null, entity: json.entityName || null, at: o.at || null, periods, bs, finArm: facts.some(x => x.concept === 'IncreaseDecreaseInFinanceReceivables') };
+  }
+
+  // ---- balance-sheet method: operating NWC at one date ----
+  // Noncash operating current assets − nondebt operating current liabilities, from the totals so nothing is left out:
+  // (total current assets − cash − restricted cash − short-term investments) − (total current liabilities − short-term
+  // debt − current portion of long-term debt − current lease liabilities).
+  const BSR = {
+    ca: ['AssetsCurrent'], cash: ['CashAndCashEquivalentsAtCarryingValue'], rcash: ['RestrictedCashCurrent'], sti: ['MarketableSecuritiesCurrent', 'ShortTermInvestments', 'AvailableForSaleSecuritiesDebtSecuritiesCurrent'],
+    cl: ['LiabilitiesCurrent'], debtCur: ['DebtCurrent'], ltdCur: ['LongTermDebtCurrent', 'LongTermDebtAndCapitalLeaseObligationsCurrent'], stb: ['ShortTermBorrowings'], cp: ['CommercialPaper'], olCur: ['OperatingLeaseLiabilityCurrent'], flCur: ['FinanceLeaseLiabilityCurrent'],
+    ar: ['AccountsReceivableNetCurrent', 'ReceivablesNetCurrent'], ntr: ['NontradeReceivablesCurrent'], inv: ['InventoryNet', 'RetailRelatedInventoryMerchandise'], prep: ['PrepaidExpenseAndOtherAssetsCurrent', 'PrepaidExpenseCurrent'], oca: ['OtherAssetsCurrent'],
+    ap: ['AccountsPayableCurrent'], apal: ['AccountsPayableAndAccruedLiabilitiesCurrent'], acc: ['AccruedLiabilitiesCurrent'], emp: ['EmployeeRelatedLiabilitiesCurrent'], def: ['ContractWithCustomerLiabilityCurrent', 'DeferredRevenueCurrent'], tax: ['AccruedIncomeTaxesCurrent', 'TaxesPayableCurrent'], ocl: ['OtherLiabilitiesCurrent'],
+  };
+  const BS_LABEL = { ca: 'Total current assets', cash: 'Cash and cash equivalents', rcash: 'Restricted cash (current)', sti: 'Short-term investments / marketable securities', cl: 'Total current liabilities', debtCur: 'Current debt (total)', ltdCur: 'Current portion of long-term debt', stb: 'Short-term borrowings', cp: 'Commercial paper', olCur: 'Current operating lease liabilities', flCur: 'Current finance lease liabilities',
+    ar: 'Accounts receivable', ntr: 'Vendor non-trade receivables', inv: 'Inventories', prep: 'Prepaid expenses and other current assets', oca: 'Other current assets', ap: 'Accounts payable', apal: 'Accounts payable and accrued liabilities', acc: 'Accrued expenses', emp: 'Accrued compensation', def: 'Deferred (unearned) revenue', tax: 'Income taxes payable', ocl: 'Other current liabilities' };
+  function inst(json, cs, end) {
+    const S = Sec();
+    for (const c of cs) { const e = S.entries(json, c, 'USD').filter(x => x.pt === 'instant' && x.end === end).sort((a, b) => String(b.filed).localeCompare(String(a.filed)))[0]; if (e) return { v: e.val / 1e6, concept: 'us-gaap:' + c, accn: e.accn, form: e.form, filed: e.filed }; }
+    return null;
+  }
+  function balanceSheet(json, end, L) {
+    const g = {}; Object.keys(BSR).forEach(k => { g[k] = inst(json, BSR[k], end); });
+    if (!g.ca || !g.cl) return null;
+    const v = k => g[k] ? g[k].v : 0;
+    // current debt: one total if the company tags it, else the parts (commercial paper only when no short-term borrowings line, which usually holds it)
+    const debt = g.debtCur ? v('debtCur') : v('ltdCur') + (g.stb ? v('stb') : v('cp'));
+    const opCA = v('ca') - v('cash') - v('rcash') - v('sti');
+    const opCL = v('cl') - debt - v('olCur') - v('flCur');
+    const accn = g.ca.accn, f = (L && L.all.find(y => y.accn === accn)) || {};
+    return { end, values: Object.fromEntries(Object.entries(g).filter(([, x]) => x).map(([k, x]) => [k, x.v])), tags: Object.fromEntries(Object.entries(g).filter(([, x]) => x).map(([k, x]) => [k, x.concept])),
+      debt, opCA, opCL, opNwc: opCA - opCL, reportedNwc: v('ca') - v('cl'), accn, form: g.ca.form, filed: g.ca.filed, url: f.url || Sec().indexUrl(json.cik, accn),
+      method: 'Operating NWC = (total current assets − cash − restricted cash − short-term investments) − (total current liabilities − current debt − current lease liabilities).' };
+  }
+  // the balance-sheet date a year before (fiscal year: the prior fiscal year end; TTM: the same quarter a year earlier)
+  function priorEnd(json, end) {
+    const g = json && json.facts && json.facts['us-gaap'] && json.facts['us-gaap'].AssetsCurrent;
+    const list = (g && g.units && g.units.USD) || [];
+    const c = list.filter(x => Math.abs(days(x.end, end) - 365) <= 8).map(x => x.end).sort().reverse();
+    return c[0] || null;
+  }
+
+  // ---- worksheet totals: the three outputs, kept separate ----
+  // lines: imported lines; ed: { [id]: { cls, inc, reason } } the analyst's choices; adj: the analyst's own lines
+  function effective(l, ed) {
+    const e = (ed && ed[l.id]) || {};
+    const cls = l.cls === 'detail' || l.cls === 'total' ? l.cls : (e.cls || l.cls);
+    const inc = l.cls === 'detail' || l.cls === 'total' ? false : (typeof e.inc === 'boolean' ? e.inc : cls === 'core');
+    const amt = isNum(e.amt) ? e.amt : l.cf; // an analyst can type the amount for a tag whose sign is not verified
+    return Object.assign({}, l, { cls, inc, cf: amt, reason: e.reason || '', edited: !!(e.cls || typeof e.inc === 'boolean' || isNum(e.amt)) });
+  }
+  function summary(lines, ed, adj, o = {}) {
+    const L = (lines || []).map(l => effective(l, ed));
+    const A = (adj || []).map(a => Object.assign({ cls: a.reported ? (a.cls || 'review') : 'adj', inc: a.inc !== false, cf: isNum(a.amt) ? a.amt : null, manual: true }, a));
+    const rep = L.filter(l => l.cls !== 'detail' && l.cls !== 'total').concat(A.filter(a => a.reported));
+    const known = rep.filter(l => isNum(l.cf));
+    const all = known.length ? sum(known.map(l => l.cf)) : null;
+    const coreL = rep.filter(l => l.cls === 'core' && isNum(l.cf));
+    const core = coreL.length ? sum(coreL.map(l => l.cf)) : null;
+    const incl = rep.filter(l => l.inc).concat(A.filter(a => !a.reported && a.inc));
+    const adjusted = incl.length && incl.every(l => isNum(l.cf)) ? sum(incl.map(l => l.cf)) : (incl.length ? null : null);
+    const scale = Math.max(1, sum(rep.filter(l => isNum(l.cf)).map(l => Math.abs(l.cf))));
+    const matPct = isNum(o.material) ? o.material : 0.05;
+    const unresolved = rep.filter(l => l.cls === 'review');
+    const material = unresolved.filter(l => !isNum(l.cf) || Math.abs(l.cf) >= matPct * scale);
+    const missingAmt = incl.filter(l => !isNum(l.cf));
+    const total = L.find(l => l.cls === 'total');
+    // the narrow core: receivables + inventory + payables only (a partial subset, never the full change)
+    const subL = rep.filter(l => SUBSET.test(l.id) && isNum(l.cf));
+    const subset = subL.length ? sum(subL.map(l => l.cf)) : null;
+    let status = 'empty';
+    if (rep.length || A.length) status = material.length || missingAmt.length || rep.some(l => !isNum(l.cf)) ? 'incomplete' : 'complete';
+    const msgs = [];
+    material.forEach(l => msgs.push(`"${l.label}" (${isNum(l.cf) ? fmt(l.cf) : 'amount not verified'}) is mixed or uncertain. Classify it as operating or not, or exclude it and add the operating part as an adjustment.`));
+    missingAmt.forEach(l => msgs.push(`"${l.label}" is included but has no amount.`));
+    if (total && isNum(total.cf) && isNum(all) && Math.abs(total.cf - all) > 0.5) msgs.push(`The company's reported total (${fmt(total.cf)}) differs from the sum of the lines found (${fmt(all)}) by ${fmt(total.cf - all)}. Some lines may use company-specific tags that are not in the SEC file: check the cash flow statement.`);
+    return { lines: L, adj: A, all, core, subset, subsetLines: subL, adjusted, included: incl, unresolved, material, status, msgs, total: total ? total.cf : null, scale };
+  }
+  const fmt = v => isNum(v) ? (v < 0 ? '−' : '+') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—';
+
+  // What the importer may put in the historical table: only a sum whose lines are all clearly classified
+  function importable(p) {
+    if (!p || !p.lines || !p.lines.length) return { v: null, reason: 'No working-capital lines were found for this period.' };
+    const tot = p.lines.find(l => l.cls === 'total');
+    const s = summary(p.lines, {}, []);
+    if (s.status === 'complete' && isNum(s.adjusted)) return { v: s.adjusted, s, reason: `Sum of ${s.included.length} clearly operating line${s.included.length > 1 ? 's' : ''}${s.unresolved.length ? `; ${s.unresolved.length} small uncertain line${s.unresolved.length > 1 ? 's were' : ' was'} left out` : ''}.` };
+    return { v: null, s, total: tot ? tot.cf : null, reason: `Not filled in: ${s.material.length} material line${s.material.length === 1 ? ' is' : 's are'} mixed or uncertain (${s.material.map(l => l.label).join(', ')}). Open the Change in NWC worksheet to classify ${s.material.length === 1 ? 'it' : 'them'}.` };
+  }
+
+  // ---- history: five fiscal years and TTM ----
+  // H: model.hist (oldest first); D: model.nwcData; sel: model.nwc.selected; T: TTM column values
+  function history(model) {
+    const H = model.hist || {}, D = model.nwcData || null, N = model.nwc || {}, edits = N.edits || {}, adjs = N.adj || {};
+    const TC = model._ttmCol || null;
+    const cols = [];
+    for (let i = 4; i >= 0; i--) {
+      const y = H.years && H.years[i];
+      cols.push({ key: y ? 'FY' + y : null, label: y ? 'FY' + y : '—', i, rev: isNum(H.rev && H.rev[i]) ? H.rev[i] : null, prevRev: i > 0 && isNum(H.rev[i - 1]) ? H.rev[i - 1] : null, sel: isNum(H.dnwc && H.dnwc[i]) ? H.dnwc[i] : null });
+    }
+    if (TC) cols.unshift({ key: 'TTM', label: 'TTM', i: 't', rev: isNum(TC.rev) ? TC.rev : null, prevRev: isNum(TC.prevRev) ? TC.prevRev : null, sel: isNum(TC.dnwc) ? TC.dnwc : null });
+    return cols.map(c => {
+      const p = D && c.key && D.periods[c.key];
+      const endBs = p && D.bs[p.end], begBs = p && D.bs[priorKey(D, p.end)];
+      const s = p ? summary(p.lines, edits[c.key], adjs[c.key]) : null;
+      const nwc = endBs ? endBs.opNwc : null, nwcB = begBs ? begBs.opNwc : null;
+      const bsChg = isNum(nwc) && isNum(nwcB) ? nwc - nwcB : null;
+      const dRev = isNum(c.rev) && isNum(c.prevRev) ? c.rev - c.prevRev : null;
+      const small = isNum(dRev) && isNum(c.rev) && Math.abs(dRev) < 0.02 * Math.abs(c.rev);
+      return Object.assign(c, { end: p ? p.end : null, nwc, nwcBegin: nwcB, bsChg, reported: s ? s.all : null, core: s ? s.core : null, adjusted: s ? s.adjusted : null, status: s ? s.status : null,
+        pctRev: isNum(nwc) && isNum(c.rev) && c.rev ? nwc / c.rev : null, dRev, small,
+        incrBs: isNum(bsChg) && isNum(dRev) && dRev !== 0 ? bsChg / dRev : null,
+        // forecast sign: investment positive = −(cash flow effect) ÷ change in revenue
+        incrSel: isNum(c.sel) && isNum(dRev) && dRev !== 0 ? -c.sel / dRev : null });
+    });
+  }
+  function priorKey(D, end) { const ks = Object.keys(D.bs || {}).filter(e => Math.abs(days(e, end) - 365) <= 8).sort().reverse(); return ks[0] || null; }
+
+  // ---- learning calculator: beginning and ending balances → change, cash effect, FCFF effect ----
+  const LEARN = [
+    ['ar', 'Accounts receivable', 'A', 'customers owe the company', 'more of your sales have not been collected in cash yet', 'customers paid down what they owed, turning receivables into cash'],
+    ['inv', 'Inventory', 'A', 'goods bought or made and not yet sold', 'more cash is tied up in goods on the shelves', 'goods were sold or run down without being replaced, releasing cash'],
+    ['oca', 'Other operating current assets', 'A', 'operating costs paid in advance and other operating current assets', 'more cash was paid out in advance', 'prepaid items were used up without being replaced'],
+    ['ap', 'Accounts payable', 'L', 'the company owes suppliers', 'suppliers are financing more of the business: cash stays in the company for longer', 'the company paid suppliers faster than it bought from them, using cash'],
+    ['acc', 'Accrued operating expenses', 'L', 'expenses recognised but not yet paid (wages, utilities, services)', 'more costs have been recorded but not yet paid in cash', 'the company paid off accrued costs, using cash'],
+    ['def', 'Deferred operating revenue', 'L', 'cash customers paid before the company delivered', 'customers paid more in advance than the company delivered', 'the company delivered on earlier prepayments without collecting as much new cash in advance'],
+    ['ocl', 'Other operating current liabilities', 'L', 'other nondebt operating liabilities', 'other operating obligations grew without a cash payment', 'other operating obligations were paid down, using cash'],
+  ];
+  function learn(st) {
+    const B = st.begin || {}, E = st.end || {};
+    const rows = LEARN.map(([k, label, side, what, up, down]) => {
+      const b = B[k], e = E[k];
+      const chg = isNum(b) && isNum(e) ? e - b : null;
+      const cash = isNum(chg) ? (side === 'A' ? -chg : chg) : null;
+      let text = '';
+      if (isNum(chg)) {
+        const amt = Math.abs(chg).toLocaleString('en-US', { maximumFractionDigits: 1 });
+        if (chg === 0) text = `${label} did not change, so it has no cash effect.`;
+        else if (side === 'A') text = chg > 0 ? `Your ${label.toLowerCase()} increased by $${amt} million. Assuming no other adjustments, ${up}: $${amt} million more is tied up in ${label.toLowerCase()}, which reduces operating cash flow by $${amt} million.` : `Your ${label.toLowerCase()} decreased by $${amt} million: ${down}. Assuming no other adjustments, operating cash flow rises by $${amt} million.`;
+        else text = chg > 0 ? `Your ${label.toLowerCase()} increased by $${amt} million: ${up}. Assuming no other adjustments, this provides $${amt} million of operating cash.` : `Your ${label.toLowerCase()} decreased by $${amt} million: ${down}. Assuming no other adjustments, this uses $${amt} million of cash.`;
+      } else text = `Enter both balances for ${label.toLowerCase()} to see its effect.`;
+      return { k, label, side, what, b: isNum(b) ? b : null, e: isNum(e) ? e : null, chg, cash, text };
+    });
+    const tot = side => (which) => { const xs = rows.filter(r => r.side === side).map(r => r[which]); return xs.every(isNum) ? sum(xs) : null; };
+    const caB = tot('A')('b'), caE = tot('A')('e'), clB = tot('L')('b'), clE = tot('L')('e');
+    const nwcB = isNum(caB) && isNum(clB) ? caB - clB : null, nwcE = isNum(caE) && isNum(clE) ? caE - clE : null;
+    const chg = isNum(nwcB) && isNum(nwcE) ? nwcE - nwcB : null;
+    const cash = isNum(chg) ? -chg : null;
+    const pre = isNum(st.fcffPre) ? st.fcffPre : null;
+    return { rows, caB, caE, clB, clE, nwcB, nwcE, chg, cash, fcffPre: pre, fcff: isNum(pre) && isNum(cash) ? pre + cash : null,
+      check: isNum(cash) ? Math.abs(sum(rows.map(r => r.cash || 0)) - cash) < 1e-9 : null };
+  }
+  const LEARN_DEFAULT = () => ({ begin: { ar: 100, inv: 200, oca: 20, ap: 120, acc: 50, def: 30, ocl: 40 }, end: { ar: 150, inv: 260, oca: 25, ap: 160, acc: 65, def: 45, ocl: 42 }, fcffPre: 335 });
+
+  // ---- FCFF with working capital, written two equivalent ways ----
+  function fcff(x) {
+    const ok = ['ebit', 'tax', 'da', 'capex', 'dnwc'].every(k => isNum(x[k]));
+    if (!ok) return null;
+    const nopat = x.ebit * (1 - x.tax);
+    const f = nopat + x.da - x.capex - x.dnwc; // dnwc: balance-sheet increase in operating NWC (investment positive)
+    const cashEffect = -x.dnwc;
+    const g = nopat + x.da - x.capex + cashEffect; // the same with the cash flow sign: added, never subtracted again
+    return { nopat, fcff: f, cashEffect, fcffCashSign: g, same: Math.abs(f - g) < 1e-9 };
+  }
+
+  // ---- forecasting worksheet: two methods ----
+  // st: { rev0, rev1, nwc0, pctRev, incr }
+  function forecast(st) {
+    const { rev0, rev1, nwc0, pctRev, incr } = st || {};
+    const dRev = isNum(rev0) && isNum(rev1) ? rev1 - rev0 : null;
+    const A = isNum(dRev) && isNum(incr) ? { dNwc: incr * dRev, nwc1: isNum(nwc0) ? nwc0 + incr * dRev : null, ratio: incr } : null;
+    const B = isNum(rev1) && isNum(pctRev) && isNum(nwc0) ? { nwc1: pctRev * rev1, dNwc: pctRev * rev1 - nwc0 } : null;
+    if (B) B.ratio = isNum(dRev) && dRev !== 0 ? B.dNwc / dRev : null;
+    const cur = isNum(nwc0) && isNum(rev0) && rev0 ? nwc0 / rev0 : null;
+    const notes = [];
+    if (A && B && Math.abs(A.dNwc - B.dNwc) > 1e-6) notes.push(`The two methods differ by ${Math.abs(A.dNwc - B.dNwc).toLocaleString('en-US', { maximumFractionDigits: 1 })} $mm. The %-of-revenue method also moves NWC from today's ${isNum(cur) ? (cur * 100).toFixed(1) + '%' : '?'} of revenue to your selected ${(pctRev * 100).toFixed(1)}%, so it includes a one-off catch-up; the incremental method only prices the new revenue.`);
+    if (isNum(dRev) && isNum(rev0) && Math.abs(dRev) < 0.02 * Math.abs(rev0)) notes.push('The change in revenue is small, so the implied incremental ratio of the %-of-revenue method is unstable.');
+    return { dRev, A, B, curPct: cur, notes };
+  }
+
+  // ---- checks for the forecast assumption against history (sign errors) ----
+  function forecastChecks(model) {
+    const out = [], v = model.inputs && model.inputs.nwc;
+    if (!v) return out;
+    const h = history(model).filter(c => c.i !== 't' && isNum(c.incrSel));
+    const avg = h.length ? sum(h.map(c => c.incrSel)) / h.length : null;
+    ['Base', 'Bear', 'Bull'].forEach(s => {
+      const x = v[s]; if (!isNum(x)) return;
+      if (isNum(avg) && Math.abs(avg) > 0.02 && Math.sign(x) !== Math.sign(avg) && Math.abs(Math.abs(x) / Math.abs(avg) - 1) < 0.25) out.push({ level: 'warn', s, text: `${s}: ${(x * 100).toFixed(1)}% has the opposite sign to your historical average of ${(avg * 100).toFixed(1)}% with almost the same size. This is the classic sign error: the forecast input is investment-positive (−cash flow effect ÷ change in revenue).` });
+    });
+    return out;
+  }
+
+  return { TAGS, SKIP, PARENTS, CLS_TXT, LEARN, LEARN_DEFAULT, wcFacts, fromSec, balanceSheet, BS_LABEL, summary, effective, importable, history, learn, fcff, forecast, forecastChecks, cfSign, fmt, isNum };
+})();
+if (typeof module !== 'undefined') module.exports = DCFNwc;
+
 // ===== FINANCIAL DATA IMPORT (no UI) =====
 // Fetches public company data from a data provider, or reads an SEC "company facts" file,
 // and turns it into figures the model can use. Every figure carries its source, reporting
@@ -3159,11 +3566,32 @@ const DCFData = (() => {
     H.sbc = ys.map(y => v(y, 'sbc'));
     H.dnwc = ys.map(y => v(y, 'dnwc'));
     H.capex = ys.map(y => v(y, 'capex') == null ? null : -v(y, 'capex'));
+    // working capital: the separate change lines of the cash flow statement, each with its source, sign and class.
+    // A year is filled in only when every material line is clearly operating; otherwise it is left for review.
+    const NW = typeof DCFNwc !== 'undefined' ? DCFNwc : require('./nwc.js');
+    const nd = NW.fromSec(json, { L, ends: F.years.map(y => y.end), at: imp.retrieved });
+    imp.nwcData = nd;
+    const nwcNote = [];
+    ys.forEach((y, i) => {
+      if (!y.fy) return;
+      const p = nd.periods['FY' + y.fy];
+      if (isNum(H.dnwc[i])) { nwcNote.push(`FY${y.fy}: the company's reported total (IncreaseDecreaseInOperatingCapital)${p && p.lines.length > 1 ? `; ${p.lines.length - 1} component lines are in the worksheet` : ''}. Check it uses an operating definition.`); return; }
+      const r = NW.importable(p);
+      if (isNum(r.v)) { H.dnwc[i] = r.v; nwcNote.push(`FY${y.fy}: ${NW.fmt(r.v)} = ${r.reason}`); }
+      else if (p && p.lines.length) nwcNote.push(`FY${y.fy}: ${r.reason}`);
+    });
+    if (nd.finArm) nwcNote.push('The company reports finance receivables (a finance arm). They are classed as not operating working capital.');
+    if (nwcNote.length) imp.notes.push('Change in NWC from the cash flow statement lines: ' + nwcNote.join(' '));
+    if (!(F.ttm.items.dnwc && isNum(F.ttm.items.dnwc.value)) && nd.periods.TTM && F.ttm.end && nd.periods.TTM.end === F.ttm.end) {
+      const r = NW.importable(nd.periods.TTM);
+      if (isNum(r.v)) F.ttm.items.dnwc = { metric: 'Change in NWC (cash flow sign)', cat: 'calc', periodType: 'TTM', value: r.v, end: F.ttm.end, periodText: 'twelve months ended ' + F.ttm.end, provider: 'Calculated from SEC EDGAR XBRL', method: `${nd.periods.TTM.method} ${r.reason}`, nwc: true };
+    }
     imp.hist = H; imp.histSrc = {};
     const newestY = F.years[0];
     const concept = k => F.conceptUsed[k] ? `XBRL tag us-gaap:${F.conceptUsed[k]}. ` : '';
-    const notes = { rev: concept('rev'), gp: newestY.recs.gp && newestY.recs.gp.cat === 'calc' ? 'Calculated: revenue − cost of revenue.' : concept('gp'), opex: 'Calculated: gross profit − (operating income + D&A).', da: concept('da'), interest: concept('interest'), sbc: concept('sbc'), dnwc: concept('dnwc') + (Sec.CONCEPT_NOTES.IncreaseDecreaseInOperatingCapital || ''), capex: concept('capex') + (Sec.CONCEPT_NOTES[F.conceptUsed.capex] || '') + ' Shown as a negative cash outflow.' };
+    const notes = { rev: concept('rev'), gp: newestY.recs.gp && newestY.recs.gp.cat === 'calc' ? 'Calculated: revenue − cost of revenue.' : concept('gp'), opex: 'Calculated: gross profit − (operating income + D&A).', da: concept('da'), interest: concept('interest'), sbc: concept('sbc'), dnwc: F.conceptUsed.dnwc ? concept('dnwc') + (Sec.CONCEPT_NOTES.IncreaseDecreaseInOperatingCapital || '') + ' Review it in the Change in NWC worksheet.' : 'Calculated from the separate working-capital lines of the cash flow statement, only for years whose material lines are all clearly operating. Other years are left blank for review in the Change in NWC worksheet.', capex: concept('capex') + (Sec.CONCEPT_NOTES[F.conceptUsed.capex] || '') + ' Shown as a negative cash outflow.' };
     Object.keys(notes).forEach(k => { if (H[k].some(isNum)) imp.histSrc[k] = { source: `SEC EDGAR XBRL (10-K annual periods)`, type: '10-K annual report', cls: 'filing', url: newestY.recs.rev ? newestY.recs.rev.url : filingUrl(cik), period: periodText(H.years, H[k]), notes: notes[k], rec: newestY.recs[k] || null }; });
+    if (imp.histSrc.dnwc) imp.histSrc.dnwc.review = true;
     imp.ttm = F.ttm; imp.quarter = F.quarter; imp.ttmPrior = F.ttmPrior;
     const rows = F.years.map(y => ({ year: y.fy, tax: y.values.tax == null ? null : y.values.tax * 1e6, ebt: y.values.ebt == null ? null : y.values.ebt * 1e6 }));
     const eff = effectiveTax(rows); if (eff) putRef(imp, 'effTax', eff.v, { source: 'Calculated from SEC 10-K figures', type: 'Calculated', period: eff.period, label: 'Effective tax rate (3-year average)', calculated: true });
@@ -3276,6 +3704,14 @@ const DCFData = (() => {
       company: imp.company.name || null, ticker: imp.symbol || imp.company.ticker || null, metric: r.metric || null, raw: r.raw == null ? null : r.raw, rawUnit: r.rawUnit || null, unit: r.unit || null, scale: r.scale || null,
       form: r.form || null, accn: r.accn || null, fp: r.fp || null, fy: r.fy || null, start: r.start || null, end: r.end || null, filed: r.filed || null, concept: r.concept || null, method: r.method || null, stale: !!r.stale };
   }
+  // an older CIK is kept only when the new import is for the same company (same ticker or name)
+  function sameCo(model, imp) {
+    const t = x => String(x || '').split(/[\s/:]/)[0].toUpperCase();
+    const a = t(model.meta && model.meta.symbol) || t(model.inputs.company.ticker), b = t(imp.symbol) || t(imp.company.ticker);
+    if (a && b) return a === b;
+    const n = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/(inc|corp|corporation|co|ltd|plc)$/, '');
+    return !!(n(model.inputs.company.name) && n(model.inputs.company.name) === n(imp.company.name));
+  }
   function applyImport(model, imp, opts = {}) {
     const at = imp.retrieved, fresh = !!opts.fresh;
     model.imported = model.imported || {};
@@ -3308,7 +3744,7 @@ const DCFData = (() => {
       log('company.valDate', null, vd); C.valDate = vd; model.imported['company.valDate'] = { v: vd, at };
       model.sources['company.valDate'] = { name: d ? 'Set to the date of the imported share price' : 'Set to the import date', type: 'Own judgment', cat: 'analyst', period: vd, notes: 'Change it if you value the company as of another date.', retrieved: at };
     }
-    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || (model.meta && model.meta.cik) || null, exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
+    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || (model.meta && model.meta.cik && sameCo(model, imp) ? model.meta.cik : null), exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
     SINGLE_KEYS.forEach(key => {
       const x = imp.values[key]; if (!x) return;
       offer(key, model.inputs[key], x.v, x, (same) => {
@@ -3344,6 +3780,7 @@ const DCFData = (() => {
     }
     // calculated and reference data are refreshed: they never replace an input
     if (imp.ttm) model.ttm = { end: imp.ttm.end, isFY: imp.ttm.isFY, items: imp.ttm.items, quarter: imp.quarter || null, prior: imp.ttmPrior || null, at, provider: imp.provider };
+    if (imp.nwcData) model.nwcData = imp.nwcData;
     if (imp.fin) model.fin = { years: imp.fin.years.map(y => ({ label: y.label, end: y.end, fy: y.fy, form: y.form, accn: y.accn, filed: y.filed, values: y.values, recs: y.recs })), at };
     if (imp.shareData) model.shareData = Object.assign({ at }, imp.shareData);
     if (imp.filings) model.filings = Object.assign({ checked: at }, imp.filings);
@@ -3923,7 +4360,7 @@ const DCFHelp = (() => {
     'hist.da': { why: 'Sets the D&A ratio and, with CapEx, how fast the asset base grows.', where: { doc: '10-K', statement: 'Cash flow statement, operating section', heading: '"Depreciation and amortization"', find: ['Depreciation and amortization', 'depreciation of property and equipment'], period: 'Each fiscal year' }, mistakes: ['Taking D&A from the income statement when it is split across lines'], example: () => ex(F.amznK, 'Cash flow statement 2025: depreciation and amortization $65,756 million (SEC tag DepreciationDepletionAndAmortization).') },
     'hist.interest': { why: 'Context for the cost of debt and coverage.', where: { doc: '10-K', statement: 'Statements of operations', heading: '"Interest expense"', find: ['Interest expense'] }, example: () => ex(F.amznK, 'Interest expense 2025: $2,274 million.') },
     'hist.sbc': { why: 'Stock-based compensation is a real cost paid in shares. It is inside EBITDA margins here, so do not add it back.', where: { doc: '10-K', statement: 'Cash flow statement, operating section', heading: '"Stock-based compensation"', find: ['Stock-based compensation'] }, example: () => ex(F.amznK, 'Cash flow statement 2025: stock-based compensation $19,467 million.') },
-    'hist.dnwc': { why: 'History for the working capital assumption.', where: { doc: '10-K', statement: 'Cash flow statement, "Changes in operating assets and liabilities"', heading: 'Each working-capital line', find: ['Changes in operating assets and liabilities', 'Accounts receivable', 'Inventories', 'Accounts payable'] }, calc: 'Sum of the change lines, keeping the cash flow sign: an increase in working capital is a negative (cash used).', mistakes: ['Flipping the sign', 'Leaving out unearned revenue changes'], example: () => ({ kind: 'none', text: 'Amazon reports each working-capital change on its own line, not as one tagged total, so the SEC import leaves this row empty for Amazon. Add the lines up from the cash flow statement.' }) },
+    'hist.dnwc': { why: 'Cash invested in (negative) or released from (positive) everyday operations: receivables, inventory, payables, accruals and deferred revenue. It is the history behind the forecast working-capital assumption.', where: { doc: '10-K (fiscal year), 10-Q (year to date)', statement: 'Cash flow statement, operating activities', heading: '"Changes in operating assets and liabilities"', find: ['Changes in operating assets and liabilities', 'Accounts receivable', 'Inventories', 'Accounts payable', 'Accrued expenses', 'Unearned revenue'] }, calc: 'Add the operating working-capital lines exactly as printed (cash flow sign: cash used is negative). Classify mixed lines such as "Other assets" from the notes before including them. The Change in NWC guide has a worksheet that does this line by line.', mistakes: ['Flipping a sign the statement already applied', 'Including cash, debt or noncurrent "other assets"', 'Treating the sum of every line as operating NWC without checking it'], example: () => ex(F.amznK, 'Amazon 2025, changes in operating assets and liabilities: inventories −3,002; accounts receivable, net and other −7,333; other assets −15,632; accounts payable +11,231; accrued expenses and other −5,019; unearned revenue −214. Sum of all reported lines −19,969 (not automatically the DCF figure: two lines are mixed). Receivables + inventory + payables alone: +896 (a partial subset).') },
     'hist.capex': { why: 'History for the CapEx assumption.', where: { doc: '10-K', statement: 'Cash flow statement, investing section', heading: '"Purchases of property and equipment"', find: ['Purchases of property and equipment', 'Capital expenditures'] }, calc: 'Entered as a negative cash outflow.', mistakes: ['Leaving out assets acquired under finance leases (a non-cash addition)', 'Using a figure net of proceeds without saying so'], example: () => ex(F.amznK, 'Cash flow statement 2025: purchases of property and equipment, net of proceeds from sales and incentives, $131,819 million → enter −131,819. Property acquired under finance leases is disclosed separately.') },
     // dilution
     'dil.proxy': { why: 'A quick, sourced proxy for dilution: the net number of shares stock awards added in the latest EPS calculation.', where: { doc: 'Newest 10-Q', statement: 'EPS note (or the bottom of the income statement)', heading: '"Total dilutive effect of outstanding stock awards"', find: ['dilutive effect', 'weighted-average shares', 'diluted'], period: 'The latest quarter (three months)' }, calc: 'Used as it is: it is already net of the treasury stock method, so no buyback is subtracted. Diluted shares = actual shares + this figure.', mistakes: ['Using the fiscal-year figure when a newer quarter exists', 'Calling it "options + RSUs in the money": it is a net effect at a past average price, not a count of awards', 'Using gross RSUs outstanding instead'], verify: 'Diluted weighted-average − basic weighted-average for the same quarter should equal it.', example: () => ex(F.amznQ, 'EPS shares for the three months ended September 30, 2026: basic 10,797, total dilutive effect of stock awards 132, diluted 10,929 (millions) → enter 132 for Q3 2026. The FY2025 figure was 171; it is older. Do not use the 223.3 million RSUs outstanding: that is a gross count.') },
@@ -3978,7 +4415,8 @@ const DCFHelp = (() => {
 
   // EDGAR full-text search for a phrase in one company's filings
   const searchUrl = (term, cik) => `https://efts.sec.gov/LATEST/search-index?q=${encodeURIComponent('"' + term + '"')}${cik ? '&ciks=' + String(cik).padStart(10, '0') : ''}&forms=10-K,10-Q`;
-  const edgarSearch = (term, cik) => `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent('"' + term + '"')}${cik ? '&ciks=' + String(cik).padStart(10, '0') : ''}`;
+  // A full-text search of ONE company's filings. Without a CIK there is no link: a search across every company would show other companies' filings.
+  const edgarSearch = (term, cik) => cik ? `https://www.sec.gov/edgar/search/#/q=${encodeURIComponent('"' + term + '"')}&ciks=${String(cik).replace(/^0+/, '').padStart(10, '0')}` : null;
 
   // This company's own example, from the record saved with the imported value
   function companyExample(key, model) {
@@ -4285,6 +4723,220 @@ const DCFHelp = (() => {
   return { B, T, W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
 })();
 if (typeof module !== 'undefined') module.exports = DCFHelp;
+
+// ===== CHANGE IN NWC: TEACHING CONTENT (static text, no model state) =====
+// The written part of the Historical financials → Change in NWC guide. Every reported figure here was read from
+// the named SEC filing (Amazon's 2025 Form 10-K, accession 0001018724-26-000004, through its XBRL facts).
+// Anything made up for teaching is labelled "Hypothetical".
+const DCFNwcHelp = (() => {
+  const AMZN_K = { co: 'Amazon.com, Inc.', form: '10-K', period: 'fiscal year ended December 31, 2025', accn: '0001018724-26-000004', filed: '2026-02-06', url: 'https://www.sec.gov/Archives/edgar/data/1018724/000101872426000004/amzn-20251231.htm', cik: '1018724' };
+  const SRC = {
+    edgar: ['SEC EDGAR full-text search', 'https://www.sec.gov/edgar/search/'],
+    damCf: ['Damodaran, The Little Book of Valuation: cash flows', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/littlebook/cashflows.htm'],
+    damWc: ['Damodaran: working capital ratios by industry (data)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/wcdata.html'],
+    amzn: ['Amazon 2025 Form 10-K (filed 2026-02-06)', AMZN_K.url],
+    sec10k: ['Investor.gov: how to read a 10-K', 'https://www.investor.gov/introduction-investing/getting-started/researching-investments/how-read-10-k'],
+  };
+  // Amazon FY2025, Consolidated Statements of Cash Flows → Operating activities → Changes in operating assets and liabilities ($ millions)
+  const AMZN_LINES = [
+    { label: 'Inventories', cf: -3002, tag: 'IncreaseDecreaseInInventories', cls: 'core', note: 'Clearly operating: goods held for sale.' },
+    { label: 'Accounts receivable, net and other', cf: -7333, tag: 'IncreaseDecreaseInAccountsReceivableAndOtherOperatingAssets', cls: 'core', note: 'Mainly customer and vendor receivables. "And other" means checking the note before calling all of it operating.' },
+    { label: 'Other assets', cf: -15632, tag: 'IncreaseDecreaseInOtherNoncurrentAssets', cls: 'review', note: 'Tagged as noncurrent. Long-term items are usually not working capital. Needs classification from the notes.' },
+    { label: 'Accounts payable', cf: 11231, tag: 'IncreaseDecreaseInAccountsPayable', cls: 'core', note: 'Clearly operating: money owed to suppliers.' },
+    { label: 'Accrued expenses and other', cf: -5019, tag: 'IncreaseDecreaseInAccruedLiabilitiesAndOtherOperatingLiabilities', cls: 'review', note: 'Operating accruals mixed with other items. On Amazon\'s balance sheet this caption also holds current lease liabilities and current debt. Needs classification.' },
+    { label: 'Unearned revenue', cf: -214, tag: 'IncreaseDecreaseInContractWithCustomerLiability', cls: 'core', note: 'Clearly operating: cash received before delivery (for example Prime memberships, AWS commitments).' },
+  ];
+  // Amazon balance sheet at December 31 ($ millions), same 10-K
+  const AMZN_BS = {
+    y25: { ca: 229083, cash: 86810, sti: 36219, rcash: 300, ar: 67729, inv: 38325, cl: 218005, ap: 121909, acc: 75520, def: 20576, debt: 2748 + 455, leases: 12655 + 1544 },
+    y24: { ca: 190867, cash: 78779, sti: 22423, rcash: 247, ar: 55451, inv: 34214, cl: 179431, ap: 94363, acc: 66965, def: 18103, debt: 5017 + 151, leases: 10546 + 1375 },
+  };
+  const n0 = v => (v < 0 ? '−' : '') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const sg = v => (v < 0 ? '−' : '+') + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  // ---- 1 and 2: always visible ----
+  const what = () => `<p>Net Working Capital (NWC) represents operating resources tied up in day-to-day business activities, such as customer receivables and inventory, minus operating financing provided by suppliers and other operating liabilities.</p>
+    <p>Change in NWC measures how this operating investment changes between periods.</p>
+    <p>For this DCF input, we use the <b>cash flow sign</b>:</p>
+    <ul><li><b>Negative</b> means the change <b>used</b> cash.</li><li><b>Positive</b> means the change <b>provided</b> cash.</li></ul>
+    <p>An increase in operating NWC normally reduces free cash flow. A decrease normally increases free cash flow.</p>
+    <div class="notice info">The NWC used in a DCF is <b>operating</b> NWC, not simply total current assets − total current liabilities. Cash and marketable securities are investments, not operating needs, and short-term debt and the current part of long-term debt are financing. Both are valued separately in the equity bridge, so leaving them in NWC would count them twice.</div>`;
+  const why = () => `<p>Companies can report revenue and profits before receiving the cash associated with those transactions. They can also purchase inventory before selling it, and receive goods or services before paying suppliers.</p>
+    <p>These timing differences create operating working capital.</p>
+    <p>When more money becomes tied up in receivables and inventory, that money is not immediately available to investors. When a company delays payment to suppliers, it temporarily preserves cash.</p>
+    <p>DCF valuation focuses on cash flows, not just accounting profits. We calculate Change in Net Working Capital to account for the cash invested in or released from everyday business operations.</p>
+    <p><b>Why it changes the value.</b> Free cash flow to the firm (FCFF) is the cash left for all investors, lenders and shareholders, after the business has paid for what it needs to keep running and growing. Cash that must be put into receivables and inventory is not available to them, so it is subtracted from FCFF. Enterprise value is the present value of FCFF, so every dollar of extra working capital a growing company needs lowers enterprise value, and every dollar suppliers or customers finance raises it, all else equal.</p>`;
+
+  // ---- 3: each component ----
+  const comp = (id, title, body) => ({ id, title, body });
+  const COMPONENTS = [
+    comp('ar', 'Accounts receivable', `<p><b>What it is.</b> When a company sells on credit, the customer owes it money: the sale is in revenue now, but the cash arrives later (often 30–90 days). Accounts receivable is the total customers owe at the balance-sheet date.</p>
+      <p><b>Why a rise reduces cash even when revenue rises.</b> Revenue is recorded when the sale is made. If receivables went up, part of this year's revenue has not been collected yet, so operating cash flow is lower than profit by the amount of the increase.</p>
+      <div class="formula">Hypothetical: beginning receivables $100 mm → ending $150 mm. Increase = $50 mm. Cash impact = −$50 mm, assuming no other adjustments.</div>
+      <p>Why: the company booked $50 mm more of sales than it collected. Collections fall short of revenue by exactly the increase. A fall in receivables works the other way: customers paid down old balances, so cash collected exceeded revenue.</p>
+      <p class="footnote">Watch for: receivables growing faster than revenue (slower collection, looser credit, or channel stuffing), and receivables sold to a bank (factoring), which lowers receivables without better collection.</p>`),
+    comp('inv', 'Inventory', `<p><b>What it is.</b> Raw materials, work in progress and finished goods bought or made but not yet sold. The company paid (or owes) for them, but they reach the income statement as cost of sales only when sold.</p>
+      <p><b>Why it consumes working capital.</b> Building inventory means spending cash today for sales tomorrow.</p>
+      <div class="formula">Hypothetical: beginning inventory $200 mm → ending $260 mm. Increase = $60 mm. Cash impact = −$60 mm, assuming no other adjustments.</div>
+      <p>Inventory can grow because of <b>expansion</b> (new stores, warehouses, product lines), <b>stocking decisions</b> (buying ahead of price rises or supply risk), <b>seasonal demand</b> (stocking before the holidays) or <b>slower sales</b> (goods not moving). The first three can be healthy; the last is a warning sign. Compare inventory growth with revenue and cost-of-sales growth, and read MD&A for the reason.</p>`),
+    comp('ap', 'Accounts payable', `<p><b>What it is.</b> Amounts the company owes suppliers for goods and services already received.</p>
+      <div class="formula">Hypothetical: beginning accounts payable $120 mm → ending $160 mm. Increase = $40 mm. Cash impact = +$40 mm, assuming no other adjustments.</div>
+      <p><b>Why paying later preserves cash.</b> The costs are already in the income statement, but $40 mm of them has not been paid in cash yet. Suppliers are, in effect, lending the company that money for free. It is temporary: if payment terms go back to normal, the cash goes out. A large retailer that sells inventory before paying for it can run on suppliers' money.</p>
+      <p class="footnote">Watch for: payables that include amounts owed for property and equipment. Those are investing, not operating working capital, and are a common reason the balance sheet change differs from the cash flow statement line.</p>`),
+    comp('acc', 'Accrued operating expenses', `<p><b>What it is.</b> Expenses recognised in the income statement but not yet paid: wages earned but not yet in a pay cheque, bonuses, utilities, rent, professional fees.</p>
+      <div class="formula">Hypothetical: accrued wages $50 mm at the start of the year and $65 mm at the end. Increase = $15 mm. Cash impact = +$15 mm, assuming no other adjustments.</div>
+      <p>Why: $15 mm of this year's wage expense is still owed to employees, so cash paid was $15 mm less than the expense. Only operating accruals belong here. Accrued <b>interest</b> is a financing item (FCFF is before interest), and accrued <b>income taxes</b> overlap with the tax rate you apply to EBIT, so many analysts leave both out.</p>`),
+    comp('def', 'Deferred (unearned) revenue', `<p><b>What it is.</b> Cash customers paid before the company delivered: subscriptions, memberships, gift cards, prepaid service contracts. It is a liability because the company still owes the product or service.</p>
+      <div class="formula">Hypothetical: deferred revenue $30 mm → $45 mm. Increase = $15 mm. Cash impact = +$15 mm, assuming no other adjustments.</div>
+      <p>Why: customers paid $15 mm more in advance than the company recognised as revenue. Subscription software firms often have large deferred revenue, which is one reason they can have negative working capital. A fall in deferred revenue means the company is delivering on old prepayments faster than it collects new ones: revenue without matching new cash.</p>`),
+    comp('other', 'Other operating assets and liabilities', `<p>Many companies group several accounts into one line such as "Other assets", "Other current liabilities" or "Accrued expenses and other". These can mix operating items (prepaid rent, customer deposits) with items that are not working capital (derivatives, tax balances, long-term deposits, current lease liabilities, current debt).</p>
+      <p><b>How to investigate:</b></p>
+      <ol><li>Find the balance-sheet caption, then search the notes for its name (for example "Other assets" or "Accrued expenses and other"). Most 10-Ks break them down in a "Supplemental financial information" or "Other balance sheet items" note.</li>
+      <li>Ask of each part: is it caused by day-to-day sales, purchasing and employees? Then it is operating. Is it debt, interest, a tax balance, a lease liability, a long-term investment or cash? Then it is not.</li>
+      <li>Check whether it is current. A noncurrent item (more than a year away) is usually not working capital.</li>
+      <li>If only part is operating, exclude the reported line and enter the operating part as an adjustment in the worksheet, with the note it comes from.</li></ol>
+      <p><b>Do not automatically include every miscellaneous asset and liability.</b> The worksheet marks these lines "Mixed or uncertain" and keeps them out of the clearly operating total until you classify them.</p>`),
+  ];
+  const signs = () => `<p>The cash flow statement shows each change with the sign of its effect on cash, not the sign of the balance-sheet change.</p>
+    <table class="fin sgn"><thead><tr><th>Balance-sheet movement</th><th>Cash impact</th><th>Why</th></tr></thead><tbody>
+      <tr><td>Increase in accounts receivable</td><td class="neg">Generally negative</td><td>Sales recorded, cash not yet collected</td></tr>
+      <tr><td>Decrease in accounts receivable</td><td>Generally positive</td><td>Old balances collected</td></tr>
+      <tr><td>Increase in inventories</td><td class="neg">Generally negative</td><td>Cash spent on goods not yet sold</td></tr>
+      <tr><td>Decrease in inventories</td><td>Generally positive</td><td>Goods sold without replacing them</td></tr>
+      <tr><td>Increase in accounts payable</td><td>Generally positive</td><td>Costs recorded, cash not yet paid</td></tr>
+      <tr><td>Decrease in accounts payable</td><td class="neg">Generally negative</td><td>Suppliers paid down</td></tr>
+      <tr><td>Increase in deferred operating revenue</td><td>Generally positive</td><td>Customers paid in advance</td></tr>
+      <tr><td>Decrease in deferred operating revenue</td><td class="neg">Generally negative</td><td>Revenue earned from cash received earlier</td></tr></tbody></table>
+    <p><b>Use the line from the cash flow statement with its reported sign</b>, subject to classifying it correctly. "(3,002)" or "−3,002" for inventories already means cash used. Do not reverse the sign a second time. The only time you flip a sign is when converting between the cash flow contribution and the balance-sheet change in NWC (the forecast input is in the balance-sheet direction: investment is positive).</p>`;
+
+  // ---- 4: operating NWC and the two methods ----
+  const calcNwc = () => `<div class="formula">Operating NWC = Accounts receivable + Inventory + Other operating current assets − Accounts payable − Other nondebt operating current liabilities</div>
+    <p>Equivalently: <b>noncash operating current assets − nondebt operating current liabilities</b>.</p>
+    <p><b>Why cash and interest-bearing debt are excluded.</b> Cash and marketable securities earn interest and are not needed to run the business day to day; they are added to enterprise value in the equity bridge. Short-term borrowings, commercial paper and the current portion of long-term debt are financing; they are subtracted in the bridge, and their cost is in WACC. Leaving either in NWC would count it twice and mix financing with operations. Current lease liabilities are left out too: lease payments are already in operating costs (or, if you treat leases as debt, in the bridge).</p>
+    <p><b>Negative operating NWC</b> happens when a business collects from customers before it pays suppliers: retailers that turn inventory in weeks but pay suppliers in months, subscription businesses paid in advance, marketplaces holding sellers' money. Growth then <i>releases</i> cash: each extra dollar of sales brings in more supplier and customer financing. Amazon has had negative operating NWC for many years.</p>
+    <h4>Complete example (hypothetical)</h4>
+    <table class="fin"><thead><tr><th>$ millions</th><th>Beginning</th><th>Ending</th><th>Change</th></tr></thead><tbody>
+      <tr><td>Accounts receivable</td><td>100</td><td>150</td><td>+50</td></tr><tr><td>Inventory</td><td>200</td><td>260</td><td>+60</td></tr><tr><td>Other operating current assets (prepaid)</td><td>20</td><td>25</td><td>+5</td></tr>
+      <tr class="sub"><td>Operating current assets</td><td>320</td><td>435</td><td>+115</td></tr>
+      <tr><td>Accounts payable</td><td>120</td><td>160</td><td>+40</td></tr><tr><td>Accrued operating expenses</td><td>50</td><td>65</td><td>+15</td></tr><tr><td>Deferred operating revenue</td><td>30</td><td>45</td><td>+15</td></tr><tr><td>Other operating current liabilities</td><td>40</td><td>42</td><td>+2</td></tr>
+      <tr class="sub"><td>Operating current liabilities</td><td>240</td><td>312</td><td>+72</td></tr>
+      <tr class="total"><td>Operating NWC</td><td>80</td><td>123</td><td>+43</td></tr></tbody></table>
+    <div class="formula">Change in NWC = Ending NWC − Beginning NWC = 123 − 80 = +43</div>
+    <p>A <b>positive</b> change means the business needed $43 mm more of its own money tied up in operations at the end of the year than at the start: an additional investment, like CapEx but in working capital. Its cash flow effect is −43.</p>`;
+  const convert = () => `<div class="tgrid2"><div><b>Balance-sheet change in NWC</b><div class="formula">Change = Ending NWC − Beginning NWC</div><p class="footnote">Investment direction: positive = more cash tied up.</p></div><div><b>Cash flow effect</b><div class="formula">Cash flow effect ≈ −Change in NWC</div><p class="footnote">Cash flow direction: negative = cash used. This is the sign on the cash flow statement and in the Historical financials row.</p></div></div>
+    <p><b>Why the signs are opposite.</b> Working capital is a use of cash. If the balance of operating assets net of operating liabilities goes <i>up</i>, the company put cash <i>in</i>, so cash went <i>down</i>.</p>
+    <div class="formula">Hypothetical: beginning NWC $1,500 mm → ending $2,100 mm. Change in NWC = +$600 mm. Cash flow effect = −$600 mm.</div>
+    <p>The company needs an additional $600 mm tied up in operations: money that could otherwise have gone to lenders and shareholders.</p>
+    <div class="formula">If instead NWC falls from $1,500 mm to $1,200 mm: Change in NWC = −$300 mm. Cash flow effect = +$300 mm (cash released).</div>
+    <p><b>Why real cash flow statements differ from simple balance-sheet changes.</b> Do not assume the balance-sheet difference must equal the sum of the reported cash flow lines:</p>
+    <ul><li><b>Acquisitions and disposals</b>: receivables and inventory of a business bought come onto the balance sheet without operating cash; the cash paid is in investing activities.</li>
+      <li><b>Foreign exchange</b>: translating a foreign subsidiary's balances at a new rate changes them without any cash moving.</li>
+      <li><b>Noncash transactions</b>: payables for equipment (investing), assets acquired under leases, stock-settled liabilities, reclassifications from long-term to current.</li>
+      <li><b>Different definitions</b>: the cash flow statement may combine lines differently from the balance sheet ("Accounts receivable, net and other" vs "Accounts receivable"), and some balance-sheet items (current debt, lease liabilities, tax balances) move in other parts of the cash flow statement.</li>
+      <li><b>Allowances and write-downs</b>: bad-debt and inventory write-downs are often added back separately in operating cash flow.</li></ul>
+    <p>When they disagree, the cash flow statement is usually the better measure of the cash actually used, because it strips these effects out. The balance sheet is the better guide to the <i>level</i> of NWC for forecasting ratios.</p>`;
+
+  // ---- 5: where to find the numbers ----
+  const steps = (co) => [
+    ['Open the company\'s most recent appropriate SEC 10-K or 10-Q.', `Use the 10-K for a fiscal year and the latest 10-Q for year to date (TTM). A newer filing replaces older figures, and restated prior years in the newest 10-K are the ones to use. ${co.filing}`],
+    ['Locate the Consolidated Statements of Cash Flows.', 'It follows the income statement, balance sheet and (often) the statement of equity in Item 8 (10-K) or Part I, Item 1 (10-Q). Ctrl+F "Cash Flows".'],
+    ['Find the Operating Activities section.', 'It starts from net income, adds back noncash items (D&A, stock-based compensation, deferred taxes), then lists the working-capital changes. Investing and financing activities come after it and do not belong in NWC.'],
+    ['Find the heading "Changes in operating assets and liabilities" or equivalent.', 'Some companies say "Changes in assets and liabilities" or "Changes in working capital", and a few put the lines straight under the noncash items with no heading.'],
+    ['Look for the components: accounts receivable, inventories, accounts payable, accrued operating expenses, deferred or unearned revenue, other operating current assets, other operating current liabilities.', 'Write each line down with its exact label and sign. Some companies combine categories (for example "Accounts payable and accrued liabilities", or one "Other operating assets and liabilities, net"), so additional disclosures in the notes may be required to split them.'],
+    ['Understand the business meaning of each item.', 'Ask what activity moves it: customer credit, buying stock, paying suppliers, paying staff, customer prepayments. That tells you whether it is operating.'],
+    ['Determine which disclosed items genuinely represent operating working capital.', 'Include lines caused by day-to-day operations. Exclude financing (interest, debt), investments, tax balances if your tax rate covers them, noncurrent "other assets" and anything you cannot identify. Mixed lines: read the note and include only the operating part.'],
+    ['Keep the cash flow statement signs when adding included items.', 'Add the numbers exactly as printed: parentheses mean negative. Do not flip any sign at this stage.'],
+    ['Reconcile the result.', 'Compare with the balance-sheet change in operating NWC (step 4 of this guide) and investigate large differences: acquisitions, foreign exchange, equipment payables, reclassifications.'],
+    ['Enter the amount in $ millions.', 'Check the statement header ("in millions"). A 10-Q in thousands must be divided by 1,000. Use the same period as the other historical figures: a fiscal year, or TTM, never a single quarter.'],
+  ];
+
+  // ---- 6: Amazon worked example ----
+  function amazon() {
+    const all = AMZN_LINES.reduce((a, l) => a + l.cf, 0);
+    const sub = -7333 - 3002 + 11231;
+    const core = sub - 214;
+    const B = AMZN_BS, op = y => (y.ca - y.cash - y.sti - y.rcash) - (y.cl - y.debt - y.leases);
+    const o25 = op(B.y25), o24 = op(B.y24), d = o25 - o24;
+    const ch = k => B.y25[k] - B.y24[k];
+    return `<p>Source: <a href="${AMZN_K.url}" target="_blank" rel="noopener">Amazon 2025 Form 10-K</a> (accession ${AMZN_K.accn}, filed ${AMZN_K.filed}) → Consolidated Statements of Cash Flows → Operating activities → Changes in operating assets and liabilities. $ millions, fiscal year ended December 31, 2025. Each figure was also checked against the XBRL tag shown.</p>
+      <table class="fin"><thead><tr><th>Line as printed</th><th>Cash flow sign</th><th>How to read it</th><th>Classification</th></tr></thead><tbody>
+      ${AMZN_LINES.map(l => `<tr><td>${l.label}<br><span class="footnote">us-gaap:${l.tag}</span></td><td class="num">${sg(l.cf)}</td><td>${l.cf < 0 ? 'Used cash: the asset grew or the liability shrank' : 'Provided cash: the liability grew'}</td><td>${l.cls === 'core' ? 'Operating' : '<b>Mixed: needs review</b>'}<br><span class="footnote">${l.note}</span></td></tr>`).join('')}
+      </tbody></table>
+      <h4>Three different numbers</h4>
+      <div class="three">
+        <div><span>1. Sum of all reported operating asset and liability change lines</span><b>${sg(all)}</b><small>−3,002 − 7,333 − 15,632 + 11,231 − 5,019 − 214 = ${n0(all)} million</small></div>
+        <div><span>2. Clearly identifiable working-capital accounts</span><b>${sg(sub)}</b><small>Accounts receivable + inventory + accounts payable: −7,333 − 3,002 + 11,231 = +896 million. With unearned revenue (also clearly operating): +896 − 214 = ${sg(core)} million.</small></div>
+        <div><span>3. Analyst-adjusted DCF cash flow effect</span><b>Your call</b><small>Number 2 plus the operating parts of "Other assets" and "Accrued expenses and other" once you have read the notes. It lies between the two figures only if those parts are operating.</small></div>
+      </div>
+      <div class="notice warn"><b>−19,969 is the sum of all reported operating asset and liability change lines</b>, not automatically the normalised DCF change in NWC: "Other assets" (−15,632) is a noncurrent line and "Accrued expenses and other" (−5,019) mixes operating accruals with other items. <b>+896 is only a partial subset</b> (receivables, inventory and payables), not Amazon's complete NWC change. Neither is the right DCF input until it is reconciled to your model's operating NWC definition.</div>
+      <h4>Checking against the balance sheet</h4>
+      <table class="fin"><thead><tr><th>$ millions</th><th>Dec 31, 2024</th><th>Dec 31, 2025</th><th>Change</th><th>Cash effect implied</th><th>Cash flow statement</th></tr></thead><tbody>
+        <tr><td>Accounts receivable, net and other</td><td>${n0(B.y24.ar)}</td><td>${n0(B.y25.ar)}</td><td>${sg(ch('ar'))}</td><td>${sg(-ch('ar'))}</td><td>−7,333</td></tr>
+        <tr><td>Inventories</td><td>${n0(B.y24.inv)}</td><td>${n0(B.y25.inv)}</td><td>${sg(ch('inv'))}</td><td>${sg(-ch('inv'))}</td><td>−3,002</td></tr>
+        <tr><td>Accounts payable</td><td>${n0(B.y24.ap)}</td><td>${n0(B.y25.ap)}</td><td>${sg(ch('ap'))}</td><td>${sg(ch('ap'))}</td><td>+11,231</td></tr>
+        <tr><td>Accrued expenses and other</td><td>${n0(B.y24.acc)}</td><td>${n0(B.y25.acc)}</td><td>${sg(ch('acc'))}</td><td>${sg(ch('acc'))}</td><td>−5,019</td></tr>
+        <tr><td>Unearned revenue</td><td>${n0(B.y24.def)}</td><td>${n0(B.y25.def)}</td><td>${sg(ch('def'))}</td><td>${sg(ch('def'))}</td><td>−214</td></tr>
+        <tr class="total"><td>Operating NWC (totals method, below)</td><td>${n0(o24)}</td><td>${n0(o25)}</td><td>${sg(d)}</td><td>${sg(-d)}</td><td>${sg(all)} (all lines)</td></tr></tbody></table>
+      <p class="footnote">Operating NWC = (total current assets − cash − marketable securities − restricted cash) − (total current liabilities − current debt − current lease liabilities). 2025: (229,083 − 86,810 − 36,219 − 300) − (218,005 − 3,203 − 14,199) = ${n0(o25)}. 2024: (190,867 − 78,779 − 22,423 − 247) − (179,431 − 5,168 − 11,921) = ${n0(o24)}. Calculated from the 10-K balance sheet and lease and debt notes (XBRL facts).</p>
+      <p>The balance sheet says operating NWC fell by ${n0(-d)} (cash released), while the cash flow statement lines add up to cash <i>used</i> of ${n0(-all)}. Every line differs. This is normal and is exactly why the guide says not to force the two methods to agree: balance-sheet movements include items that are not operating cash, such as payables for property and equipment, liabilities moving from long-term to current, lease liabilities, acquisitions and currency translation, and the cash flow statement's "Other assets" line is not a current asset at all. Read the notes before choosing your figure, and write down why in your research notes.</p>`;
+  }
+
+  // ---- 7: FCFF ----
+  const fcffText = () => `<div class="formula">FCFF = EBIT × (1 − Tax rate) + D&A − CapEx − Change in operating NWC</div>
+    <dl class="svl"><div><dt>EBIT</dt><dd>Operating income: revenue minus operating costs, before interest and taxes.</dd></div><div><dt>Tax rate</dt><dd>The tax rate on operating income (not the effective rate after interest). EBIT × (1 − t) is NOPAT: what operations earn after tax for all investors.</dd></div>
+      <div><dt>D&A</dt><dd>Depreciation and amortisation: a noncash expense inside EBIT, added back.</dd></div><div><dt>CapEx</dt><dd>Cash spent on property, equipment and software: long-term reinvestment.</dd></div>
+      <div><dt>Change in operating NWC</dt><dd>Balance-sheet direction: the increase in operating working capital. Short-term reinvestment. Subtracted.</dd></div></dl>
+    <h4>Worked example (hypothetical)</h4>
+    <table class="fin"><tbody><tr><td>EBIT</td><td class="num">500</td></tr><tr><td>Tax rate</td><td class="num">25%</td></tr><tr class="sub"><td>NOPAT = 500 × (1 − 25%)</td><td class="num">375</td></tr><tr><td>+ D&A</td><td class="num">80</td></tr><tr><td>− CapEx</td><td class="num">(120)</td></tr><tr class="sub"><td>Cash flow before working capital</td><td class="num">335</td></tr><tr><td>− Change in operating NWC (increase of 43)</td><td class="num">(43)</td></tr><tr class="total"><td>FCFF</td><td class="num">292</td></tr></tbody></table>
+    <p><b>If NWC increases</b> by 43, FCFF falls from 335 to 292. <b>If NWC decreases</b> by 43, FCFF rises to 335 + 43 = 378. Because enterprise value is the present value of FCFF, an increase in NWC generally lowers DCF enterprise value, all else equal.</p>
+    <h4>The same formula with the cash flow sign</h4>
+    <div class="formula">FCFF = NOPAT + D&A − CapEx + (Cash flow effect of NWC)  →  375 + 80 − 120 + (−43) = 292</div>
+    <p>The Historical financials row stores the <b>cash flow effect</b> (−43 in this example), so it is <b>added</b>. Subtracting it as well would reverse the sign twice and turn a use of cash into a source.</p>`;
+  const audit = () => `<p><b>How this model handles the sign, end to end</b> (checked by automated tests):</p>
+    <table class="fin"><thead><tr><th>Where</th><th>What is stored</th><th>How it enters</th></tr></thead><tbody>
+      <tr><td>Historical financials: Change in NWC</td><td>Cash flow effect (increase in NWC = negative)</td><td>Operating cash flow = net income + D&A + SBC <b>+</b> change in NWC; free cash flow = operating cash flow + CapEx (negative)</td></tr>
+      <tr><td>Forecast assumptions: Change in NWC % of change in revenue</td><td>Investment direction (positive = cash tied up)</td><td>Each year: ΔNWC = (revenue − prior revenue) × ratio, and FCFF = NOPAT + D&A − CapEx <b>−</b> ΔNWC − acquisitions</td></tr>
+      <tr><td>Historical ratio shown on Forecast assumptions</td><td>−(cash flow effect) ÷ change in revenue</td><td>The minus sign converts the cash flow sign into the investment direction once</td></tr>
+      <tr><td>Projections table</td><td>Shown with the cash flow sign, history and forecast alike</td><td>Display only</td></tr>
+      <tr><td>Terminal year (corrected method)</td><td>Reinvestment = g ÷ ROIC × NOPAT, which already includes working capital</td><td>No separate NWC line, so it is not counted twice</td></tr>
+      <tr><td>Terminal year (original workbook method)</td><td>Year-11 ΔNWC from the same ratio</td><td>Subtracted once</td></tr></tbody></table>`;
+
+  // ---- 8: forecasting ----
+  const forecastText = () => `<p><b>Why forecast it.</b> A growing business usually needs more receivables and inventory, net of payables, to support more sales. If the forecast grows revenue but ignores that investment, FCFF and the value are overstated. A company with negative working capital is the reverse: growth releases cash, and ignoring it understates value.</p>
+    <h4>Method A: incremental ratio (what this model uses)</h4>
+    <div class="formula">Incremental NWC ratio = Change in NWC ÷ Change in revenue</div>
+    <div class="formula">Hypothetical: revenue $1,000 mm → $1,200 mm, change $200 mm. Operating NWC $100 mm → $130 mm, increase $30 mm. Ratio = 30 ÷ 200 = 15%.</div>
+    <p>The business needed $30 mm of additional operating working capital to support $200 mm of additional revenue: 15 cents per extra dollar of sales. Used as a reference point, next year's forecast ΔNWC = 15% × forecast change in revenue. In this model the input "Change in NWC % of change in revenue" is exactly this ratio, positive when NWC is an investment, so every forecast year computes ΔNWC = (revenue<sub>t</sub> − revenue<sub>t−1</sub>) × ratio and subtracts it from FCFF.</p>
+    <h4>Method B: NWC as a percentage of revenue</h4>
+    <div class="formula">Forecast NWC = (Operating NWC ÷ Revenue) × Forecast revenue;  ΔNWC = Forecast NWC − Current NWC</div>
+    <p>Hypothetical, continuing the example: NWC is 130 on revenue of 1,200 (10.8% of revenue). Next year revenue grows 10% to 1,320.</p>
+    <table class="fin"><tbody><tr><td>Method A: 15% × (1,320 − 1,200)</td><td class="num">ΔNWC = +18</td></tr><tr><td>Method B at the current 10.8%: 10.8% × 1,320 − 130</td><td class="num">ΔNWC = +13</td></tr><tr><td>Method B at a normalised 10.0%: 10.0% × 1,320 − 130</td><td class="num">ΔNWC = +2</td></tr></tbody></table>
+    <p>Method A prices only the new revenue at last year's incremental rate. Method B moves the whole balance to the ratio you choose, so choosing a ratio below today's level releases cash once (a catch-up) before growth uses it again. The implied incremental ratio of Method B is ΔNWC ÷ change in revenue (13 ÷ 120 = 10.8%, or 2 ÷ 120 = 1.7%), which is what you would enter in this model.</p>
+    <p><b>When a normalised NWC-to-revenue ratio is more stable.</b> The level ratio usually moves slowly because it reflects payment terms and inventory turns. The incremental ratio divides one small difference by another: in a year when revenue barely changed, a modest NWC swing produces a huge or negative ratio. Prefer the level ratio (or an average) when revenue growth is low or volatile.</p>
+    <ul><li><b>Historical averages</b>: average 3–5 years, not one year. Drop years distorted by acquisitions, supply shocks or pandemic stocking, and say so.</li>
+      <li><b>Business models differ</b>: manufacturers and distributors often need 10–25% of revenue; software and marketplaces can be negative; banks and insurers do not use this concept at all.</li>
+      <li><b>Seasonality</b>: a fiscal year that ends before the busy season shows high inventory and payables. Compare like dates, and do not use a single quarter-end balance as a full-year level.</li>
+      <li><b>Unusual periods</b>: one big swing (inventory build, a customer paying late, a supplier-terms change) should not set the long-term assumption. Mean reversion is the default.</li>
+      <li><b>Negative working capital</b>: it can persist for a long time, but growth that slows also slows the cash it releases. Do not let a negative ratio make a fast-growth forecast look more valuable than it can be.</li></ul>
+    <p>Do not assume a single historical ratio will remain constant. Choose a figure for each scenario and explain it in your notes.</p>`;
+
+  // ---- 10: mistakes ----
+  const MISTAKES = [
+    ['Including cash and marketable securities in operating NWC', 'Cash is valued separately in the equity bridge (added to enterprise value). Counting it in NWC as well treats the cash pile as an operating need and double counts it; a cash build would also look like "investment" that cuts FCFF.'],
+    ['Including short-term borrowing as an operating liability', 'Commercial paper, short-term loans and the current portion of long-term debt are financing. In NWC they would make the company look as if suppliers fund it, raise FCFF, and then be subtracted again as debt in the bridge.'],
+    ['Double-counting changes in accounts payable or accrued expenses', 'If the cash flow statement shows a combined line ("Accounts payable and accrued liabilities") and the note breaks it down, add the combined line or the parts, never both. The worksheet marks parts of a combined line as details and does not add them.'],
+    ['Treating every "Other assets" line as current operating NWC', 'Amazon\'s "Other assets" change (−15,632 in 2025) is tagged as noncurrent. Long-term items are not working capital unless the notes show they are operating (for example long-term prepaid or capitalised contract costs, which you might then treat like CapEx).'],
+    ['Confusing balance-sheet changes with cash flow contributions', 'An increase in NWC of +600 is a cash flow effect of −600. The Historical financials row wants the cash flow effect; the forecast input wants the investment direction.'],
+    ['Reversing a cash flow statement sign twice', 'Entering "−3,002" for inventories as "+3,002" because "an increase is a use of cash" flips a sign the statement already applied. Copy the statement\'s sign; flip only when converting to the balance-sheet direction.'],
+    ['Mixing quarterly and annual amounts', 'A 10-Q cash flow statement shows year to date, not the quarter. Do not put a nine-month change next to fiscal-year revenue. Build TTM (fiscal year + year to date − prior year to date) or use the 10-K.'],
+    ['Double-counting operating lease effects', 'Lease payments are already in operating costs (and EBIT). If current lease liabilities stay in NWC, or if lease changes appear in "other liabilities", they can be counted again; and if you treat leases as debt, they belong in the bridge, not NWC.'],
+    ['Treating acquisition-related working-capital movements as ordinary operations', 'Receivables and inventory acquired with a business are paid for in investing activities. A balance-sheet NWC change in an acquisition year overstates organic working-capital needs; use the cash flow statement lines and the acquisitions % input.'],
+    ['Using old figures when newer disclosures are available', 'A 10-Q filed after the 10-K gives a more recent TTM, and the newest 10-K may restate prior years. Use the latest filing and note its accession number and period.'],
+  ];
+
+  return { AMZN_K, AMZN_LINES, AMZN_BS, SRC, COMPONENTS, MISTAKES, what, why, signs, calcNwc, convert, steps, amazon, fcffText, audit, forecastText };
+})();
+if (typeof module !== 'undefined') module.exports = DCFNwcHelp;
 
 // ===== CHARTS (pure SVG builders, no model logic) =====
 // Colours come from CSS variables so the charts follow light and dark mode.
@@ -7437,7 +8089,7 @@ const CompsApp = (() => {
     const O = cur.ttmOverride || {}, typed = HK && isNum(O[key]);
     const own = HK ? `<h3>Type your own TTM ${esc(HK.label.toLowerCase())}</h3>
       <p>${typed ? `You typed <b>${fmt.mm(O[key])}</b>. ` : ''}Type it straight into the shaded TTM box on Historical financials, in $ millions${key === 'capex' || key === 'dnwc' ? ', negative for cash going out, as in the fiscal-year columns' : ''}. ${typed ? 'Clear the box to go back to the calculated figure.' : 'Your figure replaces the calculated one only for this line.'}</p>
-      ${w ? `<dl><div><dt>Fiscal year</dt><dd>10-K, ${esc(w.statement || '')}${w.heading ? ': ' + esc(w.heading) : ''}</dd></div><div><dt>Year to date and prior year to date</dt><dd>Latest 10-Q, same statement, the "Three/Six/Nine Months Ended" columns for this year and last year</dd></div>${w.find && w.find.length ? `<div><dt>Search the filing for</dt><dd>${w.find.map(x => `<a href="https://www.sec.gov/edgar/search/#/q=${encodeURIComponent('"' + x + '"')}${cur.meta && cur.meta.cik ? '&ciks=' + String(cur.meta.cik).padStart(10, '0') : ''}" target="_blank" rel="noopener">${esc(x)}</a>`).join(' · ')}</dd></div>` : ''}</dl>` : ''}
+      ${w ? `<dl><div><dt>Fiscal year</dt><dd>10-K, ${esc(w.statement || '')}${w.heading ? ': ' + esc(w.heading) : ''}</dd></div><div><dt>Year to date and prior year to date</dt><dd>Latest 10-Q, same statement, the "Three/Six/Nine Months Ended" columns for this year and last year</dd></div>${w.find && w.find.length ? `<div><dt>Search the filing for</dt><dd>${w.find.map(x => termChip(x, companyCik())).join(' ')}</dd></div>` : ''}</dl>` : ''}
       ${hh.calc ? `<p class="footnote">${esc(hh.calc)}</p>` : ''}${key === 'opex' ? '<p class="footnote">Operating expenses here exclude D&A: TTM gross profit − TTM EBITDA, where EBITDA = operating income + D&A.</p>' : ''}
       <button class="linkbtn" data-ttm="guide">Step-by-step guide to the TTM column</button>` : '';
     return `<div><h3>Trailing twelve months</h3><h2 id="dr-title">${esc(HK && key !== k ? HK.label : lab)}</h2></div>
@@ -7522,7 +8174,7 @@ const CompsApp = (() => {
   function whereHtml(w, cik) {
     if (!w) return '';
     const row = (l, v) => v ? `<div><span>${l}</span><p>${esc(v)}</p></div>` : '';
-    return `<div class="where">${row('Document', w.doc)}${row('Statement or note', w.statement)}${row('Heading to look for', w.heading)}${row('Period', w.period)}${w.find && w.find.length ? `<div><span>Search (Ctrl+F)</span><p>${w.find.map(t => `<a class="chip" href="${DCFHelp.edgarSearch(t, cik)}" target="_blank" rel="noopener" title="Search “${esc(t)}” in ${cik ? 'this company\'s' : 'all'} filings on EDGAR">${esc(t)}</a>`).join(' ')}</p></div>` : ''}</div>`;
+    return `<div class="where">${row('Document', w.doc)}${row('Statement or note', w.statement)}${row('Heading to look for', w.heading)}${row('Period', w.period)}${w.find && w.find.length ? `<div><span>Search (Ctrl+F)</span><p>${w.find.map(t => termChip(t, cik)).join(' ')}${cik ? '' : ' <span class="footnote">Import the company to make these open searches of its own filings.</span>'}</p></div>` : ''}</div>`;
   }
   function exampleHtml(key) {
     const e = DCFHelp.example(key, cur); let out = '';
@@ -7561,7 +8213,7 @@ const CompsApp = (() => {
     if (key === 'da') { if (has(H.da[4], r[4])) own = `${co} FY${y[4]} D&A = ${n(H.da[4])} ÷ ${n(r[4])} = ${p(H.da[4] / r[4])} of revenue.`; amzn = 'Amazon 2025: 65,756 ÷ 716,924 = 9.2%. TTM: 79,353 ÷ 797,455 = 10.0%, rising because CapEx has grown faster than revenue.'; }
     if (/^capex/.test(key)) { if (has(H.capex[4], r[4])) own = `${co} FY${y[4]} CapEx = ${n(-H.capex[4])} ÷ ${n(r[4])} = ${p(-H.capex[4] / r[4])} of revenue.`; amzn = 'Amazon 2025: 131,819 ÷ 716,924 = 18.4%. TTM to 30 Sep 2026: 215,192 ÷ 797,455 = 27.0%. Purchases of property and equipment, net of proceeds and incentives; excludes assets acquired under finance leases.'; }
     if (key === 'tax') { const v = fy && fy[0] && fy[0].values; if (v && has(v.tax, v.ebt)) own = `${co} ${fy[0].label} effective rate = ${n(v.tax)} ÷ ${n(v.ebt)} = ${p(v.tax / v.ebt)}.`; amzn = 'Amazon 2025: income tax expense 19,087 ÷ pre-tax income 97,311 = 19.6% effective, against a 21% US federal statutory rate.'; }
-    if (key === 'nwc') { if (has(H.dnwc[4], r[4], r[3]) && r[4] !== r[3]) own = `${co} FY${y[4]}: −(${n(H.dnwc[4])}) ÷ (${n(r[4])} − ${n(r[3])}) = ${p(-H.dnwc[4] / (r[4] - r[3]))}.`; amzn = 'Amazon reports each working-capital change separately (no single tagged total), so no verified ratio is shown. Add the "Changes in operating assets and liabilities" lines, then divide by the change in revenue.'; }
+    if (key === 'nwc') { if (has(H.dnwc[4], r[4], r[3]) && r[4] !== r[3]) own = `${co} FY${y[4]}: −(${n(H.dnwc[4])}) ÷ (${n(r[4])} − ${n(r[3])}) = ${p(-H.dnwc[4] / (r[4] - r[3]))}.`; amzn = 'Amazon 2025 10-K: revenue rose 716,924 − 637,959 = 78,965. Using the sum of all reported working-capital lines (−19,969): −(−19,969) ÷ 78,965 = 25.3%. Using only receivables + inventory + payables (+896): −896 ÷ 78,965 = −1.1%. The right answer depends on how you classify "Other assets" and "Accrued expenses and other": work it through in the Change in NWC worksheet before choosing.'; }
     if (key === 's2c') { const A = calc().anchors.s2c; if (isNum(A.latestFY)) own = `${co} ${A.latestLabel}: change in revenue ÷ (CapEx − D&A + increase in NWC) = ${A.latestFY.toFixed(2)}×.`; amzn = 'Amazon 2025: (716,924 − 637,959) ÷ (131,819 − 65,756) = 1.20×, leaving out working capital and acquisitions.'; }
     if (key === 'nol') amzn = 'Hypothetical: $1,000 mm of usable NOLs, $5,000 mm of total EBIT in years 1–3 and a 21% tax rate: 1,000 × 21% ÷ 5,000 = 4.2 points off the tax rate in years 1–3.';
     if (key === 'acq') amzn = 'No verified example on file. Read "Acquisitions, net of cash acquired" for each year in the cash flow statement and divide by revenue.';
@@ -7584,6 +8236,7 @@ const CompsApp = (() => {
       sec('How to estimate it', g.estimate ? `<ol>${g.estimate.map(x => `<li>${esc(x)}</li>`).join('')}</ol>${g.interp ? '<p class="footnote">The model draws a straight line from year 1 to year 5 and another from year 5 to year 10. Year 3 is halfway between years 1 and 5.</p>' : ''}` : ''),
       sec('Where to find the evidence', g.where ? `<p>${esc(g.where)}</p>` : ''),
       sec('Historical comparison', anchorHtml(key, true), true),
+      key === 'nwc' ? sec('From the historical NWC worksheet', nwcForecastLinkHtml(), true) : '',
       sec('Example calculation', exampleCalcHtml(key)),
       sec('Bear, Base and Bull', `<ul>${scen}</ul><p class="footnote">Each scenario should tell one consistent story. The calculator does not create scenarios by adding or subtracting a fixed percentage.</p>`),
       sec('Common mistakes', g.mistakes && g.mistakes.length ? `<ul>${g.mistakes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''),
@@ -7654,7 +8307,7 @@ const CompsApp = (() => {
       ${T.nol.status === 'has' ? `<label>Usable NOL carryforwards ($mm, after any valuation allowance) ${toolIn('nol.bal', 'usd_mm', 'NOL balance')}</label>
       <p>EBIT in years 1–3 (${esc(s)}): ${fmt.mm(ebit3)} $mm. ${nb ? `Rate cut = ${fmt.mm(nb.used)} × ${plain(fmt.pct(cur.inputs.tax[s]))} ÷ ${fmt.mm(ebit3)} = <b>${plain(fmt.pct(nb.rateCut, 2))}</b>${nb.leftover > 0 ? `. ${fmt.mm(nb.leftover)} $mm would be left for later years, which this model does not use.` : '.'}` : 'Enter the balance to calculate.'}</p>
       ${nb ? `<button class="btn" data-tool-use="nol" data-v="${nb.rateCut}">Use ${plain(fmt.pct(nb.rateCut, 2))} for ${esc(s)}</button>` : ''}` : '<p class="footnote">With no review, the NOL input should stay at 0: that means "no benefit assumed", not "the company has none". Record what you found here.</p>'}
-      <p class="footnote">Where: 10-K income taxes note, "net operating loss carryforwards" and "valuation allowance". Ctrl+F: <a class="chip" href="${DCFHelp.edgarSearch('net operating loss carryforwards', cur.meta && cur.meta.cik)}" target="_blank" rel="noopener">net operating loss carryforwards</a></p></details>`;
+      <p class="footnote">Where: 10-K income taxes note, "net operating loss carryforwards" and "valuation allowance". Ctrl+F: ${termChip('net operating loss carryforwards', companyCik())}</p></details>`;
     // CapEx estimator
     const cxg = T.capex.guide, cxp = isNum(cxg) && isNum(rev0) && rev0 ? cxg / rev0 : null, A = calc().anchors;
     const capex = `<details class="panel tool" data-aid="tool-cx" ${aidOpen['tool-cx'] ? 'open' : ''}><summary><b>CapEx estimator</b> <span class="footnote">turn a dollar outlook into a % of revenue</span></summary>
@@ -7693,7 +8346,7 @@ const CompsApp = (() => {
   const srcLink = x => `<a href="${esc(x[1])}" target="_blank" rel="noopener">${esc(x[0])}</a> <span class="stype">${SRC_TYPE[x[2]]}${x[3] ? ' · subscription' : ' · free'}</span>`;
   // company-specific links that follow a fixed, public pattern
   function companyLinks(key) {
-    const t = (cur.inputs.company.ticker || (cur.meta && cur.meta.symbol) || '').split(/[\s/:]/)[0].toUpperCase(), cik = cur.meta && cur.meta.cik;
+    const t = (cur.inputs.company.ticker || (cur.meta && cur.meta.symbol) || '').split(/[\s/:]/)[0].toUpperCase(), cik = companyCik();
     const out = [];
     if (key === 'beta' && /^[A-Z.\-]{1,6}$/.test(t)) out.push([`Yahoo Finance statistics for ${t} (look for "Beta (5Y Monthly)")`, `https://finance.yahoo.com/quote/${encodeURIComponent(t)}/key-statistics/`, 'direct']);
     if ((key === 'kd' || key === 'csrp') && cik) out.push([`${cur.inputs.company.name || 'This company'}: filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw']);
@@ -7891,7 +8544,7 @@ const CompsApp = (() => {
     const sec = (x, t, body) => `<details class="dsec2" data-aid="${id(x)}" ${aidOpen[id(x)] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
     const li = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
     const where = w.where.map(([h, src, steps]) => `<div class="wstep"><b>${esc(h)}</b> ${srcLink(src)}<ol>${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`).join('');
-    const cik = cur.meta && cur.meta.cik;
+    const cik = companyCik();
     const co = cik && ['tem', 'troic'].includes(key) ? `<div class="wstep"><b>For ${esc(cur.inputs.company.name || 'this company')}</b><ul><li>${srcLink([`${cur.inputs.company.name || 'This company'}: filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw'])}</li>${key === 'tem' ? `<li>${srcLink(['Search its filings for "segment information"', DCFHelp.edgarSearch('segment information', cik), 'raw'])}</li>` : `<li>${srcLink(['Search its filings for "total stockholders\' equity"', DCFHelp.edgarSearch("total stockholders' equity", cik), 'raw'])}</li>`}</ul></div>` : '';
     const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}${w.calc.steps.length ? `<ol>${w.calc.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${TV_TOOL[key] && cur.mode === 'corrected' ? `<p><button class="btn tiny" data-tv-tool="${TV_TOOL[key]}">Calculate this for me</button> <span class="footnote">opens the calculator on the Terminal value page; it uses only figures you enter or that were imported, and fills nothing until you click a scenario.</span></p>` : ''}`;
     return `<p class="wquick">${esc(w.what)}</p>
@@ -8054,9 +8707,9 @@ const CompsApp = (() => {
     const id = x => `b-${key}-${x}${compact ? '-i' : ''}`;
     const sec = (x, t, body) => `<details class="dsec2" data-aid="${id(x)}" ${aidOpen[id(x)] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
     const li = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
-    const cik = cur.meta && cur.meta.cik, nm = cur.inputs.company.name || 'this company';
+    const cik = companyCik(), nm = cur.inputs.company.name || 'this company';
     const filings = cik ? `<li>${srcLink([`${nm}: 10-Q and 10-K filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw'])}</li>` : `<li>${srcLink(DCFHelp.S.edgar)} <span class="footnote">Import the company on Company & market data for direct links to its filings.</span></li>`;
-    const terms = (w.where.terms || []).length ? `<p>Search terms: ${w.where.terms.map(t => `<a class="chip" href="${DCFHelp.edgarSearch(t, cik)}" target="_blank" rel="noopener">${esc(t)}</a>`).join(' ')}</p>` : '';
+    const terms = (w.where.terms || []).length ? `<p>Search terms: ${w.where.terms.map(t => termChip(t, cik)).join(' ')}</p>` : '';
     const incl = w.include.in.length || w.include.out.length ? `<div class="tgrid2"><div><b>Include</b><ul class="chk">${w.include.in.map(x => `<li>✓ ${esc(x)}</li>`).join('')}</ul></div><div><b>Exclude</b><ul class="chk">${w.include.out.map(x => `<li>✗ ${esc(x)}</li>`).join('')}</ul></div></div>` : '<p class="footnote">A modelling choice, not a balance-sheet figure.</p>';
     const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}<p>${esc(w.calc.example)}</p>${B_TOOL[key] ? `<p><button class="btn tiny" data-b-tool="${B_TOOL[key]}">Calculate it in the worksheet</button></p>` : ''}`;
     return `<p class="wquick">${esc(w.what)}</p>
@@ -8692,7 +9345,7 @@ const CompsApp = (() => {
       const id = `h-${key}-${i}`, v = H[key][i], err = parseErrors[id];
       const pv = DCFData.provenance(cur, 'hist.' + key, H[key]); const impv = cur.imported && cur.imported['hist.' + key];
       const cellImp = impv && isNum(v) && impv.v[i] === v;
-      return `<td class="hist"><input type="text" inputmode="decimal" data-t="hist" data-k="${key}" data-i="${i}" id="${id}" class="${err ? 'err' : ''} ${cellImp ? 'imp' : (pv === 'overridden' && impv ? 'ovr' : '')}" title="${cellImp ? esc(srcTitle('hist.' + key)) : ''}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="Enter" aria-label="${esc(HBY[key].label)} ${Y[i] || ''}">${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
+      return `<td class="hist"><input type="text" inputmode="decimal" data-t="hist" data-k="${key}" data-i="${i}" id="${id}" class="${err ? 'err' : ''} ${cellImp ? 'imp' : (pv === 'overridden' && impv ? 'ovr' : '')}" title="${cellImp ? esc(srcTitle('hist.' + key)) : ''}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="${key === 'dnwc' && !isNum(v) && nwcData() && Y[i] && nwcData().periods['FY' + Y[i]] ? 'Review' : 'Enter'}" aria-label="${esc(HBY[key].label)} ${Y[i] || ''}">${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
     };
     const TO = cur.ttmOverride || {};
     const tcell = (key) => {
@@ -8701,7 +9354,7 @@ const CompsApp = (() => {
       const tip = typed ? `You typed this TTM figure.${isNum(cv) ? ' Calculated from the filings: ' + fmt.mm(cv).replace(/<[^>]+>/g, '') + '.' : ''} Clear the box to go back to the calculated figure.` : isNum(cv) ? 'Calculated: fiscal year + year to date − prior year to date. Type over it to use your own figure.' : 'Type the TTM figure: fiscal year (10-K) + year to date (latest 10-Q) − same period a year earlier.';
       return `<td class="hist ttm"><div class="ttmcell"><input type="text" inputmode="decimal" data-t="ttmo" data-k="${key}" id="${id}" class="${cls}" title="${esc(tip)}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="TTM" aria-label="${esc(HBY[key].label)} TTM"><button class="ttmi" data-ttm="${key}" title="Where to find this TTM figure and how it is built" aria-label="How to fill in TTM ${esc(HBY[key].label)}">i</button></div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
     };
-    const row = (key) => `<tr><td><div class="name" style="display:flex;gap:6px;align-items:center"><button class="help" data-help="hist.${key}" aria-label="How to fill in ${esc(HBY[key].label)}">?</button>${esc(HBY[key].label)}</div></td>${tcell(key)}${ORD.map(i => cell(key, i)).join('')}</tr>`;
+    const row = (key) => `<tr><td><div class="name" style="display:flex;gap:6px;align-items:center"><button class="help" data-help="hist.${key}" aria-label="How to fill in ${esc(HBY[key].label)}">?</button>${esc(HBY[key].label)}${key === 'dnwc' ? ' <button class="linkbtn" data-nwc-open="ws" title="Open the worksheet that builds this figure line by line from the cash flow statement">Calculate</button>' : ''}</div></td>${tcell(key)}${ORD.map(i => cell(key, i)).join('')}</tr>`;
     // column accessors: 't' = TTM, numbers = stored index
     const n = (k, i) => i === 't' ? (TC && isNum(TC.v[k]) ? TC.v[k] : null) : (isNum(H[k][i]) ? H[k][i] : null);
     const all = (...xs) => xs.every(isNum);
@@ -8740,6 +9393,7 @@ const CompsApp = (() => {
       ${row('sbc')}${row('dnwc')}${comp('Operating cash flow (estimated)', ocf, 'total')}${row('capex')}${comp('Free cash flow (estimated)', fcf, 'key')}${comp('FCF margin', i => div(fcf(i), n('rev', i)), 'sub', fmt.pct)}
     </tbody></table></div>
     ${TC ? `<p class="footnote">TTM ${TC.isFY ? 'equals the latest fiscal year: no 10-Q has been filed since it ended.' : `to ${esc(TC.end)} = fiscal year + year to date − the same period a year earlier, for each line. ${TC.typedOnly ? 'Typed by you.' : TC.manual ? 'Built from figures you typed.' : 'Calculated from the SEC filings.'}${TC.overrides.length && !TC.typedOnly ? ' Amber figures are ones you typed over.' : ''}`} Taxes, net income and cash flow in this table use the same estimate as the fiscal years; the reported TTM figures are in the comparison below.</p>` : ''}</section>
+    ${nwcHistPanel()}
     ${ttmCompareHtml()}
     ${ttmBuilderHtml()}
     <section class="panel"><h2>Ratios to anchor your assumptions</h2><div class="stats">
@@ -8815,7 +9469,7 @@ const CompsApp = (() => {
       ${row('NOPAT', 'nopat')}
       ${row('+ D&A', 'da', fmt.mm, '', hv(i => fmt.mm(hn('da', i))))}
       ${row('− Capital expenditures', 'capex', v => fmt.mm(-v), '', hv(i => fmt.mm(hn('capex', i))))}
-      ${row('− Change in NWC', 'dnwc', v => fmt.mm(-v), '', hv(i => fmt.mm(hn('dnwc', i))))}
+      ${row('Change in NWC (cash flow sign: increase = negative)', 'dnwc', v => fmt.mm(-v), '', hv(i => fmt.mm(hn('dnwc', i))))}
       ${row('− Acquisitions', 'acq', v => fmt.mm(-v))}
       ${corrected ? row('− Reinvestment (terminal year, g ÷ ROIC)', 'reinvestment', v => fmt.mm(-v)) : ''}
       ${row('FCFF', 'fcff', fmt.mm, 'key')}
@@ -8987,8 +9641,304 @@ const CompsApp = (() => {
       ${cur.log.slice(0, 200).map(l => `<tr><td>${new Date(l.at).toLocaleString()}</td><td style="text-align:left;font-family:var(--font-ui)">${esc(lab(l.field))}</td><td>${esc(l.s || '')}</td><td>${esc(l.from == null ? '—' : l.from)}</td><td>${esc(l.to == null ? '—' : l.to)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="footnote">No changes yet.</p>'}</section>`;
   };
 
+  // ---------- Change in NWC: guide, worksheets, history, forecasting ----------
+  // The analyst's working-capital work lives in cur.nwc and is saved with the model. Imported lines live in
+  // cur.nwcData (refreshed on import); the analyst's choices are kept separately, so a re-import never loses them.
+  const NWC_NOTES = [['incl', 'Why I included these line items', 'area'], ['excl', 'Why I excluded others', 'area'], ['calc', 'My calculation', 'area'], ['evidence', 'Source URLs (one per line)', 'area'], ['dates', 'Reporting dates', 'text'], ['unusual', 'Notes on unusual working-capital changes', 'area'], ['norm', 'My normalized historical estimate', 'area'], ['fcst', 'How this affects my forecast assumption', 'area'], ['confidence', 'Confidence', 'conf']];
+  function nwcState() {
+    cur.nwc = cur.nwc || {}; const N = cur.nwc;
+    ['edits', 'adj', 'selected', 'bs', 'fc'].forEach(k => { N[k] = N[k] || {}; });
+    if (!N.learn) N.learn = DCFNwc.LEARN_DEFAULT();
+    return N;
+  }
+  const nwcData = () => cur.nwcData && cur.nwcData.periods ? cur.nwcData : null;
+  // TTM column values the history table needs
+  function nwcTtmCol() {
+    const TC = DCFAnalysis.ttmColumn(cur); const O = cur.ttmOverride || {};
+    if (!TC && !isNum(O.dnwc)) return null;
+    return { rev: TC ? TC.v.rev : null, prevRev: TC && TC.prior && isNum(TC.prior.value) ? TC.prior.value : null, dnwc: TC ? TC.v.dnwc : (isNum(O.dnwc) ? O.dnwc : null) };
+  }
+  // the periods the worksheet offers, newest first, and where each one's value lives in the model
+  function nwcPeriods() {
+    const H = cur.hist, D = nwcData(), out = [];
+    if (D && D.periods.TTM || DCFAnalysis.ttmColumn(cur)) out.push({ key: 'TTM', label: 'TTM', i: 't' });
+    for (let i = 4; i >= 0; i--) if (H.years[i]) out.push({ key: 'FY' + H.years[i], label: 'FY' + H.years[i], i });
+    return out;
+  }
+  function nwcPeriod() { const N = nwcState(), ps = nwcPeriods(); if (N.period && ps.some(p => p.key === N.period)) return N.period; const D = nwcData(); const withData = ps.find(p => p.key !== 'TTM' && D && D.periods[p.key]); return (withData || ps.find(p => p.key !== 'TTM') || ps[0] || { key: null }).key; }
+  function nwcModelValue(key) {
+    const p = nwcPeriods().find(x => x.key === key); if (!p) return null;
+    if (p.i === 't') { const TC = DCFAnalysis.ttmColumn(cur), O = cur.ttmOverride || {}; return isNum(O.dnwc) ? O.dnwc : TC && isNum(TC.v.dnwc) ? TC.v.dnwc : null; }
+    return isNum(cur.hist.dnwc[p.i]) ? cur.hist.dnwc[p.i] : null;
+  }
+  const nwcSum = key => { const N = nwcState(), D = nwcData(), p = D && D.periods[key]; return DCFNwc.summary(p ? p.lines : [], N.edits[key], N.adj[key]); };
+  const sgn = v => isNum(v) ? (v < 0 ? '−' : '+') + nf(Math.abs(v), 0) : '<span class="na">—</span>';
+  const NST = { complete: ['good', 'Complete'], incomplete: ['warn', 'Incomplete: review needed'], empty: ['', 'No lines yet'] };
+  const nwcPill = st => `<span class="pill ${NST[st] ? NST[st][0] : ''}">${NST[st] ? NST[st][1] : esc(st || '')}</span>`;
+  function nwcIn(path, unit, label, ph = 'Enter', cls = '') {
+    const id = 'nw-' + path.replace(/[.]/g, '-'); const v = path.split('.').reduce((o, k) => o == null ? o : o[k], nwcState());
+    if (unit === 'text') return `<input type="text" class="txt ${cls}" data-t="nwc" data-k="${esc(path)}" data-unit="text" id="${esc(id)}" value="${esc(v || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}">`;
+    return `<input type="text" inputmode="decimal" class="${cls} ${parseErrors[id] ? 'err' : ''}" data-t="nwc" data-k="${esc(path)}" data-unit="${unit}" id="${esc(id)}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${esc(ph)}" aria-label="${esc(label)}">${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`;
+  }
+  const nwcSec = (x, t, body, open) => `<details class="dsec2 nsec" data-aid="nwc-${x}" id="nwc-${x}" ${aidOpen['nwc-' + x] || open ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+
+  // links to this company's own filings only: never a search across other companies
+  const KNOWN_CIK = { AMZN: '1018724', TSLA: '1318605', MSTR: '1050446' };
+  function companyCik() {
+    const m = cur.meta || {}, t = String(cur.inputs.company.ticker || '').split(/[\s/:]/)[0].toUpperCase(), s = String(m.symbol || '').split(/[\s/:]/)[0].toUpperCase();
+    if (m.cik && (!t || !s || t === s)) return String(m.cik).replace(/^0+/, '');
+    return KNOWN_CIK[t] || null;
+  }
+  const filingsUrl = cik => `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`;
+  const termChip = (t, cik) => { const u = DCFHelp.edgarSearch(t, cik); return u ? `<a class="chip" href="${u}" target="_blank" rel="noopener" title="Search “${esc(t)}” in this company's filings on EDGAR">${esc(t)}</a>` : `<span class="chip" title="Import the company to search its own filings">${esc(t)}</span>`; };
+
+  // ---- the filing worksheet ----
+  function nwcWorksheetHtml() {
+    const N = nwcState(), D = nwcData(), key = nwcPeriod();
+    if (!key) return '<div class="notice">Enter the fiscal years on Historical financials first.</div>';
+    const p = D && D.periods[key], s = nwcSum(key), adj = N.adj[key] || [];
+    const tabs = nwcPeriods().map(x => { const sx = nwcSum(x.key); return `<button class="btn tiny ${x.key === key ? 'primary' : ''}" data-nwc-period="${x.key}" aria-pressed="${x.key === key}">${esc(x.label)} ${D && D.periods[x.key] ? (sx.status === 'complete' ? '✓' : '•') : ''}</button>`; }).join('');
+    const clsSel = (path, v, dis) => `<select data-t="nwc" data-k="${esc(path)}" data-unit="choice" id="nw-${esc(path.replace(/[.]/g, '-'))}" ${dis ? 'disabled' : ''} aria-label="Classification">${[['core', 'Operating NWC'], ['review', 'Mixed: needs review'], ['exclude', 'Not operating NWC']].map(([k, l]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+    const chk = (path, v, dis, label) => `<input type="checkbox" data-t="nwcchk" data-k="${esc(path)}" ${v ? 'checked' : ''} ${dis ? 'disabled' : ''} aria-label="${esc(label)}">`;
+    const rows = s.lines.map(l => {
+      const base = `edits.${key}.${l.id}`, fixed = l.cls === 'detail' || l.cls === 'total';
+      return `<tr class="${fixed ? 'nw-fixed' : ''} ${l.cls === 'review' ? 'nw-rev' : ''}">
+        <td class="nw-d"><b>${esc(l.label)}</b><br><span class="footnote">${esc(l.concept)}${l.calc ? ' · TTM calculated' : ''}</span>${l.check ? `<div class="footnote">⚠ ${esc(l.check)}</div>` : ''}<div class="footnote">${esc(l.why)}</div></td>
+        <td class="num">${l.unknown || l.missingPart ? nwcIn(base + '.amt', 'num', l.label + ' amount (cash flow sign)', 'type it') + (isNum(l.raw) ? `<div class="footnote">tagged ${nf(l.raw, 0)}, sign not verified</div>` : '') : sgn(l.cf)}${l.parts ? `<div class="footnote">${l.parts.filter(Boolean).map(x => esc(x.what) + ' ' + sgn(x.cf)).join('<br>')}</div>` : ''}</td>
+        <td class="footnote">Cash flow statement (operating)</td>
+        <td class="footnote">${esc(l.start ? l.start + ' to ' + l.end : 'to ' + l.end)}<br>${esc(l.form)} ${esc(l.accn)}</td>
+        <td>${fixed ? `<span class="footnote">${esc(DCFNwc.CLS_TXT[l.cls])}</span>` : clsSel(base + '.cls', l.cls)}${!fixed && l.edited ? '<div class="footnote">changed by you</div>' : ''}</td>
+        <td class="ctr">${fixed ? '—' : chk(base + '.inc', l.inc, false, 'Include ' + l.label)}</td>
+        <td>${fixed ? '' : nwcIn(base + '.reason', 'text', 'Reason for ' + l.label, l.cls === 'review' ? 'Why? (note you read)' : 'Optional')}</td>
+        <td>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">Filing</a>` : ''}</td></tr>`;
+    }).join('');
+    const arows = adj.map((a, j) => { const b = `adj.${key}.${j}`; return `<tr class="nw-adj"><td>${nwcIn(b + '.label', 'text', 'Description', 'Description')}<label class="footnote"><select data-t="nwc" data-k="${b}.reported" data-unit="choice" id="nw-${b.replace(/[.]/g, '-')}-reported" aria-label="Line type"><option value="" ${!a.reported ? 'selected' : ''}>Analyst adjustment</option><option value="1" ${a.reported ? 'selected' : ''}>Reported line the import missed</option></select></label></td>
+        <td>${nwcIn(b + '.amt', 'num', 'Amount, cash flow sign', '−1,234')}</td><td>${nwcIn(b + '.stmt', 'text', 'Source statement', 'e.g. Note 4')}</td><td>${nwcIn(b + '.per', 'text', 'Reporting period', 'e.g. FY2025')}</td>
+        <td>${a.reported ? clsSel(b + '.cls', a.cls || 'review') : '<span class="footnote">Adjustment</span>'}</td><td class="ctr">${chk(b + '.inc', a.inc !== false, false, 'Include adjustment')}</td><td>${nwcIn(b + '.reason', 'text', 'Reason', 'Why')}</td><td>${nwcIn(b + '.url', 'text', 'Link to disclosure', 'https://')}<button class="linkbtn" data-nwc-del="${j}">Remove</button></td></tr>`; }).join('');
+    const cv = nwcModelValue(key), sel = N.selected[key] || {}, choice = N.pick && N.pick[key] || (sel.which || 'adjusted');
+    const pickV = { all: s.all, core: s.core, adjusted: s.adjusted, custom: N.custom && N.custom[key] }[choice];
+    const opt = (k, l, v, note) => `<label class="nw-pick"><input type="radio" name="nwpick" data-t="nwc" data-k="pick.${key}" data-unit="choice" value="${k}" id="nw-pick-${k}" ${choice === k ? 'checked' : ''}> <span>${l}</span> <b>${k === 'custom' ? '' : sgn(v)}</b> ${note ? `<small>${note}</small>` : ''}</label>`;
+    const bsE = D && p && D.bs[p.end], bsB = D && p && Object.values(D.bs).find(b => Math.abs((new Date(p.end) - new Date(b.end)) / 864e5 - 365) <= 8);
+    const bsCash = bsE && bsB ? -(bsE.opNwc - bsB.opNwc) : null;
+    const head = p ? `<p class="footnote">${esc(p.label)}: ${esc(p.form)} accession ${esc(p.accn)}${p.filed ? ', filed ' + esc(p.filed) : ''}. ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">Open this filing</a>` : ''} ${p.method ? esc(p.method) : ''}</p>` : `<div class="notice">No working-capital lines are loaded for ${esc(key)}. ${cur.meta && cur.meta.providerId === 'sec' ? 'The SEC file has no tagged lines for this period.' : 'Load the SEC company facts file (Company & market data → Import) to fill this in automatically, or add the lines from the cash flow statement by hand below.'}</div>`;
+    return `<div class="nw-tabs">${tabs}</div>${head}
+      <div class="tbl-wrap"><table class="fin nwws"><thead><tr><th>Line item</th><th>Amount ($ mm, cash flow sign)</th><th>Source statement</th><th>Reporting period</th><th>Classification</th><th>Include</th><th>Reason for classification</th><th>Disclosure</th></tr></thead><tbody>${rows}${arows}</tbody></table></div>
+      <p><button class="btn tiny" data-nwc-add>Add a line or adjustment</button> <span class="footnote">Use an adjustment for the operating part of a mixed line (exclude the reported line, then add the part you can support from the note), or for a reported line with a company-specific tag the SEC file does not carry.</span>${N.edits[key] && Object.keys(N.edits[key]).length ? ` <button class="linkbtn" data-nwc-clear="${key}">Reset my classifications for ${esc(key)}</button>` : ''}</p>
+      <div class="three">
+        <div><span>1. Sum of all reported changes in operating assets and liabilities</span><b>${sgn(s.all)}</b><small>Every reported line, as printed.${s.lines.some(l => l.cls === 'detail') ? ' Parts of combined lines are not added again.' : ''}${isNum(s.total) ? ` Company's own total: ${sgn(s.total)}.` : ''}</small></div>
+        <div><span>2. Sum of clearly classified operating working-capital changes</span><b>${sgn(s.core)}</b><small>Lines classed Operating NWC.${isNum(s.subset) ? ` Of which receivables + inventory + payables only: ${sgn(s.subset)} (a partial subset).` : ''}</small></div>
+        <div class="${s.status === 'complete' ? 'ok' : 'warn'}"><span>3. Analyst-adjusted DCF cash flow effect of change in NWC</span><b>${sgn(s.adjusted)}</b><small>Included lines + adjustments. ${nwcPill(s.status)}</small></div>
+      </div>
+      ${s.msgs.map(m => `<div class="notice warn">${esc(m)}</div>`).join('')}
+      ${s.status === 'incomplete' && !s.msgs.length ? '<div class="notice warn">Some lines have no verified amount. Type them or exclude them.</div>' : ''}
+      ${isNum(bsCash) ? `<p class="footnote"><b>Reconciliation:</b> the balance-sheet method gives a cash effect of ${sgn(bsCash)} (operating NWC ${sgn(bsB.opNwc)} on ${esc(bsB.end)} → ${sgn(bsE.opNwc)} on ${esc(bsE.end)}). Difference from figure 3: ${isNum(s.adjusted) ? sgn(s.adjusted - bsCash) : '—'}. Differences are normal; see "How to calculate operating NWC" for why.</p>` : ''}
+      <div class="nw-sel"><h4>Select the value for the model (${esc(key)})</h4>
+        ${opt('adjusted', 'Analyst-adjusted (3)', s.adjusted, s.status === 'complete' ? '' : 'incomplete')}${opt('core', 'Clearly operating lines (2)', s.core)}${opt('all', 'All reported lines (1)', s.all, 'only if every line is operating NWC under your definition')}${opt('custom', 'My own figure', null)} ${choice === 'custom' ? nwcIn('custom.' + key, 'num', 'My own figure', '$ mm, cash flow sign') : ''}
+        <p>In the model now: <b>${sgn(cv)}</b>${sel.at ? ` <span class="footnote">selected ${esc(new Date(sel.at).toLocaleDateString())} (${esc(sel.which)}${sel.status === 'incomplete' ? ', with unresolved lines' : ''})</span>` : ''}. <button class="btn primary" data-nwc-use="${key}" ${isNum(pickV) ? '' : 'disabled'}>Use ${isNum(pickV) ? sgn(pickV) : ''} as ${esc(key)} Change in NWC</button></p>
+        <p class="footnote">Nothing in the model changes until you press the button, and replacing a value already there asks you first. The figure goes into Historical financials with the cash flow sign and flows into historical operating cash flow and free cash flow.</p></div>`;
+  }
+
+  // ---- balance-sheet worksheet: operating NWC at two dates ----
+  function nwcBsHtml() {
+    const N = nwcState(), D = nwcData(), key = nwcPeriod(), p = D && D.periods[key];
+    const E = p && D.bs[p.end], B = p && Object.values(D.bs).find(b => Math.abs((new Date(p.end) - new Date(b.end)) / 864e5 - 365) <= 8);
+    const dflt = (b, k) => { if (!b) return null; const v = b.values; return k === 'debt' ? b.debt : k === 'leases' ? (v.olCur || 0) + (v.flCur || 0) : isNum(v[k]) ? v[k] : (k === 'rcash' || k === 'sti' ? 0 : null); };
+    const R = [['ca', 'Total current assets', '+', 'Balance sheet: "Total current assets"'], ['cash', 'Cash and cash equivalents', '−', 'Investments, valued in the bridge'], ['rcash', 'Restricted cash (current)', '−', 'Cash, not an operating need'], ['sti', 'Short-term investments / marketable securities', '−', 'Investments, valued in the bridge'],
+      ['cl', 'Total current liabilities', '+', 'Balance sheet: "Total current liabilities"'], ['debt', 'Current debt (short-term borrowings, current portion of long-term debt, commercial paper)', '−', 'Financing, subtracted in the bridge'], ['leases', 'Current lease liabilities (operating + finance)', '−', 'Lease payments are already in operating costs']];
+    N.bs[key] = N.bs[key] || {};
+    const val = (side, k) => { const o = N.bs[key][side] || {}; return isNum(o[k]) ? o[k] : dflt(side === 'e' ? E : B, k); };
+    const cell = (side, k) => { const o = N.bs[key][side] || {}, d = dflt(side === 'e' ? E : B, k), id = `nw-bs-${key}-${side}-${k}`; return `<input type="text" inputmode="decimal" data-t="nwc" data-k="bs.${key}.${side}.${k}" data-unit="num" id="${id}" class="${isNum(o[k]) ? 'ovr' : isNum(d) ? 'imp' : ''}" value="${esc(toInputText(isNum(o[k]) ? o[k] : null, 'num'))}" placeholder="${isNum(d) ? esc(nf(d, 0)) : 'Enter'}" aria-label="${esc(k + ' ' + side)}">`; };
+    const op = side => { const v = k => val(side, k); const ks = ['ca', 'cash', 'rcash', 'sti', 'cl', 'debt', 'leases']; if (!ks.every(k => isNum(v(k)))) return null; return (v('ca') - v('cash') - v('rcash') - v('sti')) - (v('cl') - v('debt') - v('leases')); };
+    const ob = op('b'), oe = op('e'), ch = isNum(ob) && isNum(oe) ? oe - ob : null, s = nwcSum(key);
+    return `<p>Optional: measure operating NWC at the start and end of ${esc(key)} from the balance sheet. ${E ? 'Grey figures are from the SEC file; type over any of them.' : 'Type the balances from the two balance sheets.'}</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th><th></th><th>Beginning${B ? ' ' + esc(B.end) : ''}</th><th>Ending${E ? ' ' + esc(E.end) : ''}</th><th>Why</th></tr></thead><tbody>
+      ${R.map(([k, l, sg, why]) => `<tr><td>${esc(l)}</td><td>${sg}</td><td>${cell('b', k)}</td><td>${cell('e', k)}</td><td class="footnote">${esc(why)}</td></tr>`).join('')}
+      <tr class="total"><td>Operating NWC</td><td>=</td><td class="num">${sgn(ob)}</td><td class="num">${sgn(oe)}</td><td class="footnote">(current assets − cash − restricted cash − investments) − (current liabilities − current debt − current leases)</td></tr></tbody></table></div>
+      <div class="formula">Balance-sheet change in NWC = Ending − Beginning = ${isNum(ch) ? `${nf(oe, 0)} − (${nf(ob, 0)}) = ${sgn(ch)}` : '—'}</div>
+      <div class="formula">Cash flow effect ≈ −Change = ${sgn(isNum(ch) ? -ch : null)}</div>
+      <p>Compare: reported cash flow lines ${sgn(s.all)}; your analyst-adjusted figure ${sgn(s.adjusted)}. ${isNum(ch) && isNum(s.adjusted) && Math.abs(-ch - s.adjusted) > Math.max(1, Math.abs(s.adjusted) * 0.1) ? 'They differ materially: look for acquisitions, currency effects, payables for equipment, reclassifications and lease or debt balances inside "other" captions before you choose.' : ''}</p>
+      ${D && D.finArm ? '<div class="notice warn">This company has a finance arm (finance receivables). Its current assets and liabilities include lending and borrowing that are not operating working capital: remove them using the segment or finance-subsidiary note.</div>' : ''}`;
+  }
+
+  // ---- learning calculator ----
+  function nwcLearnHtml() {
+    const N = nwcState(), r = DCFNwc.learn(N.learn);
+    const inp = (side, k, label) => { const id = `nw-learn-${side}-${k}`, err = parseErrors[id]; return `<input type="text" inputmode="decimal" data-t="nwc" data-k="learn.${side === 'b' ? 'begin' : 'end'}.${k}" data-unit="num" id="${id}" class="${err ? 'err' : ''}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(N.learn[side === 'b' ? 'begin' : 'end'][k], 'num'))}" aria-label="${esc(label)}">${err ? `<div class="errmsg">${esc(err)}</div>` : ''}`; };
+    const row = x => `<tr><td><b>${esc(x.label)}</b><div class="footnote">${x.side === 'A' ? 'Operating asset' : 'Operating liability'}: ${esc(x.what)}</div></td><td>${inp('b', x.k, x.label + ' beginning')}</td><td>${inp('e', x.k, x.label + ' ending')}</td><td class="num">${sgn(x.chg)}</td><td class="num">${sgn(x.cash)}</td></tr>`;
+    const A = r.rows.filter(x => x.side === 'A'), L = r.rows.filter(x => x.side === 'L');
+    const step = (a, b) => `<li>${a} <b>${b}</b></li>`;
+    return `<p class="footnote">Hypothetical figures to learn with: change any of them. $ millions.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Account</th><th>Beginning</th><th>Ending</th><th>Change</th><th>Cash flow effect</th></tr></thead><tbody>
+      ${A.map(row).join('')}<tr class="sub"><td>Operating current assets</td><td class="num">${sgn(r.caB)}</td><td class="num">${sgn(r.caE)}</td><td></td><td></td></tr>
+      ${L.map(row).join('')}<tr class="sub"><td>Operating current liabilities</td><td class="num">${sgn(r.clB)}</td><td class="num">${sgn(r.clE)}</td><td></td><td></td></tr>
+      <tr class="total"><td>Operating NWC</td><td class="num">${sgn(r.nwcB)}</td><td class="num">${sgn(r.nwcE)}</td><td class="num">${sgn(r.chg)}</td><td class="num">${sgn(r.cash)}</td></tr></tbody></table></div>
+      <h4>Line by line</h4><ol class="nw-steps">
+        ${step('1. Beginning operating NWC = operating current assets − operating current liabilities =', isNum(r.nwcB) ? `${nf(r.caB, 1)} − ${nf(r.clB, 1)} = ${sgn(r.nwcB)}` : '—')}
+        ${step('2. Ending operating NWC =', isNum(r.nwcE) ? `${nf(r.caE, 1)} − ${nf(r.clE, 1)} = ${sgn(r.nwcE)}` : '—')}
+        ${step('3. Change in operating NWC = ending − beginning =', isNum(r.chg) ? `${nf(r.nwcE, 1)} − (${nf(r.nwcB, 1)}) = ${sgn(r.chg)}` : '—')}
+        ${step('4. Cash flow effect = −change =', sgn(r.cash))}
+        <li>5. Effect on FCFF: cash flow before working capital ${nwcIn('learn.fcffPre', 'num', 'FCFF before working capital', '335', 'nw-sm')} ${isNum(r.cash) ? (r.cash < 0 ? '−' : '+') + ' ' + nf(Math.abs(r.cash), 1) : ''} = <b>FCFF ${sgn(r.fcff)}</b></li></ol>
+      <ul class="nw-say">${r.rows.map(x => `<li>${esc(x.text)}</li>`).join('')}</ul>
+      <p>${isNum(r.chg) ? (r.chg > 0 ? `<b>Overall</b>, the business tied up ${nf(r.chg, 1)} million more in operations, so FCFF is ${nf(r.chg, 1)} million lower than it would have been. In a DCF, an increase like this every year lowers enterprise value.` : r.chg < 0 ? `<b>Overall</b>, operations released ${nf(-r.chg, 1)} million of cash, so FCFF is ${nf(-r.chg, 1)} million higher. Ask whether this can continue: a release from running down inventory or stretching suppliers is usually one-off.` : '<b>Overall</b>, operating NWC did not change, so FCFF is unaffected.') : ''}</p>
+      <button class="linkbtn" data-nwc-learn-reset>Reset the example</button>`;
+  }
+
+  // ---- history comparison ----
+  function nwcHistoryHtml() {
+    const m = Object.assign({}, cur, { _ttmCol: nwcTtmCol() });
+    const H = DCFNwc.history(m).filter(c => c.key);
+    if (!H.length) return '<p class="footnote">Enter or import the historical years first.</p>';
+    const lv = v => isNum(v) ? (v < 0 ? '−' : '') + nf(Math.abs(v), 0) : '<span class="na">—</span>';
+    const fx = v => sgn(v), pc = v => isNum(v) ? (v * 100).toFixed(1) + '%' : '<span class="na">—</span>';
+    const row = (l, f, note) => `<tr><td>${l}${note ? `<div class="footnote">${note}</div>` : ''}</td>${H.map(c => `<td class="num ${c.key === 'TTM' ? 'ttm' : ''}">${f(c)}</td>`).join('')}</tr>`;
+    const fy = H.filter(c => c.key !== 'TTM');
+    const avg = (f, n) => { const v = fy.slice(0, n).map(f).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    const small = H.filter(c => c.small).map(c => c.label);
+    return `<div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th>${H.map(c => `<th class="${c.key === 'TTM' ? 'ttm' : ''}">${esc(c.label)}${c.end ? `<br><small>${esc(c.end)}</small>` : ''}</th>`).join('')}</tr></thead><tbody>
+      ${row('Revenue', c => lv(c.rev))}
+      ${row('Operating NWC (balance sheet, end of period)', c => lv(c.nwc), 'Calculated from the SEC balance-sheet totals')}
+      ${row('Balance-sheet change in NWC', c => fx(c.bsChg), 'Investment direction: + = more cash tied up')}
+      ${row('Reported cash flow working-capital changes', c => fx(c.reported), 'Sum of all reported lines (cash flow sign)')}
+      ${row('Clearly operating lines', c => fx(c.core))}
+      ${row('<b>Selected adjusted DCF cash flow effect</b>', c => `<b>${fx(c.sel)}</b>${c.status === 'incomplete' && !isNum(c.sel) ? '<br><small>review</small>' : ''}`, 'The value in Historical financials')}
+      ${row('NWC as % of revenue', c => pc(c.pctRev))}
+      ${row('Change in NWC ÷ change in revenue (balance sheet)', c => c.small ? `<span title="Revenue changed less than 2%: unstable">${pc(c.incrBs)}*</span>` : pc(c.incrBs))}
+      ${row('−(selected cash flow effect) ÷ change in revenue', c => c.small ? `${pc(c.incrSel)}*` : pc(c.incrSel), 'Same direction as the forecast input')}
+      </tbody></table></div>
+      <div class="stats"><div class="stat"><span class="k">3-year average, forecast direction</span><span class="v">${pc(avg(c => c.incrSel, 3))}</span><span class="s">from your selected values</span></div><div class="stat"><span class="k">5-year average, forecast direction</span><span class="v">${pc(avg(c => c.incrSel, 5))}</span><span class="s">from your selected values</span></div><div class="stat"><span class="k">Average NWC % revenue</span><span class="v">${pc(avg(c => c.pctRev, 5))}</span><span class="s">balance-sheet level</span></div></div>
+      ${small.length ? `<p class="footnote">* ${esc(small.join(', '))}: revenue changed by less than 2%, so the incremental ratio divides by a small number and is unstable. Do not base a long-term assumption on it.</p>` : ''}
+      <p class="footnote">Small changes in revenue make the incremental ratio jump; an unusual year (inventory build, a supplier-terms change, an acquisition) should not set the long-term assumption on its own. Prefer multi-year averages, explain the years you drop, and compare with the level ratio.</p>`;
+  }
+
+  function nwcHistPanel() {
+    const D = nwcData(), H = cur.hist;
+    const need = nwcPeriods().filter(p => D && D.periods[p.key] && !isNum(nwcModelValue(p.key)));
+    return `<details class="panel" data-aid="nwc-hist" ${aidOpen['nwc-hist'] ? 'open' : ''}><summary><b>Working capital: history and checks</b> <span class="footnote">operating NWC, balance-sheet and cash flow changes, NWC % of revenue and the incremental ratio${need.length ? ` · ${need.length} period${need.length > 1 ? 's' : ''} to review` : ''}</span></summary>
+      ${need.length ? `<div class="notice warn">Change in NWC is blank for ${esc(need.map(p => p.label).join(', '))}: the company reports its working capital in several lines and at least one material line is mixed or uncertain, so nothing was guessed. <button class="linkbtn" data-nwc-open="ws">Classify the lines in the worksheet</button></div>` : ''}
+      ${nwcHistoryHtml()}<p><button class="btn tiny" data-help="hist.dnwc">Open the Change in NWC guide</button></p></details>`;
+  }
+  // ---- forecasting worksheet ----
+  function nwcFcHtml() {
+    const N = nwcState(), F = N.fc, H = cur.hist;
+    const m = Object.assign({}, cur, { _ttmCol: nwcTtmCol() }), hist = DCFNwc.history(m).filter(c => c.key && c.key !== 'TTM');
+    const lat = hist[0] || {};
+    const { act } = calc();
+    const d = { rev0: lat.rev, rev1: act && act.ok ? act.years[0].rev : null, nwc0: lat.nwc, pctRev: lat.pctRev, incr: (() => { const v = hist.slice(0, 3).map(c => c.incrSel).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; })() };
+    const val = k => isNum(F[k]) ? F[k] : d[k];
+    const st = { rev0: val('rev0'), rev1: val('rev1'), nwc0: val('nwc0'), pctRev: val('pctRev'), incr: val('incr') };
+    const r = DCFNwc.forecast(st);
+    const inp = (k, unit, l, hint) => `<label>${l}${nwcIn('fc.' + k, unit, l, isNum(d[k]) ? (unit === 'pct' ? (d[k] * 100).toFixed(1) : nf(d[k], 0)) : 'Enter')}<small>${isNum(F[k]) ? 'Typed by you.' : isNum(d[k]) ? hint : 'Not available: type it.'}</small></label>`;
+    const chosen = F.method === 'B' ? r.B : r.A;
+    const ratio = chosen ? chosen.ratio : null;
+    return `<div class="fcgrid">
+      ${inp('rev0', 'num', 'Historical revenue ($ mm)', `Latest fiscal year (${esc(lat.label || '')}).`)}
+      ${inp('rev1', 'num', 'Forecast revenue ($ mm)', `Year 1 of your ${esc(cur.active)} forecast.`)}
+      ${inp('nwc0', 'num', 'Historical operating NWC ($ mm)', 'Balance-sheet operating NWC at the end of the latest year.')}
+      ${inp('pctRev', 'pct', 'Selected NWC-to-revenue ratio (%)', 'Latest year\'s level; type a normalised one.')}
+      ${inp('incr', 'pct', 'Selected incremental NWC ratio (%)', '3-year average of your selected values, forecast direction.')}</div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th></th><th>A. Incremental ratio</th><th>B. % of revenue</th></tr></thead><tbody>
+        <tr><td>Change in revenue</td><td class="num">${sgn(r.dRev)}</td><td class="num">${sgn(r.dRev)}</td></tr>
+        <tr><td>Forecast operating NWC</td><td class="num">${sgn(r.A && r.A.nwc1)}</td><td class="num">${sgn(r.B && r.B.nwc1)}</td></tr>
+        <tr><td>ΔNWC (investment direction)</td><td class="num">${sgn(r.A && r.A.dNwc)}</td><td class="num">${sgn(r.B && r.B.dNwc)}</td></tr>
+        <tr><td>Cash flow effect on FCFF</td><td class="num">${sgn(r.A && -r.A.dNwc)}</td><td class="num">${sgn(r.B && -r.B.dNwc)}</td></tr>
+        <tr class="total"><td>Implied model input: ΔNWC ÷ Δrevenue</td><td class="num">${r.A ? (r.A.ratio * 100).toFixed(1) + '%' : '—'}</td><td class="num">${r.B && isNum(r.B.ratio) ? (r.B.ratio * 100).toFixed(1) + '%' : '—'}</td></tr></tbody></table></div>
+      <p class="footnote">A: ΔNWC = ratio × (forecast revenue − historical revenue). B: ΔNWC = ratio × forecast revenue − historical NWC. ${r.notes.map(esc).join(' ')}</p>
+      <div class="fcgrid"><label>Approach<select data-t="nwc" data-k="fc.method" data-unit="choice" id="nw-fc-method"><option value="A" ${F.method !== 'B' ? 'selected' : ''}>A. Incremental ratio</option><option value="B" ${F.method === 'B' ? 'selected' : ''}>B. % of revenue</option></select></label>
+        <label>Scenario<select data-t="nwc" data-k="fc.scen" data-unit="choice" id="nw-fc-scen">${SC.map(s => `<option ${(F.scen || cur.active) === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+        <label class="wide">Justification${nwcIn('fc.why', 'text', 'Justification', 'Why this approach and ratio')}</label></div>
+      <p>Forecast input now (${esc(F.scen || cur.active)}): <b>${fmt.pct(cur.inputs.nwc[F.scen || cur.active])}</b>. <button class="btn" data-nwc-fc-apply ${isNum(ratio) ? '' : 'disabled'}>Use ${isNum(ratio) ? (ratio * 100).toFixed(1) + '%' : ''} for ${esc(F.scen || cur.active)}</button> <span class="footnote">Asks before changing anything. The input is investment-positive: a positive % means growth ties up cash and lowers FCFF.</span></p>
+      ${DCFNwc.forecastChecks(m).map(w => `<div class="notice warn">${esc(w.text)}</div>`).join('')}`;
+  }
+
+  // ---- your model's own year 1, to show the sign in action ----
+  function nwcModelFcffHtml() {
+    const { act } = calc(); if (!act || !act.ok) return '<p class="footnote">Complete the forecast inputs to see this with your own year 1.</p>';
+    const y = act.years[0], g = cur.inputs.nwc[cur.active];
+    return `<h4>Your model, ${esc(cur.active)} year 1</h4><table class="fin"><tbody>
+      <tr><td>NOPAT = EBIT × (1 − tax)</td><td class="num">${fmt.mm(y.nopat)}</td></tr><tr><td>+ D&A</td><td class="num">${fmt.mm(y.da)}</td></tr><tr><td>− CapEx</td><td class="num">${fmt.mm(-y.capex)}</td></tr>
+      <tr><td>− ΔNWC = (${nf(y.rev, 0)} − ${nf(y.rev / (1 + y.growth), 0)}) × ${fmt.pct(g)}</td><td class="num">${fmt.mm(-y.dnwc)}</td></tr><tr><td>− Acquisitions</td><td class="num">${fmt.mm(-y.acq)}</td></tr>
+      <tr class="total"><td>FCFF</td><td class="num">${fmt.mm(y.fcff)}</td></tr></tbody></table>
+      <p class="footnote">${isNum(g) && g > 0 ? 'Your ratio is positive, so growth ties up cash and lowers FCFF, as it should for a company that invests in working capital.' : isNum(g) && g < 0 ? 'Your ratio is negative: growth releases cash (suppliers and customers fund it), which raises FCFF. Check that this matches the company\'s history.' : ''}</p>`;
+  }
+
+  // ---- the whole guide (the ? panel for Historical financials → Change in NWC) ----
+  function nwcGuideHtml() {
+    const T = DCFNwcHelp, key = nwcPeriod(), D = nwcData(), cik = companyCik(), nm = cur.inputs.company.name || 'this company';
+    const p = D && key && D.periods[key];
+    const s = key ? nwcSum(key) : null;
+    const filing = p && p.url ? `For ${esc(nm)} ${esc(key)}: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.form)} ${esc(p.accn)}</a>.` : cik ? `<a href="${filingsUrl(cik)}" target="_blank" rel="noopener">${esc(nm)}: 10-K and 10-Q filings on EDGAR</a>.` : `Import the company to get links to its own filings. Example: <a href="${T.AMZN_K.url}" target="_blank" rel="noopener">Amazon 2025 Form 10-K</a>.`;
+    const steps = T.steps({ filing: '' }).map(([a, b], i) => `<li><b>Step ${i + 1}: ${esc(a)}</b><br>${esc(b)}${i === 0 ? `<br>${filing}` : ''}${i === 4 ? `<br>${['Changes in operating assets and liabilities', 'Accounts receivable', 'Inventories', 'Accounts payable', 'Accrued expenses', 'Unearned revenue', 'Deferred revenue'].map(t => termChip(t, cik)).join(' ')}${cik ? '' : ' <span class="footnote">Import the company to make these searches open its own filings.</span>'}` : ''}</li>`).join('');
+    const own = s && s.lines.length ? `<h4>${esc(nm)}, ${esc(key)}</h4><div class="three"><div><span>All reported lines</span><b>${sgn(s.all)}</b></div><div><span>Clearly operating</span><b>${sgn(s.core)}</b></div><div><span>Analyst-adjusted</span><b>${sgn(s.adjusted)}</b><small>${nwcPill(s.status)}</small></div></div><p><button class="btn tiny" data-nwc-open="ws">Open the worksheet</button></p>` : '';
+    const comps = T.COMPONENTS.map(c => `<details class="dsec3" data-aid="nwc-c-${c.id}" ${aidOpen['nwc-c-' + c.id] ? 'open' : ''}><summary>${esc(c.title)}</summary><div>${c.body}</div></details>`).join('');
+    const mist = T.MISTAKES.map(([t, b], i) => `<details class="dsec3" data-aid="nwc-m-${i}" ${aidOpen['nwc-m-' + i] ? 'open' : ''}><summary>${esc(t)}</summary><div><p>${esc(b)}</p></div></details>`).join('');
+    const cv = key ? nwcModelValue(key) : null;
+    const head = `<div class="nw-status"><span>${esc(key || '')} in the model: <b>${sgn(cv)}</b></span>${s ? nwcPill(s.status) : ''}<button class="btn primary tiny" data-nwc-open="ws">Calculate Change in NWC</button></div>`;
+    return `${head}
+      <div class="nsec-open"><h3>1. What is NWC?</h3>${T.what()}</div>
+      <div class="nsec-open"><h3>2. Why do analysts calculate it?</h3>${T.why()}</div>
+      ${nwcSec('comp', '3. Understand each component', comps + `<details class="dsec3" data-aid="nwc-c-signs" ${aidOpen['nwc-c-signs'] ? 'open' : ''}><summary>Why are some numbers negative?</summary><div>${T.signs()}</div></details>`)}
+      ${nwcSec('calc', '4. How to calculate operating NWC', T.calcNwc() + '<h4>Balance-sheet change vs cash flow effect</h4>' + T.convert() + `<details class="dsec3" data-aid="nwc-bsws" ${aidOpen['nwc-bsws'] ? 'open' : ''}><summary>Balance-sheet worksheet: operating NWC at two dates (${esc(key || '')})</summary><div>${nwcBsHtml()}</div></details>`)}
+      ${nwcSec('find', '5. How to find the numbers in SEC filings', `<ol class="nw-steps">${steps}</ol><p class="footnote">Some companies combine these categories, so additional disclosures (the notes on receivables, inventories, accrued expenses and other assets) may be required.</p>`)}
+      ${nwcSec('amzn', '6. Complete worked example', T.amazon() + own)}
+      ${nwcSec('fcff', '7. How it affects free cash flow', T.fcffText() + nwcModelFcffHtml() + T.audit())}
+      ${nwcSec('fc', '8. How analysts forecast future NWC', T.forecastText() + `<h4>Your company's history</h4>${nwcHistoryHtml()}<h4>Forecasting worksheet</h4>${nwcFcHtml()}<p><button class="btn tiny" data-help="nwc">Open the forecast input "Change in NWC % of change in revenue"</button></p>`)}
+      ${nwcSec('ws', '9. Interactive calculation worksheet', `<h4>Calculate Change in NWC from the filing</h4>${nwcWorksheetHtml()}<details class="dsec3" data-aid="nwc-learn" ${aidOpen['nwc-learn'] ? 'open' : ''}><summary>Learning calculator: beginning and ending balances</summary><div>${nwcLearnHtml()}</div></details>`)}
+      ${nwcSec('mist', '10. Common mistakes', mist)}
+      ${nwcSec('notes', '11. My research and calculations' + (hasNotes('hist.dnwc') ? ' ✓' : ''), `<p class="footnote">Saved with this company's model.</p>${notesHtml('hist.dnwc', NWC_NOTES, ['All'])}`)}
+      <div><h3>Sources</h3><ul>${[T.SRC.edgar, T.SRC.damCf, T.SRC.damWc, T.SRC.amzn, T.SRC.sec10k].map(([l, u]) => `<li><a href="${u}" target="_blank" rel="noopener">${esc(l)}</a></li>`).join('')}${cik ? `<li><a href="${filingsUrl(cik)}" target="_blank" rel="noopener">${esc(nm)}: filings on EDGAR</a></li>` : ''}</ul></div>
+      <div><h3>Source and verification</h3>${sourceVerifHtml('hist.dnwc', cur.hist.dnwc[4])}</div>`;
+  }
+  // forecast input "nwc": the link back to the historical worksheet
+  function nwcForecastLinkHtml() {
+    const m = Object.assign({}, cur, { _ttmCol: nwcTtmCol() }), H = DCFNwc.history(m).filter(c => c.key && c.key !== 'TTM');
+    const pc = v => isNum(v) ? (v * 100).toFixed(1) + '%' : '—';
+    return `<div><h3>From your historical NWC worksheet</h3>
+      <p>Historical ratio in the forecast direction = −(selected cash flow effect) ÷ change in revenue. A cash flow effect of −30 on +200 of revenue is +15%: an investment.</p>
+      <div class="aser">${H.map(c => `<span><small>${esc(c.label)}</small>${pc(c.incrSel)}${c.small ? '*' : ''}</span>`).join('')}</div>
+      <div class="formula">Each forecast year: ΔNWC = (revenue − prior revenue) × this input; FCFF = NOPAT + D&A − CapEx − ΔNWC − acquisitions</div>
+      ${DCFNwc.forecastChecks(m).map(w => `<div class="notice warn">${esc(w.text)}</div>`).join('')}
+      <button class="btn tiny" data-nwc-open="fc">Open the NWC history and forecasting worksheet</button></div>`;
+  }
+  function nwcUse(key) {
+    const N = nwcState(), s = nwcSum(key), choice = (N.pick && N.pick[key]) || 'adjusted';
+    const v = { all: s.all, core: s.core, adjusted: s.adjusted, custom: N.custom && N.custom[key] }[choice];
+    if (!isNum(v)) return;
+    const p = nwcPeriods().find(x => x.key === key); if (!p) return;
+    const now = nwcModelValue(key);
+    if (s.status !== 'complete' && choice !== 'custom' && !confirm(`${key} still has unresolved mixed or uncertain lines. Use ${Math.round(v).toLocaleString('en-US')} anyway? It will be marked as selected with unresolved lines.`)) return;
+    if (isNum(now) && Math.abs(now - v) > 1e-9 && !confirm(`Replace the ${key} Change in NWC in the model, ${Math.round(now).toLocaleString('en-US')}, with ${Math.round(v).toLocaleString('en-US')}?`)) return;
+    if (p.i === 't') { cur.ttmOverride = cur.ttmOverride || {}; DCFModel.logChange(cur, 'TTM Change in NWC (cash flow sign)', null, now, v); cur.ttmOverride.dnwc = v; const C = DCFModel.ttmCalc(cur); cur.ttmOverride.baseEnd = C && C.end ? C.end : null; }
+    else { DCFModel.logChange(cur, 'hist.dnwc', key, now, v); cur.hist.dnwc[p.i] = v; }
+    N.selected[key] = { v, which: choice, at: new Date().toISOString(), status: s.status, all: s.all, core: s.core, adjusted: s.adjusted };
+    const src = cur.sources['hist.dnwc'] || {}; const line = `${key}: ${Math.round(v).toLocaleString('en-US')} selected in the NWC worksheet (${choice}${s.status === 'complete' ? '' : ', unresolved lines'}).`;
+    src.notes = [line].concat(String(src.notes || '').split('\n').filter(x => x && !x.startsWith(key + ':'))).join('\n'); if (!src.name) src.name = 'Change in NWC worksheet'; cur.sources['hist.dnwc'] = src;
+    persist(); render(); toast(`${key} Change in NWC set to ${Math.round(v).toLocaleString('en-US')}`);
+  }
+  function nwcApplyForecast() {
+    const N = nwcState(), F = N.fc, sc = F.scen || cur.active;
+    const m = Object.assign({}, cur, { _ttmCol: nwcTtmCol() }), hist = DCFNwc.history(m).filter(c => c.key && c.key !== 'TTM'), lat = hist[0] || {};
+    const { act } = calc(); const dd = { rev0: lat.rev, rev1: act && act.ok ? act.years[0].rev : null, nwc0: lat.nwc, pctRev: lat.pctRev, incr: (() => { const v = hist.slice(0, 3).map(c => c.incrSel).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; })() };
+    const st = {}; ['rev0', 'rev1', 'nwc0', 'pctRev', 'incr'].forEach(k => { st[k] = isNum(F[k]) ? F[k] : dd[k]; });
+    const r = DCFNwc.forecast(st), c = F.method === 'B' ? r.B : r.A, v = c && c.ratio;
+    if (!isNum(v)) return;
+    const now = cur.inputs.nwc[sc];
+    if (!confirm(`Set "Change in NWC % of change in revenue" for ${sc} to ${(v * 100).toFixed(1)}%${isNum(now) ? ` (now ${(now * 100).toFixed(1)}%)` : ''}? Positive means growth ties up cash and lowers FCFF.`)) return;
+    DCFModel.logChange(cur, 'nwc', sc, now, v); cur.inputs.nwc[sc] = v;
+    cur.notes = cur.notes || {}; const nn = cur.notes.nwc = cur.notes.nwc || {}; const x = nn[sc] = nn[sc] || {};
+    x.calc = `${F.method === 'B' ? 'NWC % of revenue' : 'Incremental ratio'} from the NWC forecasting worksheet: ${(v * 100).toFixed(1)}%.`; if (F.why) x.why = F.why; x.saved = new Date().toISOString();
+    persist(); render(); toast(`${sc} Change in NWC % of change in revenue set to ${(v * 100).toFixed(1)}%`);
+  }
+  // keep the drawer's scroll position and focus when it is redrawn after an input changes
+  function refreshDrawer() {
+    const root = $('#drawer-root'), a = root && root.querySelector('.drawer'); if (!a) return;
+    const top = a.scrollTop, act = document.activeElement && document.activeElement.id;
+    renderDrawer(true);
+    const b = root.querySelector('.drawer'); if (b) b.scrollTop = top;
+    if (act) { const el = document.getElementById(act); if (el && b && b.contains(el)) el.focus({ preventScroll: true }); }
+  }
+
   // ---------- help drawer ----------
-  function renderDrawer() {
+  function renderDrawer(noFocus) {
     const root = $('#drawer-root');
     root.dataset.owner = 'dcf';
     if (!drawerKey) { root.innerHTML = ''; return; }
@@ -8998,7 +9948,7 @@ const CompsApp = (() => {
     if (!f) { drawerKey = null; root.innerHTML = ''; return; }
     const hh = DCFHelp.H[drawerKey] || {}, isFc = f.kind === 'forecast' && DCFHelp.G[drawerKey];
     const curVal = isHist ? cur.hist[drawerKey.slice(5)][4] : drawerKey === 'dil.proxy' ? (cur.dilution.proxy || {}).v : drawerKey.startsWith('company.') ? cur.inputs.company[drawerKey.split('.')[1]] : f.tri ? null : cur.inputs[drawerKey];
-    const cik = cur.meta && cur.meta.cik;
+    const cik = companyCik();
     const gs = GUIDE_SECTIONS[GUIDE_IDX[f.group]];
     const src = cur.sources[drawerKey] || {};
     const vids = cur.videos || {};
@@ -9006,11 +9956,11 @@ const CompsApp = (() => {
     const links = (LINKS_FOR[f.group] || []).map(k => `<li><a href="${LINKS[k][1]}" target="_blank" rel="noopener">${LINKS[k][0]}</a></li>`).join('');
     const changes = cur.log.filter(l => l.field === drawerKey).slice(0, 5);
     const types = ['', '10-K annual report', '10-Q quarterly report', '8-K / earnings release', 'Investor presentation', 'Proxy statement (DEF 14A)', 'Market data provider', 'Analyst / consensus estimate', 'Academic data (e.g. Damodaran)', 'Own judgment', 'Other'];
-    root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title">
+    root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer ${drawerKey === 'hist.dnwc' ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="dr-title">
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.B[drawerKey] ? `<div class="wsecs">${bSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
+      ${drawerKey === 'hist.dnwc' ? nwcGuideHtml() : DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.B[drawerKey] ? `<div class="wsecs">${bSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
@@ -9038,7 +9988,7 @@ const CompsApp = (() => {
       <div class="form"><h3>Teacher's video (optional)</h3><label>Replace the video link for this field in this model<input type="url" id="video-url" value="${esc(custom || '')}" placeholder="https://www.youtube.com/watch?v=…"></label></div>
       ${changes.length ? `<div><h3>Recent changes</h3><ul class="footnote" style="padding-left:18px">${changes.map(l => `<li>${new Date(l.at).toLocaleString()}${l.s ? ' · ' + l.s : ''}: ${esc(l.from == null ? '—' : l.from)} → ${esc(l.to == null ? '—' : l.to)}</li>`).join('')}</ul></div>` : ''}
     </aside>`;
-    const first = root.querySelector('.close'); if (first) first.focus();
+    const first = root.querySelector('.close'); if (first && !noFocus) first.focus();
   }
 
   // ---------- render ----------
@@ -9055,6 +10005,7 @@ const CompsApp = (() => {
     const target = pendingFocus || active;
     pendingFocus = null;
     if (target) { const el = document.getElementById(target); if (el) { el.focus({ preventScroll: false }); if (el.scrollIntoView && target !== active) el.scrollIntoView({ block: 'center' }); } }
+    if (drawerKey === 'hist.dnwc' || drawerKey === 'nwc') refreshDrawer();
   }
 
   // ---------- events ----------
@@ -9097,6 +10048,7 @@ const CompsApp = (() => {
       O.baseEnd = C && C.end ? C.end : null;
       if (!DCFModel.ttmOverrides(O).length && !O.end) delete cur.ttmOverride;
     }
+    else if (t === 'nwc') { const parts = el.dataset.k.split('.'); let o = nwcState(); for (let i = 0; i < parts.length - 1; i++) { if (o[parts[i]] == null) o[parts[i]] = /^\d+$/.test(parts[i + 1]) ? [] : {}; o = o[parts[i]]; } const last = parts[parts.length - 1]; if (v === null) delete o[last]; else o[last] = v; if (parts[0] === 'period') {} persist(); setTimeout(render, 0); return; }
     else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'bt') { const parts = el.dataset.k.split('.'); let o = bt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tv') { const parts = el.dataset.k.split('.'); let o = tvState(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
@@ -9113,6 +10065,7 @@ const CompsApp = (() => {
     if (compsOn()) return;
     const el = e.target;
     if (el.dataset && el.dataset.t === 'dilchk') { const parts = el.dataset.k.split('.'); let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; const last = parts[parts.length - 1]; DCFModel.logChange(cur, 'dilution.' + el.dataset.k, null, !!o[last], el.checked); o[last] = el.checked; persist(); render(); return; }
+    if (el.dataset && el.dataset.t === 'nwcchk') { const parts = el.dataset.k.split('.'); let o = nwcState(); for (let i = 0; i < parts.length - 1; i++) { if (o[parts[i]] == null) o[parts[i]] = /^\d+$/.test(parts[i + 1]) ? [] : {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = el.checked; persist(); render(); return; }
     if (el.dataset && el.dataset.t === 'note') { const k = el.dataset.k, sc = el.dataset.s, f = el.dataset.f; cur.notes = cur.notes || {}; const N = cur.notes[k] = cur.notes[k] || {}; const nn = N[sc] = N[sc] || {}; nn[f] = el.value; nn.saved = new Date().toISOString(); persist(); render(); return; }
     if (el.dataset && el.dataset.pendId) { pendSel = pendSel || {}; pendSel[el.dataset.pendId] = el.checked; if (!Object.keys(pendSel).some(k => pendSel[k] && cur.pending.items.find(p => p.id === k && p.kind === 'override'))) pendConfirm = false; render(); return; }
     if (el.id === 'pend-confirm') { pendConfirm = el.checked; render(); return; }
@@ -9215,6 +10168,14 @@ const CompsApp = (() => {
       return;
     }
     if (b.matches('[data-close]')) { drawerKey = null; renderDrawer(); return; }
+    if (b.dataset.nwcPeriod) { nwcState().period = b.dataset.nwcPeriod; persist(); render(); return; }
+    if (b.hasAttribute('data-nwc-add')) { const N = nwcState(), k = nwcPeriod(); N.adj[k] = N.adj[k] || []; N.adj[k].push({ label: null, amt: null, inc: true, per: k }); persist(); render(); return; }
+    if (b.dataset.nwcDel !== undefined) { const N = nwcState(), k = nwcPeriod(); if (N.adj[k]) { N.adj[k].splice(+b.dataset.nwcDel, 1); persist(); render(); } return; }
+    if (b.dataset.nwcClear) { if (!confirm(`Reset your classifications, inclusions and reasons for ${b.dataset.nwcClear}? Your adjustments and the value in the model are kept.`)) return; delete nwcState().edits[b.dataset.nwcClear]; persist(); render(); return; }
+    if (b.dataset.nwcUse) { nwcUse(b.dataset.nwcUse); return; }
+    if (b.hasAttribute('data-nwc-learn-reset')) { nwcState().learn = DCFNwc.LEARN_DEFAULT(); persist(); render(); return; }
+    if (b.hasAttribute('data-nwc-fc-apply')) { nwcApplyForecast(); return; }
+    if (b.dataset.nwcOpen) { const x = b.dataset.nwcOpen; aidOpen['nwc-' + x] = true; if (drawerKey !== 'hist.dnwc') { drawerKey = 'hist.dnwc'; renderDrawer(); } else refreshDrawer(); const el = document.getElementById('nwc-' + x); if (el) { el.open = true; el.scrollIntoView({ block: 'start' }); } return; }
     if (b.dataset.help) { drawerKey = b.dataset.help; renderDrawer(); return; }
     if (b.dataset.act) { cur.active = b.dataset.act; persist(); render(); return; }
     if (b.id === 'menu-btn') { $('#rail').classList.toggle('open'); return; }
