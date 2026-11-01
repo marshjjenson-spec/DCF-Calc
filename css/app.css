@@ -685,3 +685,38 @@ table.cx-sens td.base { background: var(--accent-soft); font-weight: 600; }
   .cx-import { grid-template-columns: 1fr; }
 }
 table.fin td button, table.fin td .btn { font-family: var(--font-ui); }
+
+/* ===== Stock Price Simulator ===== */
+/* scenario identity: first three slots of the validated categorical palette (Base blue, Bear orange, Bull aqua), each direct-labelled */
+:root { --sim-bear: #eb6834; --sim-base: #2a78d6; --sim-bull: #1baf7a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sim-bear: #d95926; --sim-base: #3987e5; --sim-bull: #199e70; } }
+:root[data-theme="dark"] { --sim-bear: #d95926; --sim-base: #3987e5; --sim-bull: #199e70; }
+.sim-page .panel + .panel, .sim-page .grid2 + .panel, .sim-page .panel + .grid2, .sim-page .notice + .panel { margin-top: 16px; }
+.sim-disc { margin: 10px 0 14px; max-width: 110ch; }
+.sim-chart .sim-grid { stroke: var(--line); stroke-width: 1; }
+.sim-chart .sim-line { stroke-width: 2; stroke-linejoin: round; }
+.sim-chart .sim-dot { stroke: var(--surface); stroke-width: 2; }
+.sim-chart .sim-lab { font: 500 11.5px var(--font-num); fill: var(--ink); }
+.sim-chart .sim-ref { stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.sim-chart .sim-reft { font-size: 11px; fill: var(--muted); }
+.sim-line.sim-bear { stroke: var(--sim-bear); } .sim-dot.sim-bear { fill: var(--sim-bear); }
+.sim-line.sim-base { stroke: var(--sim-base); } .sim-dot.sim-base { fill: var(--sim-base); }
+.sim-line.sim-bull { stroke: var(--sim-bull); } .sim-dot.sim-bull { fill: var(--sim-bull); }
+.sim-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+.legend .sw.line.sim-bear { background: var(--sim-bear); } .legend .sw.line.sim-base { background: var(--sim-base); } .legend .sw.line.sim-bull { background: var(--sim-bull); }
+.legend .sw.line.sim-refsw { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px); }
+.sw-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.sw-dot.sim-bear { background: var(--sim-bear); } .sw-dot.sim-base { background: var(--sim-base); } .sw-dot.sim-bull { background: var(--sim-bull); }
+.sim-a input { width: 6.5em; }
+.sim-a .unit { color: var(--faint); font-size: 11px; padding-right: 4px; }
+.sim-inherit input::placeholder { color: var(--faint); font-style: italic; }
+table.fin.sim-at td { vertical-align: top; }
+table.fin.sim-at td .tag { margin-left: 4px; }
+table.fin.sim-proj td:first-child { min-width: 220px; }
+.sim-meth { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.sim-sctl { margin-bottom: 6px; }
+.sim-sctl .cx-in input { width: 5.5em; }
+.sim-pending { border-left: 3px solid var(--imp); }
+.formula b { font-family: var(--font-num); font-weight: 500; }
+@media (max-width: 720px) { .sim-meth { grid-template-columns: 1fr; } .sim-a input { width: 5em; } }
+@media (max-width: 560px) { .model-switch { flex: 1 1 100%; max-width: 100%; } .model-switch a { flex: 1 1 0; min-width: 0; white-space: normal; text-align: center; line-height: 1.2; } }
