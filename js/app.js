@@ -585,17 +585,45 @@
     const lab = ['Fiscal year', 'Current year to date', 'Prior year to date'], op = ['', '+', '−'];
     return `<table class="fin parts"><thead><tr><th></th><th>Part</th><th>$ millions</th><th>Period</th><th>Filing</th></tr></thead><tbody>${t.parts.map((p, i) => `<tr><td>${t.parts.length === 1 ? '' : op[i]}</td><td>${lab[i]}</td><td class="num">${nf(p.value, 0)}</td><td>${esc(p.periodText || (p.end ? 'ended ' + p.end : '—'))}</td><td>${p.accn ? `${esc(p.form)} <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.accn)}</a><div class="footnote">filed ${esc(p.filed)}</div>` : p.cat === 'manual' ? 'Entered by you' + (p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">source</a>` : '') : '—'}</td></tr>`).join('')}<tr class="total"><td>=</td><td>TTM</td><td class="num"><b>${nf(t.value, 0)}</b></td><td>${esc(t.periodText || '')}</td><td>Calculated</td></tr></tbody></table>`;
   }
-  function ttmDrawerHtml(k) {
+  function ttmGuideHtml() {
+    const TC = DCFAnalysis.ttmColumn(cur);
+    return `<div><h3>Historical financials</h3><h2 id="dr-title">How to fill in the TTM column</h2></div>
+      <div class="formula">TTM = latest fiscal year + current year to date − same period of the prior year</div>
+      <p>TTM (trailing twelve months) is the most recent four quarters added together. Companies do not report it, so you build it from two filings.</p>
+      <ol><li><b>Fiscal year</b>: from the latest 10-K, the full-year figure (the same number as the newest fiscal-year column).</li>
+      <li><b>Year to date</b>: from the latest 10-Q, the "Three/Six/Nine Months Ended" column for this year. Use the year-to-date column, not the quarter alone. Cash flow statements in a 10-Q are already year to date.</li>
+      <li><b>Prior year to date</b>: the same 10-Q, the matching column for a year earlier.</li>
+      <li>Type <b>fiscal year + year to date − prior year to date</b> in the TTM box, in $ millions, with the same signs as the fiscal-year columns (CapEx and a rise in working capital negative).</li>
+      <li>Set the date under "TTM" to the last day of the latest 10-Q quarter.</li></ol>
+      <p><b>Worked example (Amazon, real filings):</b> revenue FY2025 716,924 (10-K, accession 0001018724-26-000004) + nine months to 30 Sep 2026 584,069 − nine months to 30 Sep 2025 503,538 (10-Q, accession 0001018724-26-000040) = <b>797,455</b> $mm TTM to 2026-09-30.</p>
+      <p><b>If no 10-Q has been filed since the fiscal year ended</b>, TTM equals the fiscal year: type the fiscal-year figure.</p>
+      <dl><div><dt>Defaults</dt><dd>When the SEC company facts file is loaded, every box is filled in with the calculated figure (cyan). Typing over a box uses your figure (amber) and is recorded in the change log. Clearing a box goes back to the calculated figure.</dd></div>
+      <div><dt>Where it is used</dt><dd>The TTM growth, margins and ratios on this page and on Forecast assumptions, and the forecast itself when you pick TTM as the forecast base.</dd></div>
+      <div><dt>Prefer three figures per line?</dt><dd>Use "Build TTM by hand" below the table: type the three figures and it does the sum, checks the dates and keeps the filing links.</dd></div></dl>
+      ${TC && TC.overrides.length ? '<button class="btn" data-ttmo-clear>Clear my typed TTM figures</button>' : ''}
+      <ul class="footnote"><li>Common mistakes: adding the latest quarter only instead of year to date; using the 10-Q quarter column for the cash flow statement (it only shows year to date); mixing a restated prior period with an original one; leaving out the minus sign on CapEx.</li></ul>
+      <p class="footnote">Sources: <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener">SEC EDGAR full-text search</a> · <a href="https://www.investor.gov/introduction-investing/investing-basics/glossary/form-10-q" target="_blank" rel="noopener">Investor.gov: Form 10-Q</a></p>`;
+  }
+  function ttmDrawerHtml(key) {
+    if (key === 'guide') return ttmGuideHtml();
+    const k = key === 'opex' ? 'ebitda' : key; // operating expenses are shown from TTM EBITDA (GP − EBITDA)
     const T = DCFModel.ttmOf(cur), t = T && T.items && T.items[k];
     const lab = (TTM_ITEMS.find(x => x[0] === k) || [k, HBY[k] ? HBY[k].label : k])[1];
     let body;
-    if (!t) body = '<div class="notice">Not available for TTM. Either the company does not tag this line in a way that matches its fiscal-year figure, or no quarterly filing has it. It is left blank rather than estimated.</div>';
-    else body = `<p>${esc(t.method || '')}</p>${partsHtml(t)}
+    if (!t) body = T ? '<div class="notice">Not available for TTM. Either the company does not tag this line in a way that matches its fiscal-year figure, or no quarterly filing has it. It is left blank rather than estimated. You can type it yourself.</div>' : '<div class="notice">No TTM is loaded yet. Load the SEC company facts file, or type the figure yourself.</div>';
+    else body = `<p>${esc(t.method || '')}</p>${partsHtml(t)}${t.override ? (() => { const Tc = DCFModel.ttmCalc(cur), tc = Tc && Tc.items && Tc.items[k]; return tc && tc.parts ? `<p class="footnote">The calculated figure you replaced:</p>${partsHtml(tc)}` : ''; })() : ''}
       ${t.deps ? `<p class="footnote">Built from the TTM figures for ${t.deps.map(d => esc((TTM_ITEMS.find(x => x[0] === d) || [d, d])[1])).join(' and ')}, each calculated the same way.</p>` : ''}
       ${t.note ? `<p class="footnote">${esc(t.note)}</p>` : ''}
-      <dl><div><dt>Units</dt><dd>$ millions. SEC data is in dollars and divided by 1,000,000.</dd></div><div><dt>Category</dt><dd>${catBadge('calc')} TTM is calculated, not a figure the company reports.</dd></div>${t.mismatch ? '<div><dt>Problem</dt><dd>This line ends on a different date from the others, so it was left out.</dd></div>' : ''}</dl>`;
-    return `<div><h3>Trailing twelve months</h3><h2 id="dr-title">${esc(lab)}</h2></div>
-      <div class="formula">TTM = latest fiscal year + current year to date − same period of the prior year</div>${body}
+      <dl><div><dt>Units</dt><dd>$ millions. SEC data is in dollars and divided by 1,000,000.</dd></div><div><dt>Category</dt><dd>${t.override ? catBadge(isNum(t.calcValue) ? 'override' : 'manual') + ' Typed by you.' : catBadge('calc') + ' TTM is calculated, not a figure the company reports.'}</dd></div>${t.mismatch ? '<div><dt>Problem</dt><dd>This line ends on a different date from the others, so it was left out.</dd></div>' : ''}</dl>`;
+    const HK = HBY[key], hh = HK ? (DCFHelp.H['hist.' + key] || {}) : null, w = hh && hh.where;
+    const O = cur.ttmOverride || {}, typed = HK && isNum(O[key]);
+    const own = HK ? `<h3>Type your own TTM ${esc(HK.label.toLowerCase())}</h3>
+      <p>${typed ? `You typed <b>${fmt.mm(O[key])}</b>. ` : ''}Type it straight into the shaded TTM box on Historical financials, in $ millions${key === 'capex' || key === 'dnwc' ? ', negative for cash going out, as in the fiscal-year columns' : ''}. ${typed ? 'Clear the box to go back to the calculated figure.' : 'Your figure replaces the calculated one only for this line.'}</p>
+      ${w ? `<dl><div><dt>Fiscal year</dt><dd>10-K, ${esc(w.statement || '')}${w.heading ? ': ' + esc(w.heading) : ''}</dd></div><div><dt>Year to date and prior year to date</dt><dd>Latest 10-Q, same statement, the "Three/Six/Nine Months Ended" columns for this year and last year</dd></div>${w.find && w.find.length ? `<div><dt>Search the filing for</dt><dd>${w.find.map(x => `<a href="https://www.sec.gov/edgar/search/#/q=${encodeURIComponent('"' + x + '"')}${cur.meta && cur.meta.cik ? '&ciks=' + String(cur.meta.cik).padStart(10, '0') : ''}" target="_blank" rel="noopener">${esc(x)}</a>`).join(' · ')}</dd></div>` : ''}</dl>` : ''}
+      ${hh.calc ? `<p class="footnote">${esc(hh.calc)}</p>` : ''}${key === 'opex' ? '<p class="footnote">Operating expenses here exclude D&A: TTM gross profit − TTM EBITDA, where EBITDA = operating income + D&A.</p>' : ''}
+      <button class="linkbtn" data-ttm="guide">Step-by-step guide to the TTM column</button>` : '';
+    return `<div><h3>Trailing twelve months</h3><h2 id="dr-title">${esc(HK && key !== k ? HK.label : lab)}</h2></div>
+      <div class="formula">TTM = latest fiscal year + current year to date − same period of the prior year</div>${body}${own}
       <p class="footnote">Why: the fiscal year can be up to a year old. Adding the months since and removing the same months a year earlier gives the most recent twelve months without counting any month twice.</p>`;
   }
   function ttmCompareHtml() {
@@ -1848,7 +1876,13 @@
       const cellImp = impv && isNum(v) && impv.v[i] === v;
       return `<td class="hist"><input type="text" inputmode="decimal" data-t="hist" data-k="${key}" data-i="${i}" id="${id}" class="${err ? 'err' : ''} ${cellImp ? 'imp' : (pv === 'overridden' && impv ? 'ovr' : '')}" title="${cellImp ? esc(srcTitle('hist.' + key)) : ''}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="Enter" aria-label="${esc(HBY[key].label)} ${Y[i] || ''}">${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
     };
-    const tcell = (key) => { const v = TC ? TC.v[key] : null; return `<td class="hist ttm">${TC ? `<button class="ttmv" data-ttm="${key === 'opex' ? 'ebitda' : key}" title="How this TTM figure is built">${isNum(v) ? fmt.mm(v) : '<span class="na">Not available</span>'}</button>` : '<span class="na">—</span>'}</td>`; };
+    const TO = cur.ttmOverride || {};
+    const tcell = (key) => {
+      const id = `ht-${key}`, err = parseErrors[id], v = TC ? TC.v[key] : (isNum(TO[key]) ? TO[key] : null), cv = TC ? TC.calc[key] : null, typed = isNum(TO[key]);
+      const cls = err ? 'err' : typed ? 'ovr' : isNum(cv) ? 'imp' : '';
+      const tip = typed ? `You typed this TTM figure.${isNum(cv) ? ' Calculated from the filings: ' + fmt.mm(cv).replace(/<[^>]+>/g, '') + '.' : ''} Clear the box to go back to the calculated figure.` : isNum(cv) ? 'Calculated: fiscal year + year to date − prior year to date. Type over it to use your own figure.' : 'Type the TTM figure: fiscal year (10-K) + year to date (latest 10-Q) − same period a year earlier.';
+      return `<td class="hist ttm"><div class="ttmcell"><input type="text" inputmode="decimal" data-t="ttmo" data-k="${key}" id="${id}" class="${cls}" title="${esc(tip)}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="TTM" aria-label="${esc(HBY[key].label)} TTM"><button class="ttmi" data-ttm="${key}" title="Where to find this TTM figure and how it is built" aria-label="How to fill in TTM ${esc(HBY[key].label)}">i</button></div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
+    };
     const row = (key) => `<tr><td><div class="name" style="display:flex;gap:6px;align-items:center"><button class="help" data-help="hist.${key}" aria-label="How to fill in ${esc(HBY[key].label)}">?</button>${esc(HBY[key].label)}</div></td>${tcell(key)}${ORD.map(i => cell(key, i)).join('')}</tr>`;
     // column accessors: 't' = TTM, numbers = stored index
     const n = (k, i) => i === 't' ? (TC && isNum(TC.v[k]) ? TC.v[k] : null) : (isNum(H[k][i]) ? H[k][i] : null);
@@ -1867,15 +1901,18 @@
     const COLS = ['t', ...ORD];
     const comp = (label, fn, cls = 'sub', f = fmt.mm) => `<tr class="${cls}"><td>${label}</td>${COLS.map(i => `<td class="hist ${i === 't' ? 'ttm' : ''}">${f(fn(i))}</td>`).join('')}</tr>`;
     const yrs = ORD.map(i => `<th class="hist"><input type="text" inputmode="numeric" data-t="year" data-i="${i}" id="y-${i}" value="${esc(Y[i] == null ? '' : Y[i])}" placeholder="FY" style="width:64px" aria-label="Fiscal year, column ${5 - i}"></th>`).join('');
-    const ttmHead = `<th class="hist ttm"><div class="ttmh">TTM${TC ? `<small>${TC.isFY ? '= latest FY' : 'to ' + esc(TC.end)}</small>` : '<small>not loaded</small>'}</div></th>`;
+    const ttmEnd = TO.end || (TC && TC.end) || '';
+    const ttmHead = `<th class="hist ttm"><div class="ttmh"><span>TTM <button class="help" data-ttm="guide" aria-label="How to fill in the TTM column">?</button></span>${TC && TC.isFY && !TO.end ? '<small>= latest FY</small>' : '<small>twelve months to</small>'}<input type="date" data-t="ttmo" data-k="end" data-unit="date" id="ht-end" value="${esc(ttmEnd)}" aria-label="TTM period end date" title="The last day of the twelve months: the end of the latest 10-Q quarter"></div></th>`;
     const avg = (fn) => { const v = [0, 1, 2, 3, 4].map(fn).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
     const cagr = all(n('rev', 0), n('rev', 4)) && H.rev[0] > 0 ? Math.pow(H.rev[4] / H.rev[0], 1 / 4) - 1 : null;
     const hs = Object.entries(cur.sources).filter(([k, x]) => k.startsWith('hist.') && x.auto);
     const impNote = hs.length ? `<div class="notice info"><b>Imported from ${esc(hs[0][1].provider)}</b> (${esc(hs[0][1].period)}), retrieved ${new Date(hs[0][1].retrieved).toLocaleString()}. Cyan cells are imported; amber cells are ones you changed. ${HIST_FIELDS.filter(h => !cur.sources['hist.' + h.key]).length ? 'Still to enter by hand: ' + HIST_FIELDS.filter(h => !cur.sources['hist.' + h.key]).map(h => esc(h.label)).join(', ') + '.' : ''} Click ? on a row to see its exact source.</div>` : `<div class="notice">Search a company in the top bar to import five years of statements automatically, or type them in from the 10-K.</div>`;
     const latest = isNum(Y[4]) ? Y[4] : null;
     return `<div><h1>Historical financials</h1><p class="lead">Reported figures in $ millions, newest first: trailing twelve months, then the last five fiscal years. These are your evidence for the forecast. ${cur.mode === 'corrected' ? 'The forecast grows from the base you choose on Forecast assumptions (latest fiscal year or TTM).' : ''}</p></div>${impNote}
-    <section class="panel"><div class="panel-head"><h2>Income statement and free cash flow</h2><span class="footnote">Type the fiscal year in each column header to relabel it. Cash outflows (CapEx, a rise in NWC) are negative, as on the cash flow statement. The shaded TTM column is calculated; click a figure to see how.</span></div>
+    <section class="panel"><div class="panel-head"><h2>Income statement and free cash flow</h2><span class="footnote">Type the fiscal year in each column header to relabel it. Cash outflows (CapEx, a rise in NWC) are negative, as on the cash flow statement. The shaded TTM column is filled in from the SEC filings when they are loaded; type in any TTM box to use your own figure (amber), or clear it to go back. Click i for where to find each figure.</span></div>
     <div class="btns hbar">${latest ? `<button class="btn" data-hist-roll title="Moves every figure one column older, drops FY${Y[0] || ''}, and adds an empty FY${latest + 1} column">Add FY${latest + 1} (shift the years)</button>` : ''}<button class="btn" data-scroll-to="ttm-build">${cur.ttm ? 'Check or replace TTM by hand' : 'Build TTM by hand'}</button></div>
+    ${TC && TC.stale ? `<div class="notice warn">Your typed TTM figures were entered for the twelve months to ${esc(TC.stale.typedFor)}, but the filings now give TTM to ${esc(TC.stale.now)}. Check them against the newer 10-Q, or <button class="linkbtn" data-ttmo-clear>clear your typed TTM figures</button>.</div>` : ''}
+    ${!TC ? '<div class="notice">No TTM is loaded yet. Type the trailing-twelve-month figures straight into the shaded TTM column (fiscal year + year to date − the same period a year earlier), or use "Build TTM by hand" below to have each line calculated from the three figures.</div>' : TC.overrides.length ? `<div class="notice info">You typed ${TC.overrides.length} TTM figure${TC.overrides.length > 1 ? 's' : ''} (amber). ${TC.hasCalc ? 'The other TTM figures are calculated from the filings.' : ''} <button class="linkbtn" data-ttmo-clear>Clear my typed TTM figures</button></div>` : ''}
     <div class="tbl-wrap"><table class="fin hfin"><thead><tr><th>$ millions, reported</th>${ttmHead}${yrs}</tr></thead><tbody>
       ${row('rev')}${comp('YoY growth', yoy, 'sub', v => fmt.pct(isNum(v) ? v : null))}
       ${row('gp')}${comp('Gross margin', i => div(n('gp', i), n('rev', i)), 'sub', fmt.pct)}
@@ -1884,7 +1921,7 @@
       ${row('interest')}${comp('Pre-tax income', ebt)}${comp(`Taxes, estimated at the Base tax rate (${isNum(t) ? (t * 100).toFixed(1) + '%' : 'not set'}), not reported`, taxes, 'sub')}${comp('Net income (estimated)', ni, 'total')}
       ${row('sbc')}${row('dnwc')}${comp('Operating cash flow (estimated)', ocf, 'total')}${row('capex')}${comp('Free cash flow (estimated)', fcf, 'key')}${comp('FCF margin', i => div(fcf(i), n('rev', i)), 'sub', fmt.pct)}
     </tbody></table></div>
-    ${TC ? `<p class="footnote">TTM ${TC.isFY ? 'equals the latest fiscal year: no 10-Q has been filed since it ended.' : `to ${esc(TC.end)} = fiscal year + year to date − the same period a year earlier, for each line. ${TC.manual ? 'Built from figures you typed.' : 'Calculated from the SEC filings.'}`} Taxes, net income and cash flow in this table use the same estimate as the fiscal years; the reported TTM figures are in the comparison below.</p>` : ''}</section>
+    ${TC ? `<p class="footnote">TTM ${TC.isFY ? 'equals the latest fiscal year: no 10-Q has been filed since it ended.' : `to ${esc(TC.end)} = fiscal year + year to date − the same period a year earlier, for each line. ${TC.typedOnly ? 'Typed by you.' : TC.manual ? 'Built from figures you typed.' : 'Calculated from the SEC filings.'}${TC.overrides.length && !TC.typedOnly ? ' Amber figures are ones you typed over.' : ''}`} Taxes, net income and cash flow in this table use the same estimate as the fiscal years; the reported TTM figures are in the comparison below.</p>` : ''}</section>
     ${ttmCompareHtml()}
     ${ttmBuilderHtml()}
     <section class="panel"><h2>Ratios to anchor your assumptions</h2><div class="stats">
@@ -2234,6 +2271,14 @@
       const last = parts[parts.length - 1]; from = o[last]; o[last] = v;
       cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
     }
+    else if (t === 'ttmo') {
+      const k = el.dataset.k; cur.ttmOverride = cur.ttmOverride || {}; const O = cur.ttmOverride;
+      const C = DCFModel.ttmCalc(cur), cv = DCFAnalysis.ttmColumn(cur), calcV = cv && cv.calc ? cv.calc[k] : null;
+      field = k === 'end' ? 'TTM period end' : 'TTM ' + (HBY[k] ? HBY[k].label : k); from = O[k];
+      if (v === null || (k !== 'end' && isNum(calcV) && Math.abs(v - calcV) < 1e-9) || (k === 'end' && C && v === C.end)) delete O[k]; else O[k] = v;
+      O.baseEnd = C && C.end ? C.end : null;
+      if (!DCFModel.ttmOverrides(O).length && !O.end) delete cur.ttmOverride;
+    }
     else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'bt') { const parts = el.dataset.k.split('.'); let o = bt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tv') { const parts = el.dataset.k.split('.'); let o = tvState(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
@@ -2312,6 +2357,7 @@
     if (b.dataset.pendDismiss !== undefined) { const ids = cur.pending ? cur.pending.items.map(p => p.id) : []; DCFModel.logChange(cur, 'import review', null, null, `kept current values for ${ids.length} field${ids.length === 1 ? '' : 's'}`); DCFData.dismissPending(cur, ids); pendSel = null; pendConfirm = false; persist(); render(); toast('Kept your current values'); return; }
     if (b.dataset.flagsDismiss !== undefined) { cur.importFlags = []; persist(); render(); return; }
     if (b.dataset.ttm) { drawerKey = 'ttm.' + b.dataset.ttm; renderDrawer(); return; }
+    if (b.hasAttribute('data-ttmo-clear')) { if (!confirm('Clear the TTM figures you typed? The calculated TTM figures come back.')) return; DCFModel.logChange(cur, 'TTM typed figures', null, DCFModel.ttmOverrides(cur.ttmOverride).length + ' typed', 'cleared'); delete cur.ttmOverride; persist(); if (drawerKey && drawerKey.startsWith('ttm.')) renderDrawer(); render(); toast('Your typed TTM figures were cleared'); return; }
     if (b.dataset.baseSet) { const m = b.dataset.baseSet; cur.base = cur.base || { mode: 'fy' }; const before = DCFModel.baseInfo(cur), from = cur.base.mode; cur.base.mode = m; const after = DCFModel.baseInfo(cur); DCFModel.logChange(cur, 'forecast base', null, `${from} · ${before.label} · ${isNum(before.rev) ? Math.round(before.rev) : '—'}`, `${m} · ${after.label} · ${isNum(after.rev) ? Math.round(after.rev) : '—'}`); persist(); render(); toast(`Forecast base is now ${after.label}. Base revenue ${nf(before.rev)} → ${nf(after.rev)} $mm. The change is in the log.`); return; }
     if (b.dataset.dilFill) { const SD = cur.shareData || {}, r = SD[b.dataset.dilFill]; if (!r) return; const D = cur.dilution; D.proxy = D.proxy || {}; const from = D.proxy.v; D.proxy.v = r.value; D.proxy.period = r.periodText || null; DCFModel.logChange(cur, 'dilution.proxy.v', null, from, `${r.value} (${r.periodText || ''}, chosen by you)`);
       cur.sources['dil.proxy'] = { name: `${r.form || 'Filing'} EPS calculation`, type: r.form === '10-K' ? '10-K annual report' : '10-Q quarterly report', cat: 'proxy', period: r.periodText || '', accn: r.accn || null, form: r.form || null, filed: r.filed || null, url: r.url || '', end: r.end || null, start: r.start || null, raw: isNum(r.raw) ? r.raw : null, rawUnit: r.rawUnit || null, unit: 'millions of shares', concept: r.concept || null, method: r.cat === 'calc' ? 'Diluted weighted-average shares − basic weighted-average shares for the same period (calculated)' : 'Reported net dilutive effect of stock awards', notes: 'Historical proxy for dilution: already net of the treasury stock method, at that period\'s average share price. Not a current diluted share count.', retrieved: SD.at || null, provider: 'SEC EDGAR XBRL', verified: r.cat !== 'calc', company: cur.inputs.company.name, ticker: cur.inputs.company.ticker };

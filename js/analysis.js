@@ -11,15 +11,24 @@ const DCFAnalysis = (() => {
   const mdl = () => (typeof DCFModel !== 'undefined' ? DCFModel : require('./model.js'));
 
   // ---- TTM in the historical table's own form ($ mm, cash outflows negative) ----
-  function ttmColumn(model) {
-    const T = mdl().ttmOf(model); if (!T || !T.items) return null;
+  function colValues(T) {
+    if (!T || !T.items) return null;
     const I = T.items, V = k => I[k] && isNum(I[k].value) ? I[k].value : null;
-    const v = {
+    return {
       rev: V('rev'), gp: V('gp'), da: V('da'), interest: V('interest'), sbc: V('sbc'), dnwc: V('dnwc'),
       capex: isNum(V('capex')) ? -V('capex') : null,
       opex: isNum(V('gp')) && isNum(V('ebitda')) ? V('gp') - V('ebitda') : null,
     };
-    return { end: T.end, isFY: !!T.isFY, manual: !!T.manual, label: T.isFY ? 'TTM = FY' : 'TTM', v, items: I, prior: T.prior, quarter: T.quarter, provider: T.provider, at: T.at };
+  }
+  function ttmColumn(model) {
+    const T = mdl().ttmOf(model); if (!T || !T.items) return null;
+    const v = colValues(T), O = model.ttmOverride || {}, C = mdl().ttmCalc(model);
+    if (isNum(O.opex)) v.opex = O.opex; // keep the typed figure even when gross profit is missing
+    const calc = colValues(C) || {};
+    const overrides = mdl().ttmOverrides(O);
+    // typed figures entered for a different TTM period from the one the filings now give
+    const stale = overrides.length && O.baseEnd && C && C.end && O.baseEnd !== C.end ? { typedFor: O.baseEnd, now: C.end } : null;
+    return { end: T.end, isFY: !!T.isFY, manual: !!T.manual, typedOnly: !!T.typedOnly, label: T.isFY ? 'TTM = FY' : 'TTM', v, calc, overrides, stale, hasCalc: !!(C && C.items), items: T.items, prior: T.prior, quarter: T.quarter, provider: T.provider, at: T.at };
   }
   // A TTM built by hand: FY + YTD − prior YTD for each line the analyst typed. Lines left blank stay blank.
   const MANUAL_KEYS = ['rev', 'cogs', 'gp', 'ebit', 'da', 'interest', 'ebt', 'tax', 'ni', 'cfo', 'capex', 'sbc', 'dnwc'];

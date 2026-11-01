@@ -188,7 +188,38 @@ const DCFModel = (() => {
   }
   // The forecast starting point: which 12 months year 1 follows, and how far the valuation date is past their end
   // the TTM in use: one the analyst built by hand (when chosen), otherwise the one calculated from the filings
-  function ttmOf(model) { const M = model.ttmManual; return (M && M.use && M.result) || model.ttm || null; }
+  function ttmCalc(model) { const M = model.ttmManual; return (M && M.use && M.result) || model.ttm || null; } // before the analyst's typed TTM figures
+  function ttmOf(model) { return applyTtmOverride(ttmCalc(model), model.ttmOverride); }
+  // TTM figures the analyst typed straight into the TTM column of Historical financials. They sit on top of the
+  // calculated TTM (SEC filings or "Build TTM by hand") line by line; a line left blank keeps the calculated figure.
+  // Stored in the table's own form: $ mm, CapEx and a rise in NWC negative, operating expenses excluding D&A.
+  const TTM_OVR_KEYS = ['rev', 'gp', 'opex', 'da', 'interest', 'sbc', 'dnwc', 'capex'];
+  function ttmOverrides(O) { return O ? TTM_OVR_KEYS.filter(k => isNum(O[k])) : []; }
+  function applyTtmOverride(base, O) {
+    const keys = ttmOverrides(O);
+    if (!keys.length) return base;
+    const B = base && base.items ? base.items : {}, items = Object.assign({}, B);
+    const end = (O && O.end) || (base && base.end) || null;
+    const bv = k => B[k] && isNum(B[k].value) ? B[k].value : null;
+    const typed = (k, value, calc) => ({ metric: k, cat: 'manual', periodType: 'TTM', value, end, override: true, calcValue: calc, provider: 'Entered by you',
+      periodText: 'twelve months ended ' + (end || '(date not set)'),
+      method: `Typed by you in the TTM column of Historical financials${isNum(calc) ? ` (the calculated figure was ${Math.round(calc).toLocaleString('en-US')} $mm)` : ''}.` });
+    ['rev', 'gp', 'da', 'interest', 'sbc', 'dnwc'].forEach(k => { if (isNum(O[k])) items[k] = typed(k, O[k], bv(k)); });
+    if (isNum(O.capex)) items.capex = typed('capex', -O.capex, bv('capex')); // table form is negative; items keep CapEx positive
+    if (isNum(O.gp) || isNum(O.opex)) {
+      const gp = items.gp && isNum(items.gp.value) ? items.gp.value : null;
+      const opex = isNum(O.opex) ? O.opex : isNum(bv('gp')) && isNum(bv('ebitda')) ? bv('gp') - bv('ebitda') : null;
+      if (isNum(gp) && isNum(opex)) items.ebitda = { metric: 'ebitda', cat: 'calc', value: gp - opex, end, deps: ['gp'], calcValue: bv('ebitda'), method: 'TTM gross profit − TTM operating expenses excluding D&A, using the figures you typed in the TTM column.' };
+      else delete items.ebitda;
+    }
+    if (isNum(O.capex)) {
+      if (items.cfo && isNum(items.cfo.value)) items.fcf = { metric: 'fcf', cat: 'calc', value: items.cfo.value - items.capex.value, end, deps: ['cfo', 'capex'], method: 'TTM operating cash flow − TTM capital expenditures (CapEx typed by you).' };
+      else delete items.fcf;
+    }
+    const out = Object.assign({}, base || { isFY: false, provider: 'Entered by you' }, { items, end, overrides: keys, typedOnly: !base });
+    if (!base) out.manual = true;
+    return out;
+  }
   function baseInfo(model) {
     const B = model.base || { mode: 'fy' }, T = ttmOf(model), H = model.hist;
     const vd = model.inputs.company.valDate;
@@ -344,6 +375,6 @@ const DCFModel = (() => {
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, ttmCalc, ttmOverrides, TTM_OVR_KEYS, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

@@ -76,8 +76,10 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
   period and the measurement date separately, and lets amendments replace the facts they restate. Actual shares
   (cover page), weighted-average basic/diluted shares and the reported net dilutive effect are kept as separate types.
 - **TTM** = latest fiscal year + current year to date − same period a year earlier, for each line, with the three
-  source figures, accession numbers and dates shown. Historicals run newest first: TTM, then five fiscal years. TTM can
-  also be built by hand from the 10-K and 10-Q.
+  source figures, accession numbers and dates shown. Historicals run newest first: TTM, then five fiscal years. Every TTM
+  box is editable: the calculated figure is the default (cyan), a typed figure replaces it for that line (amber, logged),
+  and clearing the box goes back. With no SEC file loaded the TTM column can be typed directly. TTM can also be built
+  line by line from the three 10-K and 10-Q figures.
 - **Forecast base**: latest fiscal year or TTM, with a preview before switching. New models line the forecast years up
   with the valuation date (the elapsed part of year 1 is taken off each discount period); older saved models keep the
   workbook timing, so their values do not move.

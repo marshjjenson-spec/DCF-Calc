@@ -536,6 +536,12 @@ table.fin th.ttm { color: var(--accent); }
 .ttmh { display: flex; flex-direction: column; align-items: flex-end; font-weight: 700; } .ttmh small { font-weight: 400; font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: 0; }
 .ttmv { border: 0; background: transparent; font: inherit; color: var(--ink); cursor: pointer; text-decoration: underline dotted var(--accent); text-underline-offset: 3px; padding: 0; }
 .ttmv:hover { color: var(--accent); }
+.ttmh > span { display: inline-flex; align-items: center; gap: 4px; } .ttmh .help { width: 18px; height: 18px; font-size: 11px; }
+.ttmh input[type=date] { font: 400 11px var(--font-ui); padding: 2px 3px; width: 118px; margin-top: 2px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--input-bg); color: var(--ink); }
+.ttmcell { display: flex; align-items: center; gap: 3px; justify-content: flex-end; }
+.ttmcell input { min-width: 0; }
+.ttmi { border: 1px solid var(--line-strong); background: var(--surface); color: var(--accent); border-radius: 50%; width: 16px; height: 16px; font: italic 600 10px var(--font-display); padding: 0; flex: none; cursor: pointer; display: inline-grid; place-items: center; }
+.ttmi:hover { background: var(--accent-soft); }
 .formula { font: 500 13px var(--font-num); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; }
 table.parts td { white-space: normal; } table.parts td.num { text-align: right; }
 .tmgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
