@@ -370,6 +370,93 @@ const DCFAnalysis = (() => {
     if (!corr && SC.some(s => isNum(I.tcapex[s]) && isNum(I.da[s]) && I.tcapex[s] < I.da[s])) out.push({ level: 'warn', key: 'tcapex', text: 'Terminal CapEx below D&A shrinks the asset base forever while revenue keeps growing.' });
     return out;
   }
-  return { nominalGrowth, stats, histRoic, segMargin, tvCompare, impliedG, tvChecks, parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
+  // ===== equity bridge worksheets (read-only; values reach the model only through an explicit "use" click) =====
+  const DEBT_CATS = ['Short-term bank loans', 'Revolving credit facility (drawn)', 'Commercial paper', 'Current portion of long-term debt', 'Other current borrowings', 'Bonds and notes (non-current)', 'Long-term debt (total, incl. current portion)', 'Term loans', 'Mortgages and secured financing', 'Other long-term borrowings', 'Convertible notes (debt component)', 'Finance lease liabilities', 'Operating lease liabilities', 'Other debt-like financing obligations'];
+  function debtRecon(rows, opts = {}) {
+    const out = { total: 0, n: 0, warn: [], lines: [] };
+    rows.forEach(r => {
+      const parts = isNum(r.cur) || isNum(r.nc) ? (isNum(r.cur) ? r.cur : 0) + (isNum(r.nc) ? r.nc : 0) : null;
+      const rep = isNum(r.rep) ? r.rep : parts;
+      const val = opts.market && isNum(r.mkt) ? r.mkt : rep;
+      const inc = r.inc === 'Yes' && isNum(val);
+      if (isNum(r.rep) && isNum(parts) && Math.abs(r.rep - parts) > 0.5) out.warn.push({ level: 'warn', text: `${r.cat || 'A row'}: current + non-current (${fmt(parts)}) does not equal the reported value (${fmt(r.rep)}).` });
+      if (inc) { out.total += val; out.n++; }
+      out.lines.push(Object.assign({}, r, { parts, rep, val, inc, basis: opts.market && isNum(r.mkt) ? 'market' : 'book' }));
+    });
+    const incl = c => out.lines.some(l => l.inc && l.cat === c);
+    if (incl('Long-term debt (total, incl. current portion)') && incl('Current portion of long-term debt')) out.warn.push({ level: 'bad', text: 'The current portion is included both on its own and inside "Long-term debt (total, incl. current portion)". Include it once.' });
+    if (incl('Long-term debt (total, incl. current portion)') && incl('Bonds and notes (non-current)')) out.warn.push({ level: 'warn', text: 'Bonds and notes may already be inside the long-term debt total. Check the debt note so they are not counted twice.' });
+    if (incl('Operating lease liabilities') && opts.leaseMode !== 'debt') out.warn.push({ level: 'bad', text: 'Operating lease liabilities are included, but the model treats operating leases as operating costs (lease cost is already in the cash flows). Including them counts leases twice.' });
+    if (incl('Operating lease liabilities') && opts.leaseMode === 'debt') out.warn.push({ level: 'bad', text: 'Operating lease liabilities are included here and also subtracted on their own line (lease-adjusted treatment). Leave them out of debt.' });
+    if (out.lines.some(l => l.inc && l.basis === 'book') && opts.market) out.warn.push({ level: 'info', text: 'Some included rows have no market value, so their book value is used as an approximation.' });
+    out.total = out.n ? out.total : null;
+    return out;
+  }
+  function pensionCalc(p) {
+    if (!isNum(p.pbo) || !isNum(p.assets)) return null;
+    const deficit = p.pbo - p.assets, opeb = isNum(p.opeb) ? p.opeb : 0, gross = deficit + opeb;
+    const elsewhere = isNum(p.elsewhere) ? p.elsewhere : 0;
+    const pre = gross - elsewhere;
+    const tax = p.applyTax === 'Yes' && isNum(p.tax) ? p.tax : null;
+    const proposed = isNum(tax) ? pre * (1 - tax) : pre;
+    return { deficit, opeb, gross, elsewhere, pre, tax, proposed, recognized: isNum(p.recognized) ? p.recognized : null, diffRecognized: isNum(p.recognized) ? gross - p.recognized : null, surplus: gross < 0 };
+  }
+  function nciCalc(n) {
+    const pct = isNum(n.pct) ? n.pct : null;
+    const listed = isNum(n.listed) && isNum(pct) ? n.listed * pct : null;
+    const est = isNum(n.subEq) && isNum(pct) ? n.subEq * pct : null;
+    const pick = { 'Listed market value': listed, 'Estimated economic value': est, 'Reported carrying value': isNum(n.carry) ? n.carry : null }[n.method || ''];
+    return { listed, est, carry: isNum(n.carry) ? n.carry : null, selected: isNum(pick) ? pick : null };
+  }
+  function investCalc(rows) {
+    const lines = rows.map(r => { const v = isNum(r.value) ? r.value : (isNum(r.shares) && isNum(r.price) ? r.shares * r.price : null); const excl = r.inFc === 'Yes' || r.inCash === 'Yes'; return Object.assign({}, r, { v, added: isNum(v) && !excl && (r.inFc === 'No' && r.inCash === 'No') ? v : 0, excl, undecided: isNum(v) && !excl && !(r.inFc === 'No' && r.inCash === 'No') }); });
+    const any = lines.some(l => isNum(l.v));
+    return { lines, total: any ? lines.reduce((a, l) => a + l.added, 0) : null, undecided: lines.filter(l => l.undecided).length };
+  }
+  function dtlCalc(d) {
+    const net = isNum(d.dtl) && isNum(d.dta) ? d.dtl - (d.dta - (isNum(d.va) ? d.va : 0)) : null;
+    const sched = (d.sched || []).map(x => (x && isNum(x.amt) ? x.amt : null));
+    const r = isNum(d.r) ? d.r : null;
+    const pv = r !== null && sched.some(isNum) ? sched.reduce((a, x, i) => a + (isNum(x) ? x / Math.pow(1 + r, i + 1) : 0), 0) : null;
+    return { net, pv, n: sched.filter(isNum).length };
+  }
+  // standard normal CDF (Abramowitz–Stegun 7.1.26 via erf; error below 1.5e-7)
+  function ncdf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x / 2); return x >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y); }
+  function blackScholes(S, K, T, r, q, sig) {
+    if (![S, K, T, r, q, sig].every(isNum) || S <= 0 || K <= 0 || T <= 0 || sig <= 0) return null;
+    const d1 = (Math.log(S / K) + (r - q + sig * sig / 2) * T) / (sig * Math.sqrt(T)), d2 = d1 - sig * Math.sqrt(T);
+    const c = S * Math.exp(-q * T) * ncdf(d1) - K * Math.exp(-r * T) * ncdf(d2);
+    return { c, d1, d2, nd1: ncdf(d1), nd2: ncdf(d2), intrinsic: Math.max(S - K, 0), time: c - Math.max(S - K, 0) };
+  }
+  function optionTranches(rows, S, defaults = {}) {
+    const lines = rows.map(t => { const r = isNum(t.r) ? t.r : defaults.r, q = isNum(t.q) ? t.q : (isNum(defaults.q) ? defaults.q : 0); const bs = blackScholes(S, t.k, t.t, r, q, t.vol); const n = isNum(t.n) ? t.n : null; const keep = isNum(t.forf) ? 1 - t.forf : 1; return Object.assign({}, t, { bs, total: bs && isNum(n) ? bs.c * n * keep : null, keep }); });
+    const ok = lines.filter(l => isNum(l.total));
+    return { lines, total: ok.length ? ok.reduce((a, l) => a + l.total, 0) : null, options: ok.reduce((a, l) => a + l.n, 0) };
+  }
+  function midYearCompare(model, s) {
+    const { inp } = mdl().engineInputs(model), E = eng();
+    const run = y => E.run(Object.assign({}, inp, { midYear: y }), s, model.mode);
+    const m = run('Y'), e = run('N');
+    if (!m.ok || !e.ok) return null;
+    return { mid: m, end: e, dEV: m.ev - e.ev, pEV: m.ev / e.ev - 1, dPS: m.perShare - e.perShare, pPS: m.perShare / e.perShare - 1 };
+  }
+  // scenario probabilities from two independent drivers with two states each; map[i][j] names the scenario for state i of driver 1 and j of driver 2
+  function driverProbs(d1, d2, map) {
+    const p1 = [d1.p0, isNum(d1.p0) ? 1 - d1.p0 : null], p2 = [d2.p0, isNum(d2.p0) ? 1 - d2.p0 : null];
+    if (![p1[0], p2[0]].every(v => isNum(v) && v >= 0 && v <= 1)) return null;
+    const out = { Bear: 0, Base: 0, Bull: 0 }, cells = [];
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { const sc = map && map[i] && map[i][j]; const p = p1[i] * p2[j]; cells.push({ i, j, p, sc }); if (sc && sc in out) out[sc] += p; }
+    if (cells.some(c => !c.sc)) return { cells, incomplete: true };
+    return { cells, probs: out };
+  }
+  function probCheck(probs) {
+    const v = SC.map(s => probs[s]);
+    const missing = SC.filter(s => !isNum(probs[s]));
+    if (missing.length) return { ok: false, missing, text: `Not set: ${missing.join(', ')}. A blank is different from 0%.` };
+    const sum = v.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 1) > 1e-9) return { ok: false, sum, text: `The probabilities add to ${(sum * 100).toFixed(1)}%, not 100%.`, normalized: Object.fromEntries(SC.map(s => [s, probs[s] / sum])) };
+    return { ok: true, sum, zero: SC.filter(s => probs[s] === 0) };
+  }
+  return { DEBT_CATS, debtRecon, pensionCalc, nciCalc, investCalc, dtlCalc, ncdf, blackScholes, optionTranches, midYearCompare, driverProbs, probCheck, nominalGrowth, stats, histRoic, segMargin, tvCompare, impliedG, tvChecks, parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFAnalysis;

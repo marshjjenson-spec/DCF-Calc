@@ -59,7 +59,9 @@ const DCFModel = (() => {
     return null;
   }
   // no debt in the WACC weights (corrected mode): debt is 0 and leases are 0 or excluded
-  function noDebt(model) { const I = model.inputs, ex = model.waccCfg && model.waccCfg.leases === 'exclude'; return model.mode !== 'workbook' && I.debt === 0 && (ex || I.leases === 0); }
+  // operating leases: 'operating' (default; lease cost stays in the cash flows, liability not subtracted, not in WACC weights) or 'debt' (lease-adjusted)
+  function leaseMode(model) { return model.leaseMode === 'debt' ? 'debt' : 'operating'; }
+  function noDebt(model) { const I = model.inputs, ex = leaseMode(model) !== 'debt' || (model.waccCfg && model.waccCfg.leases === 'exclude'); return model.mode !== 'workbook' && I.debt === 0 && (ex || I.leases === 0); }
   // How a WACC input is treated: required, optional adjustment (0 is valid), not applicable, or calculated
   const OPTIONAL_ADJ = ['scp', 'csrp'];
   function inputStatus(f, model) {
@@ -74,6 +76,7 @@ const DCFModel = (() => {
     if (f.key === 'troic') return true;
     if (f.key === 'rev0') return model.mode === 'workbook';
     if (f.key === 'kd') return !noDebt(model);
+    if (f.key === 'leases') return model.mode === 'workbook' || leaseMode(model) === 'debt';
     if (f.key === 'exitMult') return !s || model.inputs.tvMethod[s] === 'Exit Multiple';
     return true;
   }
@@ -223,7 +226,9 @@ const DCFModel = (() => {
     const b = baseInfo(model);
     if (model.mode === 'corrected') out.rev0 = isNum(b.rev) && b.rev > 0 ? b.rev : null;
     out.stub = model.timing === 'dated' && isNum(b.stub) ? b.stub : 0;
-    out.leasesInWacc = !(model.waccCfg && model.waccCfg.leases === 'exclude');
+    const lm = leaseMode(model);
+    out.leasesInBridge = model.mode === 'workbook' || lm === 'debt';
+    out.leasesInWacc = lm === 'debt' && !(model.waccCfg && model.waccCfg.leases === 'exclude');
     const d = dilution(model);
     if (d.method && d.method !== 'totals') { out.options = d.ok ? d.gross : null; out.treasury = d.ok ? d.buyback : null; }
     return { inp: out, invalid, dilution: d };
@@ -339,6 +344,6 @@ const DCFModel = (() => {
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { noDebt, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

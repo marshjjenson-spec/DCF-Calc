@@ -39,12 +39,19 @@ const nd = JSON.parse(JSON.stringify(z)); nd.inputs.debt = 0; nd.waccCfg = { lea
 ok('no debt and leases excluded: cost of debt not applicable', M.inputStatus(FIELDS.find(f => f.key === 'kd'), nd) === 'na' && !Object.values(M.completion(nd)).some(g => g.items.some(i => i.key === 'kd')));
 const r = DCF.run(M.engineInputs(nd).inp, 'Base', nd.mode);
 ok('no debt: WACC equals cost of equity', r.ok && near(r.waccUsed, r.W.ke, 1e-12));
-const withL = JSON.parse(JSON.stringify(nd)); withL.waccCfg = {}; 
-ok('leases still counted: borrowing rate needed', !DCF.run(M.engineInputs(withL).inp, 'Base', withL.mode).ok || withL.inputs.leases === 0);
+const withL = JSON.parse(JSON.stringify(nd)); withL.waccCfg = {}; withL.leaseMode = 'debt';
+
+ok('leases as debt: borrowing rate needed', !DCF.run(M.engineInputs(withL).inp, 'Base', withL.mode).ok || withL.inputs.leases === 0);
 ok('excluding leases changes the weights only when chosen', near(DCF.run(M.engineInputs(s).inp, 'Base', s.mode).waccUsed, all.scen.Base.waccUsed));
 // help coverage
 ['rf', 'erp', 'beta', 'scp', 'csrp', 'kd', 'we'].forEach(k => { const w = Hp.W[k]; ok(k + ' guide has every section', w && w.quick && w.need && w.where.length && w.calc && w.example && w.choose && w.scen && w.mistakes && w.sources.length); });
 ok('size premium help has no universal $2bn rule', !/\$2 ?b(n|illion)? .*(use|enter) 0/i.test(JSON.stringify(Hp.W.scp)) && /no universal/.test(Hp.W.scp.need));
 ok('every source link is https and typed', Object.values(Hp.S).every(x => /^https:\/\//.test(x[1]) && ['direct', 'raw', 'method'].includes(x[2])));
 ok('field text no longer states a 0–3% standard or $2bn rule', !/0–3%|about \$2bn|sub-\$2B/.test(JSON.stringify(FIELDS.filter(f => ['scp', 'csrp', 'erp'].includes(f.key)))));
+// lease treatment: operating (default) leaves the liability out of the bridge and weights; debt subtracts it
+const lo = JSON.parse(JSON.stringify(s)), ld = JSON.parse(JSON.stringify(s)); ld.leaseMode = 'debt';
+const ro = DCF.run(M.engineInputs(lo).inp, 'Base', lo.mode), rd = DCF.run(M.engineInputs(ld).inp, 'Base', ld.mode);
+ok('operating leases (default): not subtracted in the bridge', near(rd.bridge - ro.bridge, -s.inputs.leases, 1e-6) && M.leaseMode(lo) === 'operating');
+ok('operating leases (default): not in the WACC weights', near(ro.W.we, ro.W.mcap / (ro.W.mcap + s.inputs.debt), 1e-12));
+ok('workbook mode keeps the workbook treatment', M.engineInputs(Object.assign(JSON.parse(JSON.stringify(s)), { mode: 'workbook' })).inp.leasesInBridge === true);
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

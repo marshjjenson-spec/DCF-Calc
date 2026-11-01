@@ -387,8 +387,8 @@
       let note = '';
       if (f.key === 'exitMult') note = 'Needed only for scenarios that use Exit Multiple.';
       if (!rel && f.key !== 'exitMult') note = 'Not used by the current method.';
-      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : g === 'terminal' ? tvAidRow(f) : '');
-      else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}`;
+      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : g === 'terminal' ? tvAidRow(f) : ['bridge', 'scenarios'].includes(g) ? bAidRow(f) : '');
+      else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}` + (['bridge', 'scenarios'].includes(g) ? bAidRow(f) : '');
     });
     // calculated rows for some groups
     if (g === 'market') {
@@ -401,7 +401,7 @@
       const wv = SC.map(s => all.scen[s].ok ? all.scen[s].waccUsed : null);
       rows += calcRow('Cost of equity = Rf + β × ERP + premiums', W.map(w => fmt.pct(w && w.ke, 2)), true);
       rows += calcRow('After-tax cost of debt = Kd × (1 − t)', W.map(w => fmt.pct(w && w.kdAT, 2)), true);
-      rows += calcRow('Equity weight', W.map(w => fmt.pct(w && w.we, 1)), true, cur.mode === 'corrected' ? 'Market values: market cap ÷ (market cap + debt + operating leases).' : 'Typed on this page in original-workbook mode.');
+      rows += calcRow('Equity weight', W.map(w => fmt.pct(w && w.we, 1)), true, cur.mode === 'corrected' ? `Market values: market cap ÷ (market cap + debt${DCFModel.leaseMode(cur) === 'debt' ? ' + operating leases' : ''}).` : 'Typed on this page in original-workbook mode.');
       rows += calcRow('WACC', wv.map(v => `<b>${fmt.pct(v, 2)}</b>`), true);
     }
     if (g === 'scenarios') {
@@ -745,14 +745,14 @@
   // ---------- research notes ----------
   const NOTE_FIELDS = [['assumption', 'My assumption', 'text'], ['why', 'Why I chose it', 'area'], ['calc', 'Supporting calculations', 'area'], ['evidence', 'Evidence (one link per line)', 'area'], ['risks', 'Risks to this assumption', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
   let noteSaved = {};
-  function notesHtml(key, NF = NOTE_FIELDS) {
+  function notesHtml(key, NF = NOTE_FIELDS, scs = SC) {
     const N = (cur.notes && cur.notes[key]) || {};
-    return `<div class="notes">${SC.map(s => { const n = N[s] || {}; const id = f => `nt-${key}-${s}-${f}`;
+    return `<div class="notes">${scs.map(s => { const n = N[s] || {}; const id = f => `nt-${key}-${s}-${f}`;
       const ctl = ([f, l, t]) => t === 'area' ? `<label>${l}<textarea rows="2" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}">${esc(n[f] || '')}</textarea></label>` : t === 'conf' ? `<label>${l}<select data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}"><option value="">Not set</option>${['Low', 'Medium', 'High'].map(o => `<option ${n[f] === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>` : `<label>${l}<input type="${t === 'date' ? 'date' : 'text'}" class="txt" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}" value="${esc(n[f] || '')}"></label>`;
       const ev = String((n.evidence || '') + '\n' + (n.url || '')).split(/\n+/).map(x => x.trim()).filter(x => /^https?:\/\//i.test(x));
-      return `<fieldset><legend>${s}${n.saved ? ` <span class="saved" title="Saved ${esc(new Date(n.saved).toLocaleString())}">✓ saved</span>` : ''}</legend>${NF.map(ctl).join('')}${ev.length ? `<div class="evl">${ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').slice(0, 48))}</a>`).join('')}</div>` : ''}</fieldset>`; }).join('')}</div>`;
+      return `<fieldset><legend>${s === 'All' ? 'All scenarios' : s}${n.saved ? ` <span class="saved" title="Saved ${esc(new Date(n.saved).toLocaleString())}">✓ saved</span>` : ''}</legend>${NF.map(ctl).join('')}${ev.length ? `<div class="evl">${ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').slice(0, 48))}</a>`).join('')}</div>` : ''}</fieldset>`; }).join('')}</div>`;
   }
-  const hasNotes = key => cur.notes && cur.notes[key] && SC.some(s => cur.notes[key][s] && Object.entries(cur.notes[key][s]).some(([k, v]) => k !== 'saved' && v));
+  const hasNotes = key => cur.notes && cur.notes[key] && SC.concat('All').some(s => cur.notes[key][s] && Object.entries(cur.notes[key][s]).some(([k, v]) => k !== 'saved' && v));
   // inline guide under each forecast input
   let aidOpen = {};
   function aidRow(f) {
@@ -900,7 +900,7 @@
     const P = SC.map(s => DCFAnalysis.waccParts(cur, s));
     const p = (v, d = 2) => isNum(v) ? (v * 100).toFixed(d) + '%' : '<span class="na">—</span>';
     const x = v => isNum(v) ? v.toFixed(2) : '<span class="na">—</span>';
-    const L = cur.waccCfg && cur.waccCfg.leases === 'exclude' ? 'exclude' : 'include';
+    const L = DCFModel.leaseMode(cur) === 'debt' && !(cur.waccCfg && cur.waccCfg.leases === 'exclude') ? 'include' : 'exclude';
     const diff = P.every(q => isNum(q.wacc)) && new Set(P.map(q => q.wacc.toFixed(6))).size > 1;
     const col = q => `<div class="wlive"><h3>${q.s}</h3>
       <div class="formula">Cost of equity = ${p(q.rf)} + ${x(q.beta)} × ${p(q.erp)} + ${p(q.scp)} + ${p(q.csrp)} = <b>${p(q.ke)}</b></div>
@@ -913,11 +913,11 @@
       ${cur.mode === 'workbook' ? '<p class="footnote">Original-workbook mode: the equity weight is typed in the table above.</p>' : `<div class="tbl-wrap"><table class="fin"><tbody>
         <tr><td>Market value of equity (E) = diluted shares ${isNum(q.shares) ? nf(q.shares, 1) : '—'} mm × price ${isNum(q.price) ? '$' + q.price.toFixed(2) : '—'}</td><td class="num">${fmt.mm(q.E)}</td></tr>
         <tr><td>Debt (D): total debt from the bridge, at book value as a stand-in for market value</td><td class="num">${fmt.mm(q.D)}</td></tr>
-        <tr><td>Operating lease liabilities <select id="wacc-leases" aria-label="Lease treatment"><option value="include" ${L === 'include' ? 'selected' : ''}>counted as debt in the weights</option><option value="exclude" ${L === 'exclude' ? 'selected' : ''}>not counted in the weights</option></select></td><td class="num">${L === 'include' ? fmt.mm(cur.inputs.leases) : '<span class="na">excluded</span>'}</td></tr>
+        <tr><td>Operating lease liabilities <select id="wacc-leases" aria-label="Lease treatment"><option value="operating" ${DCFModel.leaseMode(cur) === 'operating' ? 'selected' : ''}>operating cost: not counted (standard)</option><option value="debt" ${DCFModel.leaseMode(cur) === 'debt' ? 'selected' : ''}>treated as debt (lease-adjusted)</option></select></td><td class="num">${L === 'include' ? fmt.mm(cur.inputs.leases) : '<span class="na">excluded</span>'}</td></tr>
         <tr class="total"><td>Equity weight E ÷ (E + D${L === 'include' ? ' + leases' : ''})</td><td class="num">${p(q.we, 1)}</td></tr>
         <tr class="total"><td>Debt weight</td><td class="num">${p(q.wd, 1)}</td></tr>
         <tr class="sub"><td>Check: weights add to 100%</td><td class="num">${isNum(q.sum) ? `<span class="pill ${Math.abs(q.sum - 1) < 1e-9 ? 'good' : 'bad'}">${(q.sum * 100).toFixed(1)}%</span>` : '—'}</td></tr></tbody></table></div>
-        <p class="footnote">Keep the lease choice consistent: operating leases are subtracted in the equity bridge, and under US GAAP lease cost sits inside operating expenses (and EBITDA). Counting leases as debt in the weights while leaving lease cost in the cash flows is the model's existing treatment; choose "not counted" if you treat them only in the bridge. Either way, say which in your notes.</p>
+        <p class="footnote">One lease treatment applies everywhere (see the lease reconciliation on the Equity bridge page). Standard (operating cost): under US GAAP operating lease cost is inside operating expenses and EBITDA, so the cash flows already pay for leases; the liability is neither subtracted in the bridge nor counted in the weights. Lease-adjusted (debt): the liability is debt in both places, and your margins must exclude lease cost, or leases are counted twice.</p>
         <p class="footnote">Market value of equity uses diluted shares, as the engine does. Tax in the after-tax cost of debt is each scenario's forecast tax rate; interest saves tax at the marginal rate only if the company has enough taxable income and the deduction is not limited.</p>`}
       <h3 class="sub-h">Scenarios</h3><p class="footnote">${diff ? `Your WACCs differ by scenario (${P.map(q => q.s + ' ' + p(q.wacc)).join(', ')}). That is fine if financing, market risk or capital structure differ between the scenarios; if the difference is only there to widen the range, the same risk is being counted in both the cash flows and the discount rate.` : 'The same discount rate in all three scenarios is normal: the scenarios differ in their cash flows. Use different rates only when financing, market risk or capital structure differ.'}</p>
       <p class="footnote">WACC discounts free cash flow to the firm (before interest), as this model does. Cash flow to equity would need the cost of equity instead.</p></section>`;
@@ -1004,11 +1004,11 @@
   let rfStatus = '';
 
   function applyWUse(u) {
-    const targets = u.scope === 'all' ? SC : [u.scope];
-    targets.forEach(x => { const from = cur.inputs[u.key][x]; if (from !== u.v) { DCFModel.logChange(cur, u.key, x, from, u.v); cur.inputs[u.key][x] = u.v; } });
-    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'Research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the ${TV_KEYS.includes(u.key) || u.key === 'em10' ? 'terminal value' : 'WACC'} research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
+    if (u.scope === 'single') { const from = cur.inputs[u.key]; if (from !== u.v) { DCFModel.logChange(cur, u.key, null, from, u.v); cur.inputs[u.key] = u.v; } }
+    else (u.scope === 'all' || u.scope === 'multi' ? SC : [u.scope]).forEach(x => { const nv = u.scope === 'multi' ? u.vals[x] : u.v; const from = cur.inputs[u.key][x]; if (from !== nv) { DCFModel.logChange(cur, u.key, x, from, nv); cur.inputs[u.key][x] = nv; } });
+    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'Research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the ${TV_KEYS.includes(u.key) || u.key === 'em10' ? 'terminal value' : B_KEYS.includes(u.key) ? 'equity bridge' : 'WACC'} worksheet${u.scope === 'single' ? '' : ' for ' + (u.scope === 'all' || u.scope === 'multi' ? 'all scenarios' : u.scope)}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
     if (cur.defaults) delete cur.defaults[u.key];
-    wUse = null; persist(); render(); toast(`${FBY[u.key].label} set to ${plain(fmtVal(u.key, u.v))} for ${u.scope === 'all' ? 'all three scenarios' : u.scope}. The change is in the log.`);
+    wUse = null; persist(); render(); toast(`${FBY[u.key].label} ${u.scope === 'multi' ? 'updated for all three scenarios' : 'set to ' + plain(fmtVal(u.key, u.v)) + (u.scope === 'single' ? '' : ' for ' + (u.scope === 'all' ? 'all three scenarios' : u.scope))}. The change is in the log.`);
   }
   const TREAS_URL = yr => `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${yr}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${yr}&page&_format=csv`;
   async function fetchTreasury() {
@@ -1165,6 +1165,188 @@
   function tvWorkHtml() {
     return `<section class="panel" id="tv-work"><div class="panel-head"><h2>My work: terminal value research</h2><span class="footnote">Per input and scenario. Saved with the model.</span></div>
       ${TV_KEYS.map(k => `<details class="dsec2" data-aid="tvw-${k}" ${aidOpen['tvw-' + k] ? 'open' : ''}><summary>${esc(FBY[k].label)}${hasNotes(k) ? ' ✓' : ''} <span class="footnote">${SC.map(x => `${x} ${fmtVal(k, cur.inputs[k][x])}`).join(' · ')}</span></summary><div>${notesHtml(k, TNOTE_FIELDS)}</div></details>`).join('')}</section>`;
+  }
+  // ---------- equity bridge and scenario guides, worksheets and reconciliation ----------
+  const B_KEYS = ['cash', 'sti', 'debt', 'leases', 'pension', 'minority', 'stakes', 'dtl', 'optVal', 'midYear', 'prob'];
+  const BNOTE_FIELDS = [['figures', 'Supporting figures (as reported, with units)', 'area'], ['calc', 'My supporting calculations', 'area'], ['evidence', 'Source links (one per line)', 'area'], ['dates', 'Filing and balance-sheet dates', 'text'], ['why', 'My reasoning (including why 0, if 0)', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
+  const SNOTE_FIELDS = [['growth', 'Revenue growth assumptions', 'area'], ['margins', 'Margin assumptions', 'area'], ['events', 'Major operating events', 'area'], ['evidence', 'Supporting evidence and source documents (one link per line)', 'area'], ['risks', 'Key risks', 'area'], ['why', 'Probability rationale', 'area'], ['confidence', 'Confidence', 'conf']];
+  const B_TOOL = { debt: 'bt-debt', leases: 'bt-lease', pension: 'bt-pen', minority: 'bt-nci', stakes: 'bt-inv', dtl: 'bt-dtl', optVal: 'bt-opt', midYear: 'bt-mid', prob: 'bt-prob' };
+  const B_SEARCH = { debt: ['long-term debt', 'commercial paper', 'finance lease liabilities'], leases: ['operating lease liabilities'], pension: ['projected benefit obligation', 'funded status'], minority: ['noncontrolling interests', 'redeemable noncontrolling'], stakes: ['equity method investments', 'non-marketable equity securities'], dtl: ['deferred tax liabilities', 'valuation allowance'], optVal: ['options outstanding', 'expected volatility'], cash: ['cash and cash equivalents'], sti: ['marketable securities'] };
+  const bScs = key => FBY[key] && FBY[key].tri ? SC : ['All'];
+  // latest balance-sheet date among imported bridge figures: older figures are flagged as stale
+  function latestBS() { let d = null; ['cash', 'sti', 'debt', 'leases', 'minority', 'basic'].forEach(k => { const s = cur.sources[k]; const a = s && (s.asOf || s.end); if (a && (!d || a > d)) d = a; }); const t = DCFModel.ttmOf(cur); if (t && t.end && (!d || t.end > d)) d = t.end; return d; }
+  function optionsInShares() { const d = DCFModel.dilution(cur); if (!d.method) return null; if (d.method === 'proxy') return true; if (d.method === 'totals') return isNum(cur.inputs.options) && cur.inputs.options > 0; return d.rows.some(r => /option/i.test((r.type || '') + ' ' + (r.label || '')) && r.net > 0); }
+  // completion state for a bridge input
+  function bStatus(key) {
+    const f = FBY[key]; if (!f) return null;
+    const v = f.tri ? null : cur.inputs[key], src = cur.sources[key], notes = hasNotes(key);
+    if (key === 'leases' && cur.mode === 'corrected' && DCFModel.leaseMode(cur) === 'operating') return ['na', 'Not applicable: operating-cost lease treatment'];
+    if (key === 'optVal' && isNum(v) && v > 0 && optionsInShares()) return ['dbl', 'Potential double counting: options are also in the diluted shares'];
+    if (key === 'prob') { const c = DCFAnalysis.probCheck(cur.inputs.prob); return c.ok ? ['ok', 'Complete: adds to 100%'] : ['miss', c.text]; }
+    if (key === 'midYear') return cur.inputs.midYear === 'Y' || cur.inputs.midYear === 'N' ? ['ok', 'Chosen: ' + (cur.inputs.midYear === 'Y' ? 'mid-year' : 'end of year')] : ['miss', 'Required and missing'];
+    if (!isNum(v)) return ['miss', 'Required and missing'];
+    const lb = latestBS(), asOf = src && (src.asOf || src.end);
+    if (src && asOf && lb && asOf < lb && ['cash', 'sti', 'debt', 'leases', 'minority', 'pension', 'stakes', 'dtl'].includes(key)) return ['stale', `From ${asOf}; a newer balance sheet (${lb}) is available`];
+    if (v === 0) return notes || (src && src.notes) ? ['zero', 'Complete: justified zero'] : ['zero0', 'Zero: add a one-line reason in your notes'];
+    if (src && src.auto && (src.cat === 'sec' || src.cat === 'calc' || src.verified)) return ['rep', 'Complete: verified reported amount' + (asOf ? ` (${asOf})` : '')];
+    if (notes || (src && /calculator|worksheet/i.test(src.notes || ''))) return ['est', 'Complete: documented estimate'];
+    return ['nosup', 'Value entered, supporting data missing'];
+  }
+  const B_ST_CLS = { ok: 'good', rep: 'good', est: 'good', zero: 'good', zero0: 'warn', na: '', dbl: 'bad', stale: 'warn', miss: 'bad', nosup: 'warn' };
+  const bStatusPill = key => { const st = bStatus(key); return st ? `<span class="pill ${B_ST_CLS[st[0]]}">${esc(st[1])}</span>` : ''; };
+  function bCompanyExample(key) {
+    const s = cur.sources[key], v = cur.inputs[key];
+    if (s && s.auto && isNum(v) && (s.cat === 'sec' || s.cat === 'calc' || s.verified)) return `<p>${esc(cur.inputs.company.name || 'This company')}: <b>${fmt.mm(v)} $mm</b> ${catBadge(s.cat === 'calc' ? 'calc' : 'sec')}, ${esc(s.form || '')} ${s.accn ? 'accession ' + esc(s.accn) : ''}, as of ${esc(s.asOf || s.end || '?')}${s.concept ? `, XBRL ${esc(s.concept)}` : ''}${isNum(s.raw) ? `, raw ${s.raw.toLocaleString('en-US')} ${esc(s.rawUnit || '')}` : ''}.${s.method ? ' ' + esc(s.method) : ''}${s.url ? ` <a href="${esc(s.url)}" target="_blank" rel="noopener">Open the filing</a>` : ''}</p>`;
+    return `<p class="footnote">No verified figure for ${esc(cur.inputs.company.name || 'this company')} yet. ${B_TOOL[key] ? 'Build it in the worksheet from the filing, or import from SEC filings on Company & market data.' : ''} Blank stays blank: it is never treated as zero.</p>`;
+  }
+  function bSections(key, compact) {
+    const w = DCFHelp.B[key]; if (!w) return '';
+    const id = x => `b-${key}-${x}${compact ? '-i' : ''}`;
+    const sec = (x, t, body) => `<details class="dsec2" data-aid="${id(x)}" ${aidOpen[id(x)] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+    const li = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    const cik = cur.meta && cur.meta.cik, nm = cur.inputs.company.name || 'this company';
+    const filings = cik ? `<li>${srcLink([`${nm}: 10-Q and 10-K filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw'])}</li>` : `<li>${srcLink(DCFHelp.S.edgar)} <span class="footnote">Import the company on Company & market data for direct links to its filings.</span></li>`;
+    const terms = (w.where.terms || []).length ? `<p>Search terms: ${w.where.terms.map(t => `<a class="chip" href="${DCFHelp.edgarSearch(t, cik)}" target="_blank" rel="noopener">${esc(t)}</a>`).join(' ')}</p>` : '';
+    const incl = w.include.in.length || w.include.out.length ? `<div class="tgrid2"><div><b>Include</b><ul class="chk">${w.include.in.map(x => `<li>✓ ${esc(x)}</li>`).join('')}</ul></div><div><b>Exclude</b><ul class="chk">${w.include.out.map(x => `<li>✗ ${esc(x)}</li>`).join('')}</ul></div></div>` : '<p class="footnote">A modelling choice, not a balance-sheet figure.</p>';
+    const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}<p>${esc(w.calc.example)}</p>${B_TOOL[key] ? `<p><button class="btn tiny" data-b-tool="${B_TOOL[key]}">Calculate it in the worksheet</button></p>` : ''}`;
+    return `<p class="wquick">${esc(w.what)}</p>
+      ${sec('need', 'Do I need this?', `<p>${esc(w.need)}</p>`)}
+      ${sec('incl', 'What belongs in this number?', incl)}
+      ${sec('where', 'Find it in the SEC filing', `<ol>${w.where.locs.map(x => `<li>${esc(x)}</li>`).join('')}</ol>${terms}${w.where.period ? `<p class="footnote">Reporting period: ${esc(w.where.period)}</p>` : ''}<ul>${key === 'midYear' || key === 'prob' ? '' : filings}${w.sources.filter(x => x !== DCFHelp.S.edgar).map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
+      ${sec('calc', 'Calculate it step by step', calcB)}
+      ${sec('decide', 'How to decide the right adjustment', li(w.decide))}
+      ${sec('mist', 'Common mistakes', li(w.mistakes))}
+      ${key === 'midYear' || key === 'prob' ? '' : sec('co', 'Use the latest company data', bCompanyExample(key))}
+      ${sec('notes', (key === 'prob' ? 'My research notes' : 'My supporting calculations and research notes') + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, BNOTE_FIELDS, bScs(key)))}`;
+  }
+  function bAidRow(f) {
+    if (cur.ui && cur.ui.learn === false) return '';
+    if (!DCFHelp.B[f.key]) return '';
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, worksheet link and my notes ${bStatusPill(f.key)}</summary>${bSections(f.key, true)}</details></div>`;
+  }
+  function bt() { cur.bridgeTools = cur.bridgeTools || {}; const T = cur.bridgeTools; T.debt = T.debt || { rows: DCFAnalysis.DEBT_CATS.map(c => ({ cat: c })) }; T.pen = T.pen || {}; T.nci = T.nci || {}; T.inv = T.inv || [{}, {}, {}, {}]; T.dtl = T.dtl || { sched: [{}, {}, {}, {}, {}] }; T.opt = T.opt || { tr: [{}, {}, {}] }; T.drv = T.drv || { d1: {}, d2: {}, map: [['', ''], ['', '']] }; return T; }
+  const bIn = (path, unit, label, ph = 'Enter') => {
+    const id = 'bt-' + path.replace(/\./g, '-'), v = path.split('.').reduce((o, k) => o == null ? o : o[k], bt());
+    if (unit === 'text' || unit === 'date') return `<input type="${unit === 'date' ? 'date' : 'text'}" class="txt" data-t="bt" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}">`;
+    if (Array.isArray(unit)) return `<select data-t="bt" data-k="${path}" data-unit="choice" id="${id}" aria-label="${esc(label)}"><option value="">Choose…</option>${unit.map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    return `<div class="inwrap"><input type="text" inputmode="decimal" data-t="bt" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${esc(ph)}" aria-label="${esc(label)}"><span class="unit">${unit === 'pct' ? '%' : unit === 'usd_mm' ? '$mm' : unit === 'x' ? '×' : unit === 'usd' ? '$' : ''}</span></div>${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`;
+  };
+  // single-value "use" button (bridge inputs are one value for all scenarios)
+  const useBtn1 = (key, v, label, note) => isNum(v) ? `<button class="btn tiny" data-wuse="${key}" data-v="${v}" data-scope="single" data-note="${esc(note || '')}">Use ${esc(label)} for ${esc(FBY[key].label)}</button>` : '';
+  const flagList = ws => ws.length ? `<ul class="flags">${ws.map(w => `<li class="${w.level === 'info' ? '' : w.level}">${esc(w.text)}</li>`).join('')}</ul>` : '';
+  function bToolsHtml() {
+    const T = bt(), I = cur.inputs, { all } = calc(), s = cur.active, corr = cur.mode === 'corrected', lm = DCFModel.leaseMode(cur);
+    const det = (id, title, sub, body) => `<details class="panel tool" id="${id}" data-aid="${id}" ${aidOpen[id] ? 'open' : ''}><summary><b>${title}</b> <span class="footnote">${sub}</span></summary>${body}</details>`;
+    // debt
+    const D = DCFAnalysis.debtRecon(T.debt.rows, { market: T.debt.market === 'Market values where available', leaseMode: corr ? lm : 'debt' });
+    const debtB = `<p class="footnote">One row per kind of borrowing from the debt note. "Reported" defaults to current + non-current. Mark each row Yes or No; the total adds only Yes rows. Debt is not total liabilities: payables, accruals, deferred revenue and undrawn credit lines stay out.</p>
+      <label>Values ${bIn('debt.market', ['Book values', 'Market values where available'], 'Book or market')}</label>
+      <div class="tbl-wrap"><table class="fin risk"><thead><tr><th>Debt category</th><th>Current portion</th><th>Non-current</th><th>Reported value</th><th>Market value</th><th>Include?</th><th>Source and date</th><th>Notes</th></tr></thead><tbody>${D.lines.map((r, i) => `<tr><td>${esc(r.cat)}</td><td>${bIn(`debt.rows.${i}.cur`, 'usd_mm', 'Current')}</td><td>${bIn(`debt.rows.${i}.nc`, 'usd_mm', 'Non-current')}</td><td>${bIn(`debt.rows.${i}.rep`, 'usd_mm', 'Reported', isNum(r.parts) ? nf(r.parts) : '')}</td><td>${bIn(`debt.rows.${i}.mkt`, 'usd_mm', 'Market value')}</td><td>${bIn(`debt.rows.${i}.inc`, ['Yes', 'No'], 'Include')}</td><td>${bIn(`debt.rows.${i}.src`, 'text', 'Source', '10-Q 2026-09-30 debt note')}</td><td>${bIn(`debt.rows.${i}.note`, 'text', 'Notes')}</td></tr>`).join('')}</tbody></table></div>
+      ${flagList(D.warn)}
+      ${isNum(D.total) ? `<p>Total included debt = ${D.lines.filter(l => l.inc).map(l => `${nf(l.val)} (${esc(l.cat.toLowerCase())}${l.basis === 'market' ? ', market' : ''})`).join(' + ')} = <b>${fmt.mm(D.total)} $mm</b> ${catBadge('calc')}. Your Total debt: ${fmtVal('debt', I.debt)}. ${useBtn1('debt', Math.round(D.total * 1000) / 1000, fmt.mm(D.total), 'Debt worksheet: ' + D.n + ' included rows, ' + (T.debt.market === 'Market values where available' ? 'market values where available' : 'book values'))}</p>` : ''}
+      <p class="footnote">Book value = carrying amount (net of discounts and issuance costs); principal = face amount owed; market value = trading price (the "Fair value of financial instruments" note gives the fair value of total debt). Book value is a disclosed approximation of market value. ${cur.sources.debt && cur.sources.debt.auto ? `Imported: ${esc(cur.sources.debt.method || cur.sources.debt.notes || '')}` : ''}</p>`;
+    // lease reconciliation
+    const L = cur.inputs.leases;
+    const leaseRow = (a, op, db) => `<tr><td>${a}</td><td>${op}</td><td>${db}</td></tr>`;
+    const leaseB = `<label>Lease treatment for this model <select id="lease-mode" aria-label="Lease treatment" ${corr ? '' : 'disabled'}><option value="operating" ${lm === 'operating' ? 'selected' : ''}>Operating cost (standard US GAAP)</option><option value="debt" ${lm === 'debt' ? 'selected' : ''}>Debt (lease-adjusted)</option></select></label>
+      ${corr ? '' : '<p class="footnote">Original-workbook mode keeps the workbook: operating leases are subtracted in the bridge.</p>'}
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Where leases appear</th><th>Operating cost${lm === 'operating' && corr ? ' ✓ this model' : ''}</th><th>Debt (lease-adjusted)${lm === 'debt' && corr ? ' ✓ this model' : ''}</th></tr></thead><tbody>
+        ${leaseRow('Operating cash flows / free cash flow', 'Lease payments reduce cash flow (inside operating costs)', 'Lease cost added back; repayments are financing')}
+        ${leaseRow('EBITDA and EBIT', 'After lease cost (as reported under US GAAP)', 'Before lease cost: your margins must be lease-adjusted (EBITDAR-style)')}
+        ${leaseRow('Debt balance', 'Operating leases not in debt; finance leases are', 'Operating lease liability added to debt-like claims')}
+        ${leaseRow('WACC weights', 'Not counted', 'Counted as debt')}
+        ${leaseRow('Equity bridge', 'Not subtracted', `Subtracted: ${fmtVal('leases', L)}`)}
+      </tbody></table></div>
+      <p class="footnote">Finance lease liabilities are debt under both treatments (put them in the debt worksheet). The standard operating-cost treatment matches reported EBITDA and is the common practice for US companies. Choose the lease-adjusted treatment only if you also raise your EBITDA margins by the lease cost (from the lease note), otherwise leases are counted twice.</p>`;
+    // pension
+    const PN = DCFAnalysis.pensionCalc(T.pen);
+    const penB = `<div class="tgrid"><label>Projected benefit obligation ($mm) ${bIn('pen.pbo', 'usd_mm', 'PBO')}</label><label>Fair value of plan assets ($mm) ${bIn('pen.assets', 'usd_mm', 'Plan assets')}</label><label>Other postretirement obligations, if included ($mm) ${bIn('pen.opeb', 'usd_mm', 'OPEB')}</label><label>Recognized funded status on the balance sheet (net liability, $mm) ${bIn('pen.recognized', 'usd_mm', 'Recognized')}</label><label>Already counted elsewhere, e.g. in debt ($mm) ${bIn('pen.elsewhere', 'usd_mm', 'Elsewhere')}</label><label>Apply a tax adjustment? ${bIn('pen.applyTax', ['No', 'Yes'], 'Tax adjustment')}</label>${T.pen.applyTax === 'Yes' ? `<label>Tax rate you justify ${bIn('pen.tax', 'pct', 'Tax rate')}</label>` : ''}<label>Funding / payment schedule notes ${bIn('pen.sched', 'text', 'Schedule', 'expected contributions next year…')}</label></div>
+      ${PN ? `<div class="tbl-wrap"><table class="fin"><tbody><tr><td>Reported funding deficit = PBO − plan assets</td><td class="num">${nf(T.pen.pbo)} − ${nf(T.pen.assets)} = ${fmt.mm(PN.deficit)}</td></tr>${PN.opeb ? `<tr><td>+ Other postretirement obligations</td><td class="num">${fmt.mm(PN.opeb)}</td></tr>` : ''}${isNum(PN.recognized) ? `<tr><td>Recognized balance-sheet funded status</td><td class="num">${fmt.mm(PN.recognized)}${Math.abs(PN.diffRecognized) > 0.5 ? ` <span class="pill warn">differs by ${fmt.mm(PN.diffRecognized)}: check which plans and dates each covers</span>` : ' <span class="pill good">matches</span>'}</td></tr>` : ''}<tr><td>− Already counted elsewhere</td><td class="num">${fmt.mm(-PN.elsewhere)}</td></tr>${isNum(PN.tax) ? `<tr><td>× (1 − ${pc2(PN.tax, 1)}) tax adjustment you chose</td><td class="num"></td></tr>` : ''}<tr class="total"><td>Proposed debt-like adjustment</td><td class="num">${fmt.mm(PN.proposed)} ${catBadge('calc')}</td></tr></tbody></table></div>
+        ${PN.surplus ? '<div class="notice">The plans are in surplus. A surplus is not automatically value for shareholders (it may be trapped or taxed); 0 is usually the cautious choice. Record your reasoning.</div>' : ''}
+        <p>${useBtn1('pension', Math.max(0, Math.round(PN.proposed * 1000) / 1000), fmt.mm(Math.max(0, PN.proposed)), 'Pension worksheet: PBO − plan assets' + (PN.opeb ? ' + OPEB' : '') + (PN.elsewhere ? ' − counted elsewhere' : '') + (isNum(PN.tax) ? ', after tax at ' + (PN.tax * 100).toFixed(1) + '%' : ''))}</p>` : '<p class="footnote">Enter the obligation and plan assets from the funded-status table. If the company has no defined-benefit plans, set Pension underfunding to 0 and note "no defined-benefit plans (10-K benefits note)". Not checked yet is missing, not zero.</p>'}
+      <p class="footnote">Subtract the obligation once: either the recognized liability or your calculated deficit for the same plans, not both. No automatic after-tax haircut is applied.</p>`;
+    // NCI
+    const N = DCFAnalysis.nciCalc(T.nci);
+    const nciB = `<div class="tgrid"><label>Reported carrying value ($mm) ${bIn('nci.carry', 'usd_mm', 'Carrying value')}</label><label>Outside ownership % ${bIn('nci.pct', 'pct', 'Outside ownership')}</label><label>Estimated subsidiary equity value ($mm) ${bIn('nci.subEq', 'usd_mm', 'Subsidiary equity value')}</label><label>Listed subsidiary market value ($mm, 100%) ${bIn('nci.listed', 'usd_mm', 'Listed value')}</label><label>Redeemable? ${bIn('nci.redeem', ['No', 'Yes'], 'Redeemable')}</label><label>Method ${bIn('nci.method', ['Listed market value', 'Estimated economic value', 'Reported carrying value'], 'Method')}</label><label>Forecast covers ${bIn('nci.scope', ['100% of consolidated operations', 'Only the parent\'s share'], 'Forecast scope')}</label></div>
+      <div class="tbl-wrap"><table class="fin"><tbody><tr><td>Reported accounting value (book) ${catBadge('manual')}</td><td class="num">${mm0(N.carry)}</td></tr><tr><td>Economic value: listed value × outside % ${catBadge('calc')}</td><td class="num">${mm0(N.listed)}</td></tr><tr><td>Economic value: estimated subsidiary equity × outside % ${catBadge('calc')}</td><td class="num">${mm0(N.est)}</td></tr></tbody></table></div>
+      ${T.nci.scope === 'Only the parent\'s share' ? '<div class="notice bad">Your forecast covers only the parent\'s share, so subtracting noncontrolling interest would remove it twice. Set Minority interest to 0.</div>' : ''}
+      ${T.nci.redeem === 'Yes' ? '<div class="notice">Redeemable noncontrolling interest: use the redemption terms (price, timing, who can force it). It can behave more like debt than equity.</div>' : ''}
+      ${isNum(N.selected) && T.nci.scope !== 'Only the parent\'s share' ? `<p>${useBtn1('minority', Math.round(N.selected * 1000) / 1000, fmt.mm(N.selected), 'NCI worksheet: ' + T.nci.method)}</p>` : '<p class="footnote">Choose a method once the figures are entered. 0 is right when every subsidiary is wholly owned.</p>'}`;
+    // investments
+    const V = DCFAnalysis.investCalc(T.inv);
+    const invB = `<div class="tbl-wrap"><table class="fin risk"><thead><tr><th>Investment</th><th>Ownership %</th><th>Shares held (mm)</th><th>Price ($)</th><th>Estimated value ($mm)</th><th>Carrying amount ($mm)</th><th>In operating forecast?</th><th>In cash / securities?</th><th>Added</th><th>Source URL and date</th></tr></thead><tbody>${V.lines.map((r, i) => `<tr><td>${bIn(`inv.${i}.name`, 'text', 'Investment', 'Investee')}</td><td>${bIn(`inv.${i}.pct`, 'pct', 'Ownership')}</td><td>${bIn(`inv.${i}.shares`, 'num', 'Shares held')}</td><td>${bIn(`inv.${i}.price`, 'usd', 'Price')}</td><td>${bIn(`inv.${i}.value`, 'usd_mm', 'Value', isNum(r.shares) && isNum(r.price) ? nf(r.shares * r.price) : '')}</td><td>${bIn(`inv.${i}.carry`, 'usd_mm', 'Carrying amount')}</td><td>${bIn(`inv.${i}.inFc`, ['Yes', 'No'], 'In forecast')}</td><td>${bIn(`inv.${i}.inCash`, ['Yes', 'No'], 'In cash')}</td><td class="num">${isNum(r.v) ? (r.undecided ? '<span class="na">answer both</span>' : fmt.mm(r.added)) : '—'}</td><td>${bIn(`inv.${i}.src`, 'text', 'Source')}</td></tr>`).join('')}</tbody></table></div>
+      <div class="btns"><button class="btn tiny" data-b-add="inv">Add a row</button></div>
+      ${isNum(V.total) ? `<p>Amount added = sum of values not already in the forecast or in cash = <b>${fmt.mm(V.total)} $mm</b> ${catBadge('calc')}. ${V.undecided ? '' : useBtn1('stakes', Math.round(V.total * 1000) / 1000, fmt.mm(V.total), 'Investments worksheet')}</p>` : ''}
+      <p class="footnote">Listed stakes: shares held × current price (or ownership % × the investee's market value). Private stakes: carrying value is an accounting amount, often cost; say how you support any other value. Consolidated subsidiaries are already in operations.</p>`;
+    // deferred taxes
+    const DT = DCFAnalysis.dtlCalc(T.dtl);
+    const dtlB = `<div class="tgrid"><label>Gross deferred tax liabilities ($mm) ${bIn('dtl.dtl', 'usd_mm', 'Gross DTL')}</label><label>Gross deferred tax assets ($mm) ${bIn('dtl.dta', 'usd_mm', 'Gross DTA')}</label><label>Valuation allowance ($mm) ${bIn('dtl.va', 'usd_mm', 'Valuation allowance')}</label><label>Major temporary differences ${bIn('dtl.major', 'text', 'Major items', 'e.g. accelerated depreciation, leases')}</label><label>Do your cash taxes already include the reversals? ${bIn('dtl.inCF', ['Yes', 'No', 'Not sure'], 'Already in cash flows')}</label></div>
+      ${isNum(DT.net) ? `<p>Reported net deferred tax position = ${nf(T.dtl.dtl)} − (${nf(T.dtl.dta)} − ${nf(isNum(T.dtl.va) ? T.dtl.va : 0)}) = <b>${fmt.mm(DT.net)} $mm</b> ${catBadge('calc')}. This is an accounting balance, not the adjustment.</p>` : ''}
+      <h3 class="sub-h">Separate adjustment (only for payments your forecast misses)</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${T.dtl.sched.map((_, i) => `<th>Year ${i + 1}</th>`).join('')}</tr></thead><tbody><tr><td>Incremental tax payment ($mm)</td>${T.dtl.sched.map((_, i) => `<td>${bIn(`dtl.sched.${i}.amt`, 'usd_mm', 'Year ' + (i + 1))}</td>`).join('')}</tr></tbody></table></div>
+      <label>Discount rate for these payments ${bIn('dtl.r', 'pct', 'Discount rate')}</label>
+      ${isNum(DT.pv) ? `<p>PV = Σ payment ÷ (1 + r)^t = <b>${fmt.mm(DT.pv)} $mm</b> ${catBadge('calc')}. ${T.dtl.inCF === 'Yes' ? '<span class="pill bad">You said your cash taxes already include these reversals: subtracting them again counts them twice.</span>' : useBtn1('dtl', Math.round(DT.pv * 1000) / 1000, fmt.mm(DT.pv), 'Tax worksheet: PV of incremental tax payments')}</p>` : ''}
+      <p>${useBtn1('dtl', 0, '0 (no separate adjustment)', 'No separate deferred tax adjustment: cash taxes come from the forecast tax rate')} <span class="footnote">An analyst decision, not a zero balance: record why in the notes.</span></p>`;
+    // options
+    const ois = optionsInShares(), OT = DCFAnalysis.optionTranches(T.opt.tr, isNum(T.opt.S) ? T.opt.S : I.price, { r: I.rf[s], q: T.opt.q });
+    const optB = `<div class="notice ${ois && isNum(I.optVal) && I.optVal > 0 ? 'bad' : ''}">Equity compensation method: ${ois === null ? 'no dilution method chosen yet' : ois ? '<b>Method A, dilution</b>: options are in the diluted share count on Company & market data' : 'options are <b>not</b> in the diluted share count'}; option value line: ${fmtVal('optVal', I.optVal)}. ${ois && isNum(I.optVal) && I.optVal > 0 ? 'Both are set: the same options are counted twice.' : ''}</div>
+      <p class="footnote">Method B (option value): value the options here, subtract the total in the bridge, and remove them from the diluted share count (Company & market data, share dilution) so the remaining equity is divided by actual shares plus RSUs. RSUs have no exercise price: keep them as shares, never value them here too. Grant-date fair value in the note is not today's value.</p>
+      <div class="tgrid"><label>Share price S ($) ${bIn('opt.S', 'usd', 'Share price', isNum(I.price) ? I.price.toFixed(2) + ' (your price)' : '')}</label><label>Dividend yield q ${bIn('opt.q', 'pct', 'Dividend yield', '0')}</label></div>
+      <div class="tbl-wrap"><table class="fin risk"><thead><tr><th>Tranche</th><th>Options (mm)</th><th>Exercise price K</th><th>Expected term T (yrs)</th><th>Volatility σ</th><th>Risk-free r</th><th>Expected forfeiture</th><th>d1 / d2</th><th>Value per option</th><th>Total ($mm)</th></tr></thead><tbody>${OT.lines.map((t, i) => `<tr><td>${bIn(`opt.tr.${i}.name`, 'text', 'Tranche', 'e.g. WAEP $45, 4.2 yrs left')}</td><td>${bIn(`opt.tr.${i}.n`, 'num', 'Options')}</td><td>${bIn(`opt.tr.${i}.k`, 'usd', 'Exercise price')}</td><td>${bIn(`opt.tr.${i}.t`, 'num', 'Term')}</td><td>${bIn(`opt.tr.${i}.vol`, 'pct', 'Volatility')}</td><td>${bIn(`opt.tr.${i}.r`, 'pct', 'Risk-free', isNum(I.rf[s]) ? (I.rf[s] * 100).toFixed(2) : '')}</td><td>${bIn(`opt.tr.${i}.forf`, 'pct', 'Forfeiture', '0')}</td><td class="num">${t.bs ? t.bs.d1.toFixed(3) + ' / ' + t.bs.d2.toFixed(3) : '—'}</td><td class="num">${t.bs ? '$' + t.bs.c.toFixed(2) + (t.bs.intrinsic === 0 ? ' <span class="footnote">all time value</span>' : '') : '—'}</td><td class="num">${mm0(t.total)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="btns"><button class="btn tiny" data-b-add="opt">Add a tranche</button></div>
+      <div class="formula">C = S·e^(−qT)·N(d1) − K·e^(−rT)·N(d2); d1 = [ln(S/K) + (r − q + σ²/2)T] ÷ (σ√T); d2 = d1 − σ√T</div>
+      ${isNum(OT.total) ? `<p>Total option claim = Σ value per option × options × (1 − forfeiture) = <b>${fmt.mm(OT.total)} $mm</b> ${catBadge('calc')}. ${useBtn1('optVal', Math.round(OT.total * 1000) / 1000, fmt.mm(OT.total), 'Black–Scholes worksheet, ' + OT.lines.filter(l => isNum(l.total)).length + ' tranches')}${ois ? ' <span class="pill bad">Options are still in the diluted shares: switching needs both steps</span>' : ''}</p>` : '<p class="footnote">Inputs from the 10-K stock-based compensation note: options outstanding, weighted-average exercise price, remaining term, and the volatility and risk-free assumptions. Use the expected term, not the 10-year contractual term.</p>'}
+      <p class="footnote">Black–Scholes assumes a tradable European option. Employee options vest, cannot be sold and are often exercised early, so use expected term and forfeitures as above. ${srcLink(DCFHelp.S.damOpt)}</p>`;
+    // mid-year
+    const MY = corr ? DCFAnalysis.midYearCompare(cur, s) : null;
+    const midB = MY ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>${esc(s)}</th><th>End of year</th><th>Mid-year</th><th>Difference</th></tr></thead><tbody>
+        <tr><td>Enterprise value ($mm)</td><td class="num">${fmt.mm(MY.end.ev)}</td><td class="num">${fmt.mm(MY.mid.ev)}</td><td class="num">${fmt.mm(MY.dEV)} (${(MY.pEV * 100).toFixed(1)}%)</td></tr>
+        <tr><td>Value per share</td><td class="num">${fmt.usd(MY.end.perShare)}</td><td class="num">${fmt.usd(MY.mid.perShare)}</td><td class="num">${fmt.usd(MY.dPS)} (${(MY.pPS * 100).toFixed(1)}%)</td></tr>
+        <tr><td>Terminal value discounted (years)</td><td class="num">${MY.end.tvPeriod.toFixed(1)}</td><td class="num">${MY.mid.tvPeriod.toFixed(1)}</td><td></td></tr></tbody></table></div>
+      <p>Your model uses <b>${I.midYear === 'Y' ? 'mid-year' : I.midYear === 'N' ? 'end of year' : 'nothing yet'}</b>. The effect for this scenario is ${(MY.pPS * 100).toFixed(1)}% of value per share: it depends on WACC and how much value sits in the terminal value, so it is calculated, not assumed.</p>
+      <p class="footnote"><b>Terminal value timing (audited).</b> Each value is discounted from the date it is measured. The Gordon formula FCFF₁₁ ÷ (WACC − g) values cash flows of year 11 onward at the end of year 10 as if each arrives at year end. Under the mid-year convention those flows arrive half a year earlier (10.5, 11.5, …), so their value at the end of year 10 is that formula × (1 + WACC)^0.5. Discounting the Gordon value 9.5 years is the same thing. It is not a shortcut. The exit-multiple value is a sale price at the end of year 10 and is always discounted 10 years. Both follow from the cash-flow timing, so the model keeps them.</p>` : '<p class="footnote">Needs a calculated scenario in corrected mode.</p>';
+    // probabilities
+    const PC = DCFAnalysis.probCheck(I.prob), DV = T.drv, DP = DCFAnalysis.driverProbs(DV.d1, DV.d2, DV.map);
+    const vals = SC.map(x => all.scen[x].ok ? all.scen[x].perShare : null);
+    const st2 = (d, i) => esc(DV[d]['s' + i] || (i === 0 ? 'state A' : 'state B'));
+    const probB = `<div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${SC.map(x => `<th>${x}</th>`).join('')}<th>Total</th></tr></thead><tbody><tr><td>Value per share</td>${vals.map(v => `<td class="num">${fmt.usd(v)}</td>`).join('')}<td></td></tr><tr><td>Probability</td>${SC.map(x => `<td class="num">${isNum(I.prob[x]) ? fmt.pct(I.prob[x]) : '<span class="na">not set</span>'}</td>`).join('')}<td class="num">${isNum(PC.sum) ? `<span class="pill ${PC.ok ? 'good' : 'bad'}">${(PC.sum * 100).toFixed(1)}%</span>` : '—'}</td></tr>
+        <tr class="total"><td>Value × probability</td>${SC.map((x, i) => `<td class="num">${isNum(vals[i]) && isNum(I.prob[x]) ? fmt.usd(vals[i] * I.prob[x]) : '—'}</td>`).join('')}<td class="num">${PC.ok && vals.every(isNum) ? fmt.usd(SC.reduce((a, x, i) => a + vals[i] * I.prob[x], 0)) : '—'}</td></tr></tbody></table></div>
+      ${PC.ok ? (PC.zero.length ? `<p class="footnote">${PC.zero.join(', ')} set to 0%: a deliberate choice that the scenario cannot happen.</p>` : '') : `<div class="notice bad">${esc(PC.text)}${PC.normalized ? ` Rescaling each to sum to 100% would give ${SC.map(x => x + ' ' + (PC.normalized[x] * 100).toFixed(1) + '%').join(', ')}. <button class="btn tiny" data-wuse-multi="prob" data-vals='${JSON.stringify(PC.normalized)}' data-note="Rescaled so the probabilities add to 100%">Rescale (asks first)</button>` : ''}</div>`}
+      <p class="footnote">The weighted value is the average of three simplified outcomes, not a forecast of the share price, and it depends on how the scenarios were defined. No split is assumed for you; equal weights are fine when you choose them.</p>
+      <h3 class="sub-h">Optional: probabilities from two business drivers</h3>
+      <p class="footnote">For example demand (strong / weak) and margins (hold / compress). Give the chance of the first state of each driver (independent drivers), then say which scenario each combination is. The output is only as good as these judgments.</p>
+      <div class="tgrid"><label>Driver 1 ${bIn('drv.d1.name', 'text', 'Driver 1', 'e.g. demand')}</label><label>State A ${bIn('drv.d1.s0', 'text', 'Driver 1 state A', 'strong')}</label><label>State B ${bIn('drv.d1.s1', 'text', 'Driver 1 state B', 'weak')}</label><label>P(state A) ${bIn('drv.d1.p0', 'pct', 'Driver 1 probability')}</label></div>
+      <div class="tgrid"><label>Driver 2 ${bIn('drv.d2.name', 'text', 'Driver 2', 'e.g. margins')}</label><label>State A ${bIn('drv.d2.s0', 'text', 'Driver 2 state A', 'hold')}</label><label>State B ${bIn('drv.d2.s1', 'text', 'Driver 2 state B', 'compress')}</label><label>P(state A) ${bIn('drv.d2.p0', 'pct', 'Driver 2 probability')}</label></div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th></th><th>${st2('d2', 0)}</th><th>${st2('d2', 1)}</th></tr></thead><tbody>${[0, 1].map(i => `<tr><td>${st2('d1', i)}</td>${[0, 1].map(j => { const c = DP && DP.cells.find(x => x.i === i && x.j === j); return `<td>${bIn(`drv.map.${i}.${j}`, SC, 'Scenario')} ${c ? `<span class="footnote">${(c.p * 100).toFixed(1)}%</span>` : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+      ${DP && DP.probs ? `<p>Resulting probabilities: ${SC.map(x => `${x} ${(DP.probs[x] * 100).toFixed(1)}%`).join(', ')}. <button class="btn tiny" data-wuse-multi="prob" data-vals='${JSON.stringify(Object.fromEntries(SC.map(x => [x, Math.round(DP.probs[x] * 1e6) / 1e6])))}' data-note="From two drivers: ${esc((DV.d1.name || 'driver 1') + ' and ' + (DV.d2.name || 'driver 2'))}">Use these (asks first)</button></p>` : DP && DP.incomplete ? '<p class="footnote">Assign a scenario to every combination.</p>' : ''}
+      <h3 class="sub-h">Scenario evidence worksheet</h3>${notesHtml('scenario', SNOTE_FIELDS)}`;
+    return `<h2 class="sec-h">Equity bridge worksheets</h2>${wUseConfirm()}
+      ${det('bt-debt', 'Total debt worksheet', 'what is in and out, book vs market, duplicates', debtB)}
+      ${det('bt-lease', 'Lease treatment reconciliation', 'one treatment across cash flows, EBITDA, weights and the bridge', leaseB)}
+      ${det('bt-pen', 'Pension calculator', 'funding deficit, recognized status, proposed adjustment', penB)}
+      ${det('bt-nci', 'Noncontrolling interest', 'book vs economic value', nciB)}
+      ${det('bt-inv', 'Equity investments', 'only value not counted elsewhere', invB)}
+      ${det('bt-dtl', 'Deferred tax worksheet', 'accounting balance vs a separate adjustment', dtlB)}
+      ${det('bt-opt', 'Employee options (Black–Scholes)', 'value per tranche, method check', optB)}
+      ${det('bt-mid', 'Mid-year vs end of year', 'the actual effect on this model', midB)}
+      ${det('bt-prob', 'Scenario probabilities', 'check, drivers, evidence', probB)}`;
+  }
+  function bridgeRecon() {
+    const { all, inp } = calc(), r = all.scen[cur.active], corr = cur.mode === 'corrected', lm = DCFModel.leaseMode(cur);
+    if (!r.ok) return `<section class="panel" id="bridge-recon"><div class="panel-head"><h2>Equity bridge, line by line</h2></div><p class="footnote">The ${esc(cur.active)} scenario does not calculate yet.</p></section>`;
+    const lines = [['debt', '−'], ['leases', '−'], ['pension', '−'], ['minority', '−'], ['cash', '+'], ['sti', '+'], ['stakes', '+'], ['dtl', '−'], ['optVal', '−']];
+    const row = ([k, sg]) => {
+      const off = k === 'leases' && corr && lm === 'operating';
+      const v = inp[k], s = cur.sources[k], src = s ? `${esc(s.name || '')}${s.form ? ' · ' + esc(s.form) : ''}${s.asOf || s.end ? ' · as of ' + esc(s.asOf || s.end) : ''}` : '<span class="na">no source recorded</span>';
+      const id = 'br-' + k;
+      return `<tr><td><details data-aid="${id}" ${aidOpen[id] ? 'open' : ''}><summary>${sg} ${esc(FBY[k].label)}</summary><div class="footnote">${off ? 'Not subtracted: lease cost is already in the cash flows (operating-cost treatment).' : esc(s && (s.method || s.notes) || 'Entered directly.')} ${hasNotes(k) ? 'Your notes are saved under this input.' : ''}</div></details></td><td class="num">${off ? '<span class="na">not used</span>' : (isNum(v) ? (sg === '−' && v !== 0 ? fmt.mm(-v) : fmt.mm(v)) : '<span class="na">missing</span>')}</td><td class="note">${src}</td><td>${bStatusPill(k)}</td></tr>`;
+    };
+    return `<section class="panel" id="bridge-recon"><div class="panel-head"><h2>Equity bridge, line by line (${esc(cur.active)})</h2><span class="footnote">Click a line to see how it was built. Every adjustment appears once.</span></div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Line</th><th>$ millions</th><th>Source and date</th><th>Status</th></tr></thead><tbody>
+      <tr class="total"><td>Enterprise value</td><td class="num">${fmt.mm(r.ev)}</td><td class="note">Your DCF</td><td></td></tr>
+      ${lines.map(row).join('')}
+      <tr class="total"><td>= Estimated common equity value</td><td class="num">${fmt.mm(r.equity)}</td><td class="note">÷ ${nf(r.W.shares, 1)} mm diluted shares = ${fmt.usd(r.perShare)}</td><td></td></tr></tbody></table></div>
+      <p class="footnote">Preferred stock, legal settlements and other debt-like claims belong in the debt worksheet's "other debt-like financing obligations" row; other non-operating assets in equity investments. Nothing is added here that is already in the cash flows or another line.</p></section>`;
   }
   // ---------- pages ----------
   const P = {};
@@ -1623,7 +1805,11 @@
     const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and calculators</button><button class="btn" data-tvwork-toggle aria-pressed="${work}">${work ? 'Hide my work' : 'Show my work'}</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Each input has a guide: what it is, why it matters, where to find it, how to calculate it, a worked example, how to forecast it, scenarios, common mistakes and your notes. "Show my work" keeps a research worksheet per input and scenario with the model.</span></div>`;
     return `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10. It is often most of the total, so its inputs deserve the most evidence.</p></div>${bar}${groupPanel('terminal')}${tvChecksHtml()}${learn ? tvToolsHtml() : ''}${tvScenarioHtml()}${work ? tvWorkHtml() : ''}`;
   };
-  P.bridge = () => `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${groupPanel('bridge')}${groupPanel('scenarios')}`;
+  P.bridge = () => {
+    const learn = !(cur.ui && cur.ui.learn === false);
+    const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and worksheets</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Each input shows its short definition; open it for what belongs in the number, where to find it in the SEC filing, how to calculate it, how to decide, common mistakes, the latest company figure and your notes. Worksheets fill an input only when you click "Use", and ask before replacing a value.</span></div>`;
+    return `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${bar}${groupPanel('bridge')}${bridgeRecon()}${groupPanel('scenarios')}${learn ? bToolsHtml() : ''}`;
+  };
   P.wacc = () => {
     const { wb, inp } = calc();
     const b = (k, label, unit, note) => {
@@ -1713,7 +1899,8 @@
     const wc = face ? T.reduce((a, t) => a + (isNum(t.face) && isNum(t.coupon) ? t.face * t.coupon : 0), 0) / face : null;
     const sh = [inp.basic, inp.options, inp.treasury].every(isNum) ? inp.basic + inp.options - inp.treasury : null;
     const mcap = isNum(sh) && isNum(inp.price) ? sh * inp.price : null;
-    const nd = [inp.debt, inp.leases, inp.cash, inp.sti].every(isNum) ? inp.debt + inp.leases - inp.cash - inp.sti : null;
+    const lIn = cur.mode === 'workbook' || DCFModel.leaseMode(cur) === 'debt';
+    const nd = [inp.debt, inp.leases, inp.cash, inp.sti].every(isNum) ? inp.debt + (lIn ? inp.leases : 0) - inp.cash - inp.sti : null;
     const tev = isNum(mcap) && isNum(nd) ? mcap + nd : null;
     const dcfEv = act.ok ? act.ev : null;
     return `<div><h1>Capital structure</h1><p class="lead">The debt schedule from the 10-K long-term debt note, the diluted share count, and a check of the market's enterprise value against your DCF.</p></div>
@@ -1727,7 +1914,7 @@
     <div class="grid2"><section class="panel"><h2>Diluted share count</h2><p class="footnote">From the share dilution panel on <a href="#company">Company &amp; market data</a>. <a href="#guide">How it works</a></p><div class="tbl-wrap"><table class="fin"><tbody>
       <tr><td>Actual common shares outstanding${cur.asOf && cur.asOf.basic ? ` <span class="footnote">as of ${esc(cur.asOf.basic)}</span>` : ''}</td><td>${fmt.n(inp.basic, 2)}</td></tr><tr><td>+ Gross new shares from dilutive securities</td><td>${fmt.n(inp.options, 2)}</td></tr><tr><td>− Shares repurchased with proceeds (treasury stock method)</td><td>${fmt.n(inp.treasury, 2)}</td></tr><tr class="total"><td>Diluted shares (mm)</td><td>${fmt.n(sh, 0)}</td></tr></tbody></table></div></section>
     <section class="panel"><h2>Market vs DCF enterprise value</h2><div class="tbl-wrap"><table class="fin"><tbody>
-      <tr><td>Market capitalisation</td><td>${fmt.mm(mcap)}</td></tr><tr><td>+ Debt + operating leases − cash − short-term investments</td><td>${fmt.mm(nd)}</td></tr><tr class="total"><td>Trading enterprise value</td><td>${fmt.mm(tev)}</td></tr>
+      <tr><td>Market capitalisation</td><td>${fmt.mm(mcap)}</td></tr><tr><td>+ Debt${lIn ? ' + operating leases' : ''} − cash − short-term investments</td><td>${fmt.mm(nd)}</td></tr><tr class="total"><td>Trading enterprise value</td><td>${fmt.mm(tev)}</td></tr>
       <tr><td>DCF enterprise value (${cur.active})</td><td>${fmt.mm(dcfEv)}</td></tr><tr class="key"><td>Market premium / (discount) to DCF</td><td>${fmt.pct(isNum(tev) && isNum(dcfEv) ? tev / dcfEv - 1 : null)}</td></tr></tbody></table></div>
       <p class="footnote">Uses the same debt-like items as the equity bridge, so the two numbers compare like for like.</p></section></div>`;
   };
@@ -1803,7 +1990,7 @@
     <section class="panel"><h2>Enterprise value to value per share</h2><div class="tbl-wrap"><table class="fin"><tbody>
       ${r('Sum of PV of FCFF (years 1–10)', fmt.mm(act.sumPV))}${r('+ PV of terminal value', fmt.mm(act.pvTV))}${r('Enterprise value', fmt.mm(act.ev), 'total')}
       ${r('+ Cash & equivalents', fmt.mm(i.cash), 'sub')}${r('+ Short-term investments', fmt.mm(i.sti), 'sub')}${r('+ Equity stakes', fmt.mm(i.stakes), 'sub')}
-      ${r('− Total debt', fmt.mm(-i.debt), 'sub')}${r('− Pension underfunding', fmt.mm(-i.pension), 'sub')}${r('− Operating leases', fmt.mm(-i.leases), 'sub')}${r('− Minority interest', fmt.mm(-i.minority), 'sub')}${r('− Deferred tax liability', fmt.mm(-i.dtl), 'sub')}${r('− Options value', fmt.mm(-i.optVal), 'sub')}
+      ${r('− Total debt', fmt.mm(-i.debt), 'sub')}${r('− Pension underfunding', fmt.mm(-i.pension), 'sub')}${cur.mode === 'workbook' || DCFModel.leaseMode(cur) === 'debt' ? r('− Operating leases', fmt.mm(-i.leases), 'sub') : r('Operating leases (not subtracted: lease cost is already in the cash flows)', '0', 'sub')}${r('− Minority interest', fmt.mm(-i.minority), 'sub')}${r('− Deferred tax liability', fmt.mm(-i.dtl), 'sub')}${r('− Options value', fmt.mm(-i.optVal), 'sub')}
       ${r('Equity value', fmt.mm(act.equity), 'total')}${r('÷ Diluted shares (mm)', fmt.n(act.W.shares, 0))}
       ${r('Intrinsic value per share', fmt.usd(act.perShare), 'key')}${r('Current share price', fmt.usd(i.price))}${r('Upside / (downside)', fmt.pct(act.upside))}
       ${r('Implied EV / EBITDA (year 1)', fmt.x(act.evEbitda1))}${r('Implied EV / revenue (year 1)', fmt.x(act.evRev1))}
@@ -1892,7 +2079,8 @@
       ['Terminal reinvestment did not match growth', 'The workbook built year 11 from separate CapEx and NWC inputs, so its reinvestment (7.6%) disagreed with g ÷ ROIC (14.3%), and the Terminal ROIC input was ignored.', 'Year-11 FCFF = NOPAT × (1 − g ÷ terminal ROIC). The terminal ROIC input now drives it.', 'Damodaran stable-growth identity: growth = reinvestment rate × ROIC.'],
       ['Gordon terminal value was discounted a half-year too far', 'Cash flows were discounted at mid-year (0.5 … 9.5), but the Gordon terminal value at a full 10 years.', 'With mid-year on, the Gordon TV is discounted 9.5 years. The exit-multiple TV stays at 10 years.', 'BVR: under the mid-year convention, discount a perpetuity-growth TV by N − 0.5; an exit-multiple TV by N.'],
       ['Exit multiple used year-11 EBITDA', 'The multiple was applied to the terminal-year (year 11) EBITDA but discounted as if received at year 10.', 'TV = Year 10 EBITDA × multiple, discounted 10 years.', 'Standard practice: apply the multiple to the final forecast year\'s EBITDA.'],
-      ['WACC weights were typed, not market values', 'Equity and debt weights were a typed 97/3, while the equity bridge treats both debt and operating leases as debt.', 'Equity weight = market cap ÷ (market cap + debt + operating leases), calculated.', 'Workbook checklist: weight by market values, not book.'],
+      ['WACC weights were typed, not market values', 'Equity and debt weights were a typed 97/3 instead of market values.', 'Equity weight = market cap ÷ (market cap + debt), calculated from market values (operating leases added only under the lease-adjusted treatment).', 'Workbook checklist: weight by market values, not book.'],
+      ['Operating leases were counted twice', 'Lease cost stayed in operating expenses (and so in EBITDA and free cash flow) while the lease liability was also subtracted in the bridge and counted as debt in the WACC weights.', 'Standard US GAAP treatment by default: lease cost stays in the cash flows; the liability is not subtracted and not in the weights. A lease-adjusted (debt) treatment can be chosen per model.', 'Common practice: treat leases one way consistently across cash flows, EBITDA, weights and the bridge.'],
       ['Base revenue was typed twice', 'Base-year revenue on Assumptions was not linked to Historicals.', 'Linked to the latest historical year.', 'Avoids two numbers that should be one.'],
       ['Inputs that did nothing', 'SBC %, interest income rate, NWC base, R&D capitalisation rate and revenue mix never reached the valuation.', 'Removed from the input screens. EBITDA margins are entered after SBC. Gross margin is kept, labelled display only.', 'An input that changes nothing misleads the analyst.'],
       ['Wording that did not match the formulas', 'Sensitivity said "Base-case FCFFs" but used the active scenario; the Readme named the wrong second grid; historical taxes were a hidden 21%.', 'Labels corrected; estimated taxes labelled as estimates at the Base tax rate.', 'No formula change.'],
@@ -1961,7 +2149,7 @@
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
+      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.B[drawerKey] ? `<div class="wsecs">${bSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
@@ -2039,6 +2227,7 @@
       cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
     }
     else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
+    else if (t === 'bt') { const parts = el.dataset.k.split('.'); let o = bt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tv') { const parts = el.dataset.k.split('.'); let o = tvState(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tool') { const parts = el.dataset.k.split('.'); let o = toolState(); for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
@@ -2056,7 +2245,7 @@
     if (el.dataset && el.dataset.pendId) { pendSel = pendSel || {}; pendSel[el.dataset.pendId] = el.checked; if (!Object.keys(pendSel).some(k => pendSel[k] && cur.pending.items.find(p => p.id === k && p.kind === 'override'))) pendConfirm = false; render(); return; }
     if (el.id === 'pend-confirm') { pendConfirm = el.checked; render(); return; }
     if (el.id === 'tm-use') { cur.ttmManual = cur.ttmManual || {}; DCFModel.logChange(cur, 'TTM source', null, cur.ttmManual.use ? 'built by hand' : 'from filings', el.checked ? 'built by hand' : 'from filings'); cur.ttmManual.use = el.checked; persist(); render(); toast(el.checked ? 'Using the TTM you built by hand' : 'Using the TTM calculated from the filings'); return; }
-    if (el.id === 'wacc-leases') { cur.waccCfg = cur.waccCfg || {}; DCFModel.logChange(cur, 'leases in WACC weights', null, cur.waccCfg.leases || 'include', el.value); cur.waccCfg.leases = el.value; persist(); render(); toast(el.value === 'exclude' ? 'Operating leases are no longer counted as debt in the WACC weights' : 'Operating leases are counted as debt in the WACC weights'); return; }
+    if (el.id === 'wacc-leases' || el.id === 'lease-mode') { const from = DCFModel.leaseMode(cur); if (from === el.value) return; DCFModel.logChange(cur, 'operating lease treatment', null, from, el.value); cur.leaseMode = el.value; if (cur.waccCfg) delete cur.waccCfg.leases; persist(); render(); toast(el.value === 'debt' ? 'Operating leases are now treated as debt: subtracted in the bridge and counted in the WACC weights. Make sure your margins exclude lease cost.' : 'Operating leases are now treated as operating costs: lease cost stays in the cash flows, and the liability is not subtracted or counted in the weights.'); return; }
     if (el.id === 'base-timing') { DCFModel.logChange(cur, 'forecast timing', null, cur.timing, el.value); cur.timing = el.value; persist(); render(); toast(el.value === 'dated' ? 'Forecast years now line up with the valuation date' : 'Using the workbook timing'); return; }
     if (el.dataset && el.dataset.t) return setInput(el);
     if (el.id === 'model-select') { cur = models[el.value]; try { localStorage.setItem('dcfcalc.current', cur.id); } catch (x) {} parseErrors = {}; render(); return; }
@@ -2094,7 +2283,15 @@
     if (b.dataset.tab) { dashTab = b.dataset.tab; render(); return; }
     if (b.dataset.useRef) { useRef(b.dataset.useRef); return; }
     if (b.dataset.dilMethod) { const m = b.dataset.dilMethod; if (cur.dilution.method === m) return; const from = cur.dilution.method; if (from === 'totals' || !from) cur.dilution.savedTotals = { options: cur.inputs.options, treasury: cur.inputs.treasury }; if (m === 'totals' && cur.dilution.savedTotals) { cur.inputs.options = cur.dilution.savedTotals.options; cur.inputs.treasury = cur.dilution.savedTotals.treasury; } cur.dilution.method = m; if (m === 'proxy' && !cur.dilution.proxy) cur.dilution.proxy = { v: null, period: null }; DCFModel.logChange(cur, 'dilution method', null, from, m); persist(); render(); toast(m === 'totals' ? 'Using the workbook totals' : m === 'simple' ? 'Simple dilution: enter an estimate or value on actual shares' : m === 'proxy' ? 'Reported net dilution: use the latest EPS note figure' : 'Detailed estimate: enter each security'); return; }
-    if (b.dataset.wuse) { const u = { key: b.dataset.wuse, v: +b.dataset.v, scope: b.dataset.scope, note: b.dataset.note }; const targets = u.scope === 'all' ? SC : [u.scope]; const over = targets.filter(x => isNum(cur.inputs[u.key][x]) && Math.abs(cur.inputs[u.key][x] - u.v) > 1e-12); if (over.length) { wUse = Object.assign(u, { text: `${FBY[u.key].label}: ${over.map(x => x + ' ' + plain(fmtVal(u.key, cur.inputs[u.key][x]))).join(', ')} would become ${plain(fmtVal(u.key, u.v))}.` }); render(); const c = document.querySelector('.confirmbar'); if (c) c.scrollIntoView({ block: 'center' }); } else applyWUse(u); return; }
+    if (b.dataset.wuse || b.dataset.wuseMulti) {
+      const key = b.dataset.wuse || b.dataset.wuseMulti, scope = b.dataset.wuseMulti ? 'multi' : b.dataset.scope;
+      const u = { key, scope, note: b.dataset.note, v: b.dataset.v != null ? +b.dataset.v : null, vals: b.dataset.vals ? JSON.parse(b.dataset.vals) : null };
+      const targets = scope === 'all' ? SC : scope === 'multi' ? SC : scope === 'single' ? ['single'] : [scope];
+      const get = x => x === 'single' ? cur.inputs[key] : cur.inputs[key][x], want = x => scope === 'multi' ? u.vals[x] : u.v;
+      const over = targets.filter(x => isNum(get(x)) && Math.abs(get(x) - want(x)) > 1e-12);
+      if (over.length || scope === 'multi') { wUse = Object.assign(u, { text: `${FBY[key].label}: ${targets.map(x => (x === 'single' ? '' : x + ' ') + plain(fmtVal(key, get(x))) + ' → ' + plain(fmtVal(key, want(x)))).join(', ')}.${key === 'optVal' && optionsInShares() ? ' Options are also in the diluted share count: remove them there, or the same options are counted twice.' : ''}` }); render(); const c = document.querySelector('.confirmbar'); if (c) c.scrollIntoView({ block: 'center' }); } else applyWUse(u);
+      return;
+    }
     if (b.dataset.wuseYes !== undefined) { if (wUse) applyWUse(wUse); return; }
     if (b.dataset.wuseNo !== undefined) { wUse = null; render(); return; }
     if (b.dataset.rfFetch !== undefined) { fetchTreasury(); return; }
@@ -2120,6 +2317,8 @@
     if (b.dataset.toolUse) { const k = b.dataset.toolUse, v = Math.round(+b.dataset.v * 1e6) / 1e6, sc = cur.active; const from = cur.inputs[k][sc]; cur.inputs[k][sc] = v; DCFModel.logChange(cur, k, sc, from, v); if (cur.defaults) delete cur.defaults[k]; persist(); render(); toast(`${FBY[k].label} (${sc}) set to ${(v * 100).toFixed(2)}%. The previous value (${isNum(from) ? (from * 100).toFixed(2) + '%' : 'empty'}) is in the change log.`); return; }
     if (b.dataset.suggest) { const k = b.dataset.suggest, v = Math.round(+b.dataset.v * 1e6) / 1e6; const empty = SC.filter(sc => !isNum(cur.inputs[k][sc])); empty.forEach(sc => { DCFModel.logChange(cur, k, sc, null, v); cur.inputs[k][sc] = v; }); if (empty.length && !cur.sources[k]) cur.sources[k] = { name: 'Historical anchor: ' + b.dataset.l, type: 'Own judgment', cat: 'analyst', notes: 'Filled from the historical anchor by your choice. Review it.' }; persist(); render(); toast(empty.length ? `Filled ${empty.join(', ')} with ${plain(fmtVal(k, v))}. Cells you had filled were not changed.` : 'All three scenarios already have values, so nothing was changed.'); return; }
     if (b.dataset.tvworkToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.tvWork = !cur.ui.tvWork; persist(); render(); if (cur.ui.tvWork) { const w = document.getElementById('tv-work'); if (w) w.scrollIntoView({ block: 'start' }); } return; }
+    if (b.dataset.bAdd) { const T = bt(); if (b.dataset.bAdd === 'inv') T.inv.push({}); else T.opt.tr.push({}); persist(); render(); return; }
+    if (b.dataset.bTool) { const id = b.dataset.bTool; aidOpen[id] = true; cur.ui = cur.ui || {}; if (cur.ui.learn === false) { cur.ui.learn = true; persist(); } if (drawerKey) { drawerKey = null; renderDrawer(); } const go = () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ block: 'start' }); }; if (page() !== 'bridge') { location.hash = 'bridge'; setTimeout(go, 120); } else { render(); go(); } return; }
     if (b.dataset.tvTool) { const id = b.dataset.tvTool; aidOpen[id] = true; cur.ui = cur.ui || {}; if (cur.ui.learn === false) { cur.ui.learn = true; persist(); } if (drawerKey) { drawerKey = null; renderDrawer(); } const go = () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ block: 'start' }); }; if (page() !== 'terminal') { location.hash = 'terminal'; setTimeout(go, 120); } else { render(); go(); } return; }
     if (b.dataset.learnToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.learn = cur.ui.learn === false; persist(); render(); return; }
     if (b.dataset.aidAll) { const open = b.dataset.aidAll === 'open'; document.querySelectorAll('details[data-aid]').forEach(d => { aidOpen[d.dataset.aid] = open; }); render(); return; }

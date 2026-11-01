@@ -1023,7 +1023,7 @@ const FIELDS = [
 "required": true,
 "source": "Analyst judgment",
 "backup": "Mgmt guidance ranges",
-"tip": "Must sum to 100% (check cell C89). Typical: Base 50–60%, Bull 20–25%, Bear 20–25%.",
+"tip": "Must sum to 100% (check cell C89).",
 "video": "scenario analysis probability weighted DCF"
 },
 {
@@ -1034,7 +1034,7 @@ const FIELDS = [
 "tri": false,
 "item": 58,
 "what": "Whether cash flows arrive in the middle of each year (Y) or at the end (N).",
-"enter": "Y or N. Y is more realistic and adds about 5–7% to value.",
+"enter": "Y or N.",
 "kind": "forecast",
 "min": null,
 "max": null,
@@ -1042,7 +1042,7 @@ const FIELDS = [
 "required": true,
 "source": "Convention choice",
 "backup": "—",
-"tip": "Y = CFs arrive mid-year (more realistic). N = end-of-year. Y adds ~5–7% to value.",
+"tip": "Y = CFs arrive mid-year (more realistic). N = end-of-year.",
 "video": "mid-year convention DCF"
 }
 ];
@@ -1188,7 +1188,7 @@ const GUIDE_SECTIONS = [
 "title": "Scenarios & Final Checks",
 "why": "A point-estimate DCF is false precision. Scenarios force you to define what HAS to be true for the stock to be cheap or expensive. Probability-weighting gives you an expected value, not a target.",
 "think": "Bear/Base/Bull should be PLAUSIBLE futures, not just ± 20%. Each should have a clear narrative: \"In Bear, competitor X wins on price; in Bull, the new product hits margin targets.\" Probabilities reflect your conviction in the base case.",
-"watch": "Bear and Bull that are just \"flex every input the same direction\" — real scenarios have offsetting effects. Probabilities that don't sum to 100%. No mid-year convention applied (understates value by ~5–7%)."
+"watch": "Bear and Bull that are just \"flex every input the same direction\" — real scenarios have offsetting effects. Probabilities that don't sum to 100%. A timing convention chosen without thinking about when the cash actually arrives."
 }
 ];
 
@@ -1299,6 +1299,22 @@ const DIL_HELP = {
   Object.assign(by.troic, { what: 'Return on new capital invested after year 10. Sets terminal reinvestment: reinvestment rate = g ÷ ROIC.', enter: 'A percentage. Above WACC means growth creates value, equal means growth is neutral, below means growth destroys value. None of these is forced.', source: 'Company historical ROIC and Damodaran ROIC by industry (normalized column)', backup: 'Peer ROIC', tip: 'Terminal FCFF = NOPAT × (1 − g ÷ ROIC).' });
   Object.assign(by.tvMethod, { source: 'Damodaran: prefer Gordon in a DCF; use the multiple as a cross-check', tip: 'Compare both methods on the Terminal value page.' });
   Object.assign(by.exitMult, { enter: 'A number such as 12 for 12×, from peers or an industry table you cite. Applied to year-10 EBITDA. Only needed when the method is Exit Multiple.', source: 'Peer EV/EBITDA (trailing), with date and source', backup: 'Damodaran EV/EBITDA by industry', tip: 'Today\'s multiples include today\'s growth: a mature year-10 company usually deserves less.' });
+})();
+
+// Equity bridge and scenario inputs (full guides live in help.js)
+(() => {
+  const by = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+  Object.assign(by.cash, { tip: 'Use the newest balance sheet, the same date as debt. Added to enterprise value.' });
+  Object.assign(by.sti, { enter: '$ millions. 0 if the balance sheet shows none.', tip: 'Liquid securities only. Strategic stakes go in Equity stakes.' });
+  Object.assign(by.debt, { what: 'Total financial debt is the value of a company\'s outstanding interest-bearing borrowing obligations and any lease or similar financing obligations treated as debt by this valuation model. It is deducted from enterprise value because lenders and other financing claimants have claims on the business before common shareholders.', enter: '$ millions: short-term borrowings, commercial paper, current and non-current long-term debt, finance leases. Not total liabilities.', tip: 'Debt is not total liabilities. Operating leases have their own line. Use the debt worksheet to build it.' });
+  Object.assign(by.leases, { what: 'Operating lease liabilities (present value of remaining lease payments, ASC 842). Used only when leases are treated as debt.', enter: '$ millions, current + non-current. Not used under the standard operating-cost treatment.', tip: 'Standard: lease cost stays in the cash flows, so the liability is not subtracted. Lease-adjusted: subtracted, and margins must exclude lease cost.' });
+  Object.assign(by.pension, { what: 'Defined-benefit pension obligations not covered by plan assets: a debt-like claim.', enter: '$ millions. 0 if there are no defined-benefit plans or they are fully funded.', tip: 'Deficit = projected benefit obligation − plan assets. No automatic after-tax haircut; subtract it once.' });
+  Object.assign(by.minority, { what: 'Noncontrolling interest: outside owners\' share of consolidated subsidiaries. Subtracted.', enter: '$ millions. 0 if every subsidiary is wholly owned.', tip: 'Book value is not market value. Read redeemable NCI terms.' });
+  Object.assign(by.stakes, { enter: '$ millions. 0 if none, or if their income is already in the forecast.', tip: 'Add only value not already in cash, securities or the forecast cash flows.' });
+  Object.assign(by.dtl, { what: 'A separate adjustment for future tax payments your cash-flow taxes do not already include. Not the book deferred tax balance by default.', enter: '$ millions. 0 when you make no separate adjustment (record why).', tip: 'Do not subtract the whole book DTL mechanically; use the tax worksheet.' });
+  Object.assign(by.optVal, { enter: '$ millions. 0 when options are already in the diluted share count (dilution method).', tip: 'One method only: dilution (shares) or option value (subtract here).' });
+  Object.assign(by.midYear, { enter: 'Y or N. The effect for your model is calculated on the Equity bridge page.', tip: 'Y = cash arrives through the year; N = at year end. A modelling choice, not a filing item.' });
+  Object.assign(by.prob, { enter: 'A percentage for each case. The three must add up to 100%. 0% is a valid choice; blank is not set.', tip: 'Analyst judgment backed by evidence. There is no standard split.' });
 })();
 
 if (typeof module !== 'undefined') module.exports = { FIELDS, GROUPS, HIST_FIELDS, GUIDE_SECTIONS, DIL_HELP };

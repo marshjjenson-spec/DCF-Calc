@@ -153,6 +153,7 @@ const DCFHelp = (() => {
     damRoc: ['Damodaran: return on capital by industry (unadjusted, lease-adjusted, normalized ROIC)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/roc.html', 'direct'],
     damEbitda: ['Damodaran: EV/EBITDA and other value multiples by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/vebitda.html', 'direct'],
     damFundG: ['Damodaran: fundamental growth in EBIT (reinvestment rate × return on capital)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/fundgrEB.html', 'direct'],
+    damOpt: ['Damodaran: valuing employee options (valuation questions)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/valquestions/mgtoption.htm', 'method'],
     bloomberg: ['Bloomberg Terminal (BETA function, bond yields)', 'https://www.bloomberg.com/professional/', 'direct', true],
   };
   const W = {
@@ -309,6 +310,109 @@ const DCFHelp = (() => {
       forecast: ['CapEx below D&A forever shrinks the asset base.'], scen: 'Usually close across scenarios.', mistakes: ['Setting both terminal CapEx and a ROIC-based reinvestment (counting reinvestment twice)'], sources: [S.edgar],
     },
   };
-  return { T, W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
+  // ---- equity bridge and scenario guides ----
+  const B = {
+    cash: {
+      what: 'Cash and cash equivalents on the latest balance sheet: money the company could pay out without affecting operations. Added to enterprise value.',
+      need: 'Required. Enter the reported figure; 0 only if the balance sheet really shows none. If you have not looked yet it is missing, not zero.',
+      include: { in: ['Cash on hand and demand deposits', 'Cash equivalents (money-market funds, very short Treasury bills)'], out: ['Restricted cash you cannot use (note it separately)', 'Marketable securities (next line)', 'Customer funds held for others (payment companies)', 'Strategic equity stakes (equity stakes line)'] },
+      where: { locs: ['Latest 10-Q or 10-K: Consolidated Balance Sheets, first line of current assets', 'Notes: "Cash, Cash Equivalents, and Marketable Securities" or "Fair Value Measurements"'], terms: ['cash and cash equivalents', 'restricted cash'], period: 'Use the newest balance sheet (often a 10-Q), the same date as debt.' },
+      calc: { formula: 'Cash = reported cash and cash equivalents', vars: [], example: 'No calculation: copy the balance-sheet line.' },
+      decide: ['Some analysts subtract "operating cash" needed to run the business; this model adds all reported cash. If you hold back an amount, say why in your notes.', 'Cash trapped abroad may face tax on repatriation; adjust only with evidence.'],
+      mistakes: ['Cash from the 10-K while debt comes from a newer 10-Q', 'Adding restricted cash', 'Counting securities in both cash and short-term investments'],
+      sources: [S.edgar],
+    },
+    sti: {
+      what: 'Liquid marketable securities held as a store of cash. Added to enterprise value.',
+      need: 'Enter 0 when the balance sheet shows none (that is a justified zero). Missing means you have not checked.',
+      include: { in: ['Short-term marketable securities', 'Treasury and corporate bonds held for liquidity', 'Long-term marketable debt securities held as surplus cash (if clearly non-operating)'], out: ['Strategic equity stakes and equity-method investments (equity stakes line)', 'Securities already inside cash equivalents'] },
+      where: { locs: ['Balance sheet: "Marketable securities" or "Short-term investments"', 'Note: "Cash, Cash Equivalents, and Marketable Securities"'], terms: ['marketable securities', 'short-term investments', 'available-for-sale'], period: 'Same balance-sheet date as cash and debt.' },
+      calc: { formula: 'Short-term investments = reported marketable securities', vars: [], example: 'No calculation: copy the balance-sheet line.' },
+      decide: ['Include only what you could sell at about the reported value.'], mistakes: ['Including equity stakes here and in equity stakes'], sources: [S.edgar],
+    },
+    debt: {
+      what: 'Total financial debt is the value of a company\'s outstanding interest-bearing borrowing obligations and any lease or similar financing obligations treated as debt by this valuation model. It is deducted from enterprise value because lenders and other financing claimants have claims on the business before common shareholders.',
+      need: 'Required. Debt is not the same as total liabilities: payables, accruals and deferred revenue are operating items. A company with no borrowings has debt of 0, which is complete, not missing.',
+      include: { in: ['Short-term bank loans', 'Revolving credit facility amounts actually drawn', 'Commercial paper outstanding', 'Current portion of long-term loans and bonds', 'Other current interest-bearing borrowings', 'Corporate bonds, senior and subordinated notes', 'Term loans', 'Mortgages and secured financing', 'Other long-term financial borrowings', 'Convertible notes (the debt part; the conversion feature is equity-like)', 'Finance lease liabilities, current and non-current', 'Operating lease liabilities only if this model treats leases as debt (see the lease reconciliation)', 'Other material debt-like financing obligations, when economically justified'], out: ['Accounts payable', 'Routine accrued expenses and payroll', 'Deferred revenue', 'Customer deposits that are operating liabilities', 'Undrawn credit lines and unused borrowing capacity', 'Cash and short-term investments (separate lines)', 'Pension deficits, minority interest and deferred taxes (their own bridge lines)'] },
+      where: { locs: ['Latest 10-Q or 10-K: Consolidated Balance Sheets (short-term borrowings, current portion of long-term debt, long-term debt)', 'Notes: "Debt" / "Borrowings" / "Long-Term Debt" (table of every note with rates and maturities)', 'Notes: "Credit Facilities" / "Commercial Paper"', 'Notes: "Leases" (finance lease liabilities)', 'Notes: "Convertible Notes"', 'Notes: "Fair Value of Financial Instruments" (fair value of total debt)'], terms: ['long-term debt', 'commercial paper', 'credit facility', 'finance lease liabilities', 'fair value of long-term debt'], period: 'Use the newest balance sheet; the same date as cash.' },
+      calc: { formula: 'Total included debt = short-term borrowings + current portion of long-term debt + non-current borrowings + included lease liabilities + other identified financing obligations − duplicated components', vars: [['Book value', 'Carrying amount on the balance sheet (net of discounts and issuance costs)'], ['Principal', 'Face amount owed at maturity'], ['Market value', 'What the debt trades at; the fair-value note discloses an estimate']], example: 'Hypothetical: commercial paper 2,000 + current portion 1,500 + long-term debt 20,000 + finance leases 3,000 = 26,500. If "long-term debt" in the note already includes the 1,500 current portion, subtract it once: 25,000.' },
+      decide: ['Use market value when it differs materially from book (for example after rates moved a lot), and say which you used; book value is a disclosed approximation otherwise.', 'Count operating leases only if the cash flows are lease-adjusted (lease cost added back to EBITDA). Otherwise lease payments already reduce the cash flows.', 'Non-interest-bearing items can still matter in unusual cases (large legal settlements, deferred purchase consideration): put those in their own line with a reason.'],
+      mistakes: ['The current portion counted twice (inside "total long-term debt" and again separately)', 'Lease liabilities in both debt and the lease line', 'Using total liabilities', 'Debt from an older filing than cash', 'Adding undrawn credit lines'],
+      sources: [S.edgar, S.finra],
+    },
+    leases: {
+      what: 'Operating lease liabilities: the present value of remaining lease payments on the balance sheet under ASC 842.',
+      need: 'Depends on the model\'s lease treatment. If lease costs are left in operating expenses (as in reported EBITDA and these cash flows), the liability should not also be subtracted. If you treat leases as debt, the cash flows must be lease-adjusted.',
+      include: { in: ['Operating lease liabilities, current and non-current, when leases are treated as debt'], out: ['Finance lease liabilities (in debt)', 'Future leases not yet commenced', 'Short-term leases not on the balance sheet'] },
+      where: { locs: ['Balance sheet: "Operating lease liabilities" (sometimes inside accrued expenses and other long-term liabilities)', 'Note: "Leases" (maturity table, discount rate, lease cost)'], terms: ['operating lease liabilities', 'lease cost', 'weighted-average discount rate'], period: 'Same date as debt.' },
+      calc: { formula: 'Operating lease liability = current + non-current operating lease liabilities', vars: [], example: 'Hypothetical: current 1,200 + non-current 8,800 = 10,000.' },
+      decide: ['Pick one treatment and use it everywhere: cash flows, EBITDA, WACC weights and the bridge. The lease reconciliation on the Equity bridge page shows where each choice applies.'],
+      mistakes: ['Subtracting the liability while lease costs stay in the cash flows (counted twice)', 'Counting finance leases here and in debt'], sources: [S.edgar],
+    },
+    pension: {
+      what: 'A defined-benefit pension promises future retirement payments. If the actuarial obligation is larger than the plan assets set aside, the shortfall is a debt-like claim on future cash.',
+      need: 'Only for companies with defined-benefit plans. 0 is right when there are no such plans or they are fully funded (a justified zero); if you have not checked the note it is missing, not zero.',
+      include: { in: ['Projected benefit obligation (PBO) of defined-benefit pension plans', 'Other postretirement benefit obligations (retiree health), if you include them', 'Minus the fair value of plan assets'], out: ['Defined-contribution plans (401(k)): no obligation beyond contributions already expensed', 'Amounts already counted in debt', 'Service cost for current employees, which is in operating costs'] },
+      where: { locs: ['10-K note: "Employee Benefit Plans" / "Retirement Plans" / "Pensions and Other Postretirement Benefits" (funded status table)', '10-Q: updates on contributions and remeasurements; the full table is annual'], terms: ['defined benefit pension', 'projected benefit obligation', 'fair value of plan assets', 'funded status', 'accrued pension liability', 'postretirement benefits'], period: 'The funded-status table is at fiscal year end; use a newer 10-Q only if it reports a remeasurement.' },
+      calc: { formula: 'Pension funding deficit = projected benefit obligation − fair value of plan assets', vars: [['PBO', 'Present value of benefits earned to date, with assumed salary growth'], ['Plan assets', 'Fair value of assets held in the plan']], example: 'Hypothetical: obligation 5,000 − plan assets 4,000 = deficit 1,000. That is a starting point: check what is already on the balance sheet and whether a tax effect applies.' },
+      decide: ['The funded status is the usual starting point. The balance sheet usually already shows it as a liability (and any surplus as an asset): subtract it once.', 'Pension contributions are tax-deductible, so some analysts reduce the deficit by the tax rate. That is a choice to document, not an automatic haircut.', 'A large surplus may not be fully recoverable by shareholders.'],
+      mistakes: ['Subtracting the recognized pension liability and a separately calculated deficit for the same plan', 'Applying an automatic after-tax haircut', 'Using the accumulated (ABO) instead of projected obligation without saying so'], sources: [S.edgar],
+    },
+    minority: {
+      what: 'Noncontrolling interest: the part of consolidated subsidiaries owned by outside shareholders. The parent reports 100% of those subsidiaries\' results, so the outsiders\' share of value is removed.',
+      need: '0 is right when every subsidiary is wholly owned (justified zero). Not needed if your forecast already includes only the parent\'s share of operations.',
+      include: { in: ['Value of outside owners\' stakes in consolidated subsidiaries', 'Redeemable noncontrolling interests, valued on their contractual terms'], out: ['Equity-method investments (the company is the minority owner: add them in equity stakes)', 'Preferred stock of the parent (its own claim)'] },
+      where: { locs: ['Balance sheet equity section: "Noncontrolling interests"; mezzanine section: "Redeemable noncontrolling interests"', 'Notes: "Consolidation" / "Noncontrolling Interests" / "Variable Interest Entities"', 'Exhibit 21 lists subsidiaries'], terms: ['noncontrolling interests', 'redeemable noncontrolling interests', 'variable interest entities'], period: 'Same balance-sheet date as debt.' },
+      calc: { formula: 'Outside stake value = subsidiary equity value × percentage owned by outside shareholders', vars: [['Subsidiary equity value', 'Market value if the subsidiary is listed; otherwise your estimate'], ['Outside ownership', 'From the consolidation note']], example: 'Hypothetical: subsidiary equity value 10,000 × 20% outside = 2,000. The book carrying value may be very different.' },
+      decide: ['Book value is an accounting amount, not market value. Use market value when the subsidiary is listed; otherwise book or an estimate, labelled as such.', 'Redeemable NCI can carry a put or redemption price that makes it closer to debt: read the terms.'],
+      mistakes: ['Subtracting NCI when the forecast already excludes the subsidiary\'s minority share', 'Treating redeemable NCI as ordinary equity without reading the terms'], sources: [S.edgar],
+    },
+    stakes: {
+      what: 'Investments in other businesses whose value is not in the forecast cash flows, such as equity-method stakes, minority holdings and joint ventures. Added to enterprise value.',
+      need: '0 is right when there are none or their income is already in the forecast. Add only the value not counted elsewhere.',
+      include: { in: ['Equity-method investments and joint ventures', 'Minority holdings in listed companies (shares × price)', 'Private stakes, at a supported value', 'Other identifiable non-operating ownership interests'], out: ['Consolidated subsidiaries (already in operations)', 'Securities already in cash or short-term investments', 'Investments whose income is in your EBITDA forecast', 'Operating assets'] },
+      where: { locs: ['Balance sheet: "Equity method investments", "Long-term investments", "Other assets"', 'Notes: "Investments" / "Equity Method Investments" / "Fair Value Measurements" / "Variable Interest Entities"', 'Significant-investee financial statements (Rule 3-09 / 4-08(g))'], terms: ['equity method investments', 'non-marketable equity securities', 'joint venture'], period: 'Holdings at the balance-sheet date; listed prices on the valuation date.' },
+      calc: { formula: 'Stake value = ownership % × investee equity market value, or shares held × current share price', vars: [], example: 'Hypothetical: 50 million shares × $20 = 1,000. A private stake carried at cost 300 may be worth more or less: say how you valued it.' },
+      decide: ['Equity-method income sits below operating income, so it is not in EBITDA-based cash flows: the stake is usually added here.', 'Consider tax on a gain if the stake would have to be sold.'],
+      mistakes: ['Adding a stake whose dividends are already in the forecast', 'Counting marketable securities here and in short-term investments', 'Using carrying value for a listed stake'], sources: [S.edgar],
+    },
+    dtl: {
+      what: 'Deferred tax liabilities and assets come from timing differences between tax and book accounting. The reported net balance is an accounting figure, not necessarily the present value of extra taxes the company will pay.',
+      need: 'Usually no separate adjustment: the forecast tax rate already drives cash taxes. Enter 0 with a note when you make no separate adjustment; that is an analyst decision, different from a balance of zero.',
+      include: { in: ['Only the present value of incremental future tax payments that your cash-flow taxes do not already include'], out: ['The full book balance by default', 'Deferred tax assets already used through the NOL input'] },
+      where: { locs: ['10-K note: "Income Taxes" (table of deferred tax assets and liabilities, valuation allowance)', 'Balance sheet: "Deferred income taxes"', 'Notes on tax-loss carryforwards and uncertain tax positions'], terms: ['deferred tax assets and liabilities', 'valuation allowance', 'net operating loss carryforwards', 'unrecognized tax benefits'], period: 'The detailed table is annual.' },
+      calc: { formula: 'Net DTL = deferred tax liabilities − deferred tax assets (after valuation allowance). Separate adjustment = Σ incremental tax payment_t ÷ (1 + r)^t', vars: [['Incremental payments', 'Extra cash taxes from reversals your forecast does not include'], ['r', 'A rate matching their timing and risk']], example: 'Hypothetical: reversals add 100 of tax in each of years 1–3 not in the forecast, at 8%: 100 ÷ 1.08 + 100 ÷ 1.08² + 100 ÷ 1.08³ = 257.7.' },
+      decide: ['If your cash taxes come from a rate × EBIT, timing differences are mostly ignored; an adjustment can make sense when large reversals are known.', 'Accelerated depreciation DTLs often never reverse while the company keeps investing.'],
+      mistakes: ['Subtracting the whole book DTL mechanically', 'Counting reversals in both cash taxes and the bridge', 'Netting assets and liabilities from different jurisdictions without checking'], sources: [S.edgar],
+    },
+    optVal: {
+      what: 'The value of employee stock options outstanding, subtracted from equity value when you do not count them as extra shares.',
+      need: 'Use one approach. Method A (dilution): options are in the diluted share count, so this line is 0. Method B (option value): subtract their value here and divide by actual shares.',
+      include: { in: ['Outstanding employee options (vested and unvested, adjusted for expected forfeitures)'], out: ['RSUs (no exercise price: count as shares)', 'Future grants (a cost in the forecast)', 'Convertible securities (their own treatment)', 'Options already in the diluted share count'] },
+      where: { locs: ['10-K note: "Stock-Based Compensation" / "Share-Based Payment" (option activity table: number outstanding, weighted-average exercise price, remaining term)', 'Same note: Black–Scholes assumptions (expected term, volatility, risk-free rate, dividend yield)', 'DEF 14A proxy statement: executive awards'], terms: ['options outstanding', 'weighted-average exercise price', 'expected volatility', 'expected term'], period: 'Option table at fiscal year end; 10-Q updates the count.' },
+      calc: { formula: 'C = S·e^(−qT)·N(d1) − K·e^(−rT)·N(d2); d1 = [ln(S/K) + (r − q + σ²/2)T] ÷ (σ√T); d2 = d1 − σ√T', vars: [['S', 'Share price'], ['K', 'Exercise price'], ['T', 'Years to expected exercise'], ['r', 'Risk-free rate for that term'], ['q', 'Dividend yield'], ['σ', 'Expected volatility'], ['N', 'Standard normal cumulative distribution']], example: 'Hypothetical: S 100, K 100, T 5, r 4%, q 0, σ 30%: d1 = 0.634, d2 = −0.037, value per option ≈ 100 × 0.737 − 100 × e^(−0.2) × 0.485 = 33.96. An option with K above S still has time value because the price may rise before expiry.' },
+      decide: ['Employee options cannot be traded and are often exercised early: use the expected term, not the contractual term, and allow for forfeitures.', 'Grant-date fair value in the note is not today\'s value.'],
+      mistakes: ['Counting options in diluted shares and subtracting their value', 'Valuing RSUs with Black–Scholes and also counting them as shares', 'Using the contractual 10-year term'], sources: [S.damOpt, S.edgar],
+    },
+    midYear: {
+      what: 'Whether each year\'s cash flow is discounted as if it arrives mid-year (spread through the year) or at year end.',
+      need: 'Required choice. It is a modelling convention, not a filing item.',
+      include: { in: [], out: [] },
+      where: { locs: ['Not in any filing: it is your modelling choice.'], terms: [], period: '' },
+      calc: { formula: 'End-year PV = FCFF_t ÷ (1 + WACC)^t; mid-year PV = FCFF_t ÷ (1 + WACC)^(t − 0.5)', vars: [['t − 0.5', 'Cash arrives on average half-way through year t']], example: 'Hypothetical: year-1 cash flow 100, WACC 10%. End-year: 100 ÷ 1.10 = 90.91. Mid-year: 100 ÷ 1.10^0.5 = 95.35. Each cash flow is discounted half a year less.' },
+      decide: ['Mid-year suits steady, recurring cash generation through the year.', 'End-year or dated discounting suits seasonal businesses, large one-off payments, or irregular investment.', 'The actual effect for your model is calculated on the Equity bridge page: it is not a fixed percentage.'],
+      mistakes: ['Using mid-year for a business that collects most cash in one quarter', 'Rolling an exit-multiple terminal value back half a year'], sources: [S.damPrques],
+    },
+    prob: {
+      what: 'Your assessment of how likely each scenario is. Used for the probability-weighted value.',
+      need: 'Required for the weighted value. 0% is a valid choice for a scenario you consider impossible; blank means not decided.',
+      include: { in: [], out: [] },
+      where: { locs: ['Not in any filing: it is analyst judgment, informed by guidance, history, industry outlook and risks.'], terms: [], period: '' },
+      calc: { formula: 'Probability-weighted value = Bear value × Bear % + Base value × Base % + Bull value × Bull %; the three must add to 100%', vars: [], example: 'Hypothetical: Bear $100 × 25% + Base $150 × 50% + Bull $200 × 25% = $150.' },
+      decide: ['Base probabilities on evidence: management guidance, how volatile the business has been, how accurate past forecasts were, cycle exposure, competition, financial risk and catalysts.', 'Three scenarios are a simplified distribution: the weighted value depends on how the scenarios were defined as much as on the percentages.', 'Equal weights are fine if you choose them deliberately. There is no standard split.'],
+      mistakes: ['Treating 50/25/25 as a rule', 'Probabilities that do not add to 100%', 'Reading the weighted value as a price forecast'], sources: [],
+    },
+  };
+  return { B, T, W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
 })();
 if (typeof module !== 'undefined') module.exports = DCFHelp;

@@ -14,7 +14,10 @@ const DCF = (() => {
     // no debt (and no leases counted) in the weights: the debt weight is 0, so no borrowing rate is needed
     if (mode !== 'workbook' && isNum(inp.debt) && inp.debt === 0 && (inp.leasesInWacc === false || (isNum(inp.leases) && inp.leases === 0))) tri.splice(tri.indexOf('kd'), 1);
     if (inp.tvMethod && inp.tvMethod[s] === 'Exit Multiple') tri.push('exitMult');
-    return { tri, single: SINGLE.slice() };
+    const single = SINGLE.slice();
+    // leases unused when they are neither subtracted in the bridge nor counted in the weights
+    if (inp.leasesInBridge === false && inp.leasesInWacc === false) single.splice(single.indexOf('leases'), 1);
+    return { tri, single };
   }
   function missing(inp, s, mode) {
     const r = required(inp, s, mode), out = [];
@@ -101,7 +104,8 @@ const DCF = (() => {
     tvPeriod -= off;
     const pvTV = tv / Math.pow(1 + w, tvPeriod);
     const ev = sumPV + pvTV;
-    const bridge = inp.cash + inp.sti + inp.stakes - inp.debt - inp.pension - inp.leases - inp.minority - inp.dtl - inp.optVal;
+    // operating lease liabilities are subtracted only when leases are treated as debt (inp.leasesInBridge !== false)
+    const bridge = inp.cash + inp.sti + inp.stakes - inp.debt - inp.pension - (inp.leasesInBridge === false ? 0 : inp.leases) - inp.minority - inp.dtl - inp.optVal;
     const equity = ev + bridge;
     const perShare = equity / W.shares;
     const termRoic = T.roic;
