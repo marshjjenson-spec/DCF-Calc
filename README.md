@@ -1,4 +1,4 @@
-# DCF Workbench
+# DCF Pro
 
 A guided discounted cash flow calculator rebuilt from the `dcf-model-amzn-CMGs6046.xlsx` teaching workbook.
 It walks an analyst through every input (what it is, what to enter, where to find it, a video, and a place to
@@ -10,12 +10,48 @@ scenarios, sensitivity grids and a probability-weighted value.
 Or serve the folder (`npm start`, then http://localhost:8000). No build step,
 no server code, no paid services. Models save in the browser; model files (.json) and Excel files carry work between computers.
 
+## Dashboard
+
+The dashboard is the home page. It follows the approved navy-to-cyan design: company search, company overview,
+valuation summary, key drivers with reference values from data, the analyst input panel (key inputs, scenarios,
+advanced), a football field, a WACC × growth sensitivity grid, scenario results, projected free cash flow and the
+model completion tracker. Light and dark mode are remembered per computer.
+
+## Company data import
+
+Search a company or ticker in the top bar. The import fills **reported figures and market data only**: company
+details, share price, 52-week range, shares outstanding, five years of historicals, cash, short-term investments,
+debt, minority interest and deferred tax. Each figure is saved with its source, reporting period and retrieval time,
+and shown as Imported, Overridden (changed by the analyst) or Analyst-entered. Forecast assumptions are never filled
+in; provider beta, the 10-year Treasury yield, the effective tax rate and historical ratios appear as references the
+analyst can choose to use. A re-import keeps any value the analyst typed over.
+
+Sources (set up under **Data source**, keys stay on the analyst's computer):
+
+| Source | Key | What it gives |
+|---|---|---|
+| Financial Modeling Prep | Free key, 250 requests a day, US-listed companies | Search, quote, profile, 5 years of statements, balance sheet, Treasury rates |
+| Alpha Vantage | Free key, 25 requests a day | Search, quote, overview, statements, balance sheet, Treasury yield (no SBC or change in NWC) |
+| SEC EDGAR company facts file | None | Reported figures straight from the filings, each linked to its filing. No prices |
+
+Figures the provider may define differently from the workbook (total debt, deferred tax, weighted-average shares)
+are flagged for the analyst to check against the filing.
+
+## Model completion
+
+For each section the tracker counts required, completed, missing and invalid inputs, default values still to
+confirm, and whether each reported figure has a source and has been verified. It also tracks whether every scenario
+calculates, failing and warning checks, reviewed assumptions, and whether the model was saved after the last change.
+The model shows Complete, and 100%, only when all of these pass; defaults and placeholders never count as done.
+
 ## Structure
 
 | Path | What it is |
 |---|---|
 | `js/engine.js` | Calculation engine: pure functions, one per workbook sheet. No UI code |
-| `js/model.js` | Input data model, validation, completion tracking, browser persistence |
+| `js/model.js` | Input data model, validation, the completion tracker, browser persistence |
+| `js/data.js` | Data providers (FMP, Alpha Vantage, SEC company facts): fetch, map to model figures with sources, apply with provenance |
+| `js/charts.js` | SVG charts: football field, free cash flow, completion ring |
 | `js/fields.js` | Every input field: label, unit, scenario columns, workbook cell, help text from the workbook checklist |
 | `js/excel.js` | Excel export (writes inputs into the workbook template) and import |
 | `js/app.js` | User interface only |

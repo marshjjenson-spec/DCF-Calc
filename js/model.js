@@ -15,7 +15,10 @@ const DCFModel = (() => {
       wb: { bei: null, crp: null, histErp: null, rawBeta: null, unlevBeta: null },
       tranches: Array.from({ length: 6 }, () => ({ name: null, face: null, coupon: null, maturity: null, note: null })),
       street: { mean: null, median: null, high: null, low: null, rec: null, ltg: null, asOf: null },
-      sources: {}, reviewed: {}, log: [], snapshots: [] };
+      sources: {}, reviewed: {}, log: [], snapshots: [],
+      imported: {}, ref: {}, meta: {}, importNotes: [], savedAt: null, lastRun: null,
+      // choices that start with a default value: they don't count as complete until the analyst confirms them
+      defaults: { tvMethod: true, midYear: true } };
   }
   function fromSample(s, name) {
     const m = blank(name || s.company.name);
@@ -25,6 +28,7 @@ const DCFModel = (() => {
     m.wb = Object.assign({}, s.wb); m.tranches = JSON.parse(JSON.stringify(s.tranches));
     m.street = Object.assign({}, s.street);
     m.sample = true;
+    m.defaults = {};
     return m;
   }
   const isNum = v => typeof v === 'number' && isFinite(v);
@@ -87,6 +91,64 @@ const DCFModel = (() => {
     }));
     return groups;
   }
+  // ---- model completion tracker ----
+  // Sections of the model with required, completed, missing, invalid, default-only and source status,
+  // plus calculation readiness and outstanding warnings. checks: [{title, status: 'good'|'warn'|'bad'|'neutral', detail}]
+  const SECTIONS = [
+    { id: 'company', title: 'Company & market data', groups: ['company', 'market'], page: 'company' },
+    { id: 'hist', title: 'Historical financials', groups: ['hist'], page: 'historicals' },
+    { id: 'forecast', title: 'Forecast assumptions', groups: ['revenue', 'margins', 'reinvest'], page: 'assumptions' },
+    { id: 'wacc', title: 'WACC & cost of capital', groups: ['wacc'], page: 'wacc' },
+    { id: 'terminal', title: 'Terminal value', groups: ['terminal'], page: 'terminal' },
+    { id: 'bridge', title: 'Equity bridge', groups: ['bridge'], page: 'bridge' },
+    { id: 'scenarios', title: 'Scenarios & timing', groups: ['scenarios'], page: 'bridge' },
+  ];
+  const needsSource = f => f.kind === 'reported' || (f.kind === 'market' && !f.tri);
+  function tracker(model, all, checks) {
+    const comp = completion(model);
+    const out = [];
+    let pts = 0, done = 0;
+    SECTIONS.forEach(sec => {
+      const items = [].concat(...sec.groups.map(g => comp[g] ? comp[g].items : []));
+      const missing = items.filter(i => !i.ok && i.problem === 'Missing');
+      const invalid = items.filter(i => !i.ok && i.problem !== 'Missing');
+      const defaults = items.filter(i => i.ok && model.defaults && model.defaults[i.key]).map(i => Object.assign({}, i, { problem: 'Default value: confirm it' }));
+      // source status for reported figures and single market figures that are filled in
+      const srcKeys = [];
+      items.forEach(i => { const f = F.find(x => x.key === i.key); if (i.ok && ((f && needsSource(f)) || i.key === 'hist.rev') && !srcKeys.includes(i.key)) srcKeys.push(i.key); });
+      if (sec.id === 'hist') HF.forEach(h => { if (model.hist[h.key].some(isNum) && !srcKeys.includes('hist.' + h.key)) srcKeys.push('hist.' + h.key); });
+      const unsourced = srcKeys.filter(k => !model.sources[k]);
+      const verified = srcKeys.filter(k => model.reviewed[k]);
+      const flagged = srcKeys.filter(k => model.sources[k] && model.sources[k].review && !model.reviewed[k]);
+      const required = items.length, completed = items.filter(i => i.ok).length - defaults.length;
+      const ok = !missing.length && !invalid.length && !defaults.length && !unsourced.length;
+      pts += required + srcKeys.length; done += completed + (srcKeys.length - unsourced.length);
+      out.push({ id: sec.id, title: sec.title, page: sec.page, required, completed, missing, invalid, defaults, sourced: srcKeys.length - unsourced.length, needSource: srcKeys.length, unsourced, verified: verified.length, flagged, status: ok ? 'complete' : (completed > 0 ? 'progress' : 'empty') });
+    });
+    // calculation readiness
+    const calcItems = SC.map(s => ({ label: s + ' case calculates', ok: !!(all && all.scen[s].ok), problem: all && !all.scen[s].ok ? (all.scen[s].errors && all.scen[s].errors.length ? all.scen[s].errors.join(' ') : 'Waiting for inputs') : null }));
+    calcItems.push({ label: 'Probability-weighted value calculates', ok: !!(all && all.weighted !== null), problem: all && all.weighted === null ? all.weightedNote : null });
+    const failing = (checks || []).filter(c => c.status === 'bad');
+    const warns = (checks || []).filter(c => c.status === 'warn');
+    const calcOk = calcItems.every(i => i.ok) && !failing.length;
+    pts += calcItems.length + (checks || []).length; done += calcItems.filter(i => i.ok).length + (checks || []).filter(c => c.status !== 'bad').length;
+    out.push({ id: 'calc', title: 'Calculation & validation checks', page: 'valuation', calcItems, failing, warns, status: calcOk ? 'complete' : (calcItems.some(i => i.ok) ? 'progress' : 'empty') });
+    // review and save
+    const fc = F.filter(f => f.kind === 'forecast' && f.required && relevant(f, model) && f.unit !== 'choice');
+    const unreviewed = fc.filter(f => !model.reviewed[f.key]);
+    const lastChange = model.log.length ? model.log[0].at : null;
+    const saved = !!model.savedAt && (!lastChange || model.savedAt >= lastChange);
+    pts += fc.length + 1; done += fc.length - unreviewed.length + (saved ? 1 : 0);
+    out.push({ id: 'review', title: 'Model review & save', page: 'checklist', unreviewed: unreviewed.map(f => ({ key: f.key, label: f.label })), saved, savedAt: model.savedAt, status: !unreviewed.length && saved ? 'complete' : (fc.length - unreviewed.length || model.savedAt ? 'progress' : 'empty') });
+    const complete = out.every(s => s.status === 'complete');
+    let pct = pts ? Math.floor(done / pts * 100) : 0;
+    if (!complete) pct = Math.min(pct, 99);
+    const warnings = [].concat(failing.map(c => ({ level: 'bad', text: c.title, detail: c.detail })), warns.map(c => ({ level: 'warn', text: c.title, detail: c.detail })),
+      [].concat(...out.filter(s => s.flagged).map(s => s.flagged.map(k => ({ level: 'warn', key: k, text: 'Check imported figure: ' + labelOf(k), detail: model.sources[k].notes })))));
+    return { sections: out, pct, complete, ready: calcItems.every(i => i.ok), warnings, points: pts, done };
+  }
+  function labelOf(k) { const f = F.find(x => x.key === k); if (f) return f.label; const h = HF.find(x => 'hist.' + x.key === k); return h ? h.label + ' (historicals)' : k; }
+
   function logChange(model, field, s, from, to) {
     model.log.unshift({ at: new Date().toISOString(), field, s: s || null, from, to });
     if (model.log.length > 500) model.log.length = 500;
@@ -100,9 +162,10 @@ const DCFModel = (() => {
   function upgrade(m) { // fill any keys missing from an older file
     const b = blank(m.name); const out = Object.assign(b, m);
     out.inputs = Object.assign(blank().inputs, m.inputs || {});
-    ['sources', 'reviewed'].forEach(k => out[k] = m[k] || {}); ['log', 'snapshots'].forEach(k => out[k] = m[k] || []);
+    ['sources', 'reviewed', 'imported', 'ref', 'meta'].forEach(k => out[k] = m[k] || {}); ['log', 'snapshots', 'importNotes'].forEach(k => out[k] = m[k] || []);
+    out.defaults = m.defaults || {}; // older files: their choices were made by the analyst
     return out;
   }
-  return { SC, blank, fromSample, fieldError, relevant, engineInputs, completion, logChange, loadAll, save, remove, upgrade, isNum };
+  return { SC, SECTIONS, blank, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

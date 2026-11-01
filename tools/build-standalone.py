@@ -3,16 +3,17 @@ embedded) that runs by double-clicking it, with no web server."""
 import base64, json, pathlib
 R = pathlib.Path(__file__).resolve().parent.parent
 css = (R / 'css/app.css').read_text()
-js = ''.join((R / f).read_text() + '\n' for f in ['js/vendor/jszip.min.js', 'js/fields.js', 'js/engine.js', 'js/model.js', 'js/excel.js', 'js/app.js'])
+js = ''.join((R / f).read_text() + '\n' for f in ['js/vendor/jszip.min.js', 'js/fields.js', 'js/engine.js', 'js/model.js', 'js/data.js', 'js/charts.js', 'js/excel.js', 'js/app.js'])
 sample = json.loads((R / 'data/amzn-sample.json').read_text())
 tpl = {k: base64.b64encode((R / f'templates/dcf-template-{k}.xlsx').read_bytes()).decode() for k in ('corrected', 'original')}
 html = f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DCF Workbench</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
+<title>DCF Pro</title>
+<script>try{{var t=localStorage.getItem("dcfcalc.theme");if(t)document.documentElement.setAttribute("data-theme",t);}}catch(e){{}}</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>{css}</style></head><body>
 <div class="app"><header class="topbar" id="topbar"></header><nav class="rail" id="rail" aria-label="Model sections"></nav><main class="main" id="main"></main></div>
-<div id="drawer-root"></div>
+<div id="drawer-root"></div><div id="modal-root"></div>
 <script>window.DCF_SAMPLE = {json.dumps(sample)}; window.DCF_TEMPLATES = {json.dumps(tpl)};</script>
 <script>{js}</script>
 </body></html>
