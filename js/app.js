@@ -14,6 +14,7 @@
     { id: 'dashboard', title: 'Dashboard', grp: 'Overview', icon: 'home' },
     { id: 'checklist', title: 'Model completion', grp: 'Overview', icon: 'check' },
     { id: 'start', title: 'How to use', grp: 'Overview', icon: 'book' },
+    { id: 'guide', title: 'Share dilution guide', grp: 'Overview', icon: 'learn' },
     { id: 'company', title: 'Company & market data', grp: 'Inputs', icon: 'building', fg: ['company', 'market'] },
     { id: 'historicals', title: 'Historical financials', grp: 'Inputs', icon: 'bars', fg: ['hist'] },
     { id: 'assumptions', title: 'Forecast assumptions', grp: 'Inputs', icon: 'sliders', fg: ['revenue', 'margins', 'reinvest'] },
@@ -29,7 +30,7 @@
     { id: 'files', title: 'Saved models library', grp: 'Your work', icon: 'folder' },
     { id: 'record', title: 'Sources & change log', grp: 'Your work', icon: 'list' },
   ];
-  const UNIT_TXT = { pct: '%', usd: '$/share', usd_mm: '$ mm', shares: 'mm shares', x: '×', text: 'text', date: 'date', choice: 'choice' };
+  const UNIT_TXT = { pct: '%', usd: 'USD per share', usd_mm: '$ millions', shares: 'millions of shares', x: '×', text: 'text', date: 'date', choice: 'choice' };
   const KIND_TXT = { reported: 'Reported figure', forecast: 'Forecast assumption', market: 'Market data', company: 'Company info' };
   const VIDEO = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
   const LINKS = {
@@ -80,7 +81,7 @@
   let confirmDelete = null;
   let parseErrors = {}; // id -> message for text that could not be parsed
 
-  function persist() { if (cur) { const ok = DCFModel.save(cur); if (!ok) toast('Could not save in this browser. Use "Save model file" on Saved models.'); models = DCFModel.loadAll(); } }
+  function persist() { if (cur) { DCFModel.syncDilution(cur); const ok = DCFModel.save(cur); if (!ok) toast('Could not save in this browser. Use "Save model file" on Saved models.'); models = DCFModel.loadAll(); } }
   function toast(msg) { let box = document.getElementById('toasts'); if (!box) { box = document.createElement('div'); box.id = 'toasts'; box.setAttribute('role', 'status'); document.body.appendChild(box); } const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; box.appendChild(t); setTimeout(() => t.remove(), 3200); }
 
   // ---------- theme ----------
@@ -225,6 +226,7 @@
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
     check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/>',
+    learn: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5"/><path d="M22 9v6"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/>',
     building: '<rect x="4" y="3" width="11" height="18"/><path d="M15 9h5v12h-5M8 7h3M8 11h3M8 15h3"/>',
     bars: '<path d="M5 20V12M10 20V8M15 20V4M20 20v-6"/>',
@@ -391,7 +393,7 @@
     // calculated rows for some groups
     if (g === 'market') {
       const sh = [inp.basic, inp.options, inp.treasury].every(isNum) ? inp.basic + inp.options - inp.treasury : null;
-      rows += calcRow('Diluted shares (mm)', fmt.n(sh, 0), false, 'Basic + options and RSUs − treasury shares.');
+      rows += calcRow('Diluted shares (mm)', fmt.n(sh, 0), false, 'Actual shares + gross new shares from dilutive securities − shares repurchased (treasury stock method).');
       rows += calcRow('Market capitalisation ($ mm)', fmt.mm(isNum(sh) && isNum(inp.price) ? sh * inp.price : null), false, 'Diluted shares × price. Should match a public quote within about 1%.');
     }
     if (g === 'wacc') {
@@ -414,6 +416,98 @@
       <div class="fgrid ${tri ? '' : 'single'}">${rows}</div></section>`;
   }
 
+  // ---------- market data and share dilution ----------
+  const SRC_CLS = { market: ['Market quote', 'b-mkt'], filing: ['SEC filing data', 'b-fil'] };
+  function srcBadge(key, asOfKey) {
+    const s = cur.sources[key], d = cur.asOf && cur.asOf[asOfKey];
+    const v = cur.inputs[key];
+    if (!isNum(v)) return '<span class="na">—</span>';
+    const pv = provOf(key, v);
+    const cls = s && s.cls ? SRC_CLS[s.cls] : null;
+    const who = pv === 'imported' ? `Imported · ${esc(s.provider || s.name)}` : pv === 'overridden' ? 'Changed by you' : s ? esc(s.name) : 'Entered by you, no source yet';
+    return `<div class="srcb">${cls ? `<span class="badge-s ${cls[1]}">${cls[0]}</span>` : ''}<span class="badge-s ${pv === 'overridden' ? 'b-ovr' : pv === 'imported' ? 'b-imp' : 'b-man'}">${who}</span>${d ? `<span class="asof">as of ${esc(d)}</span>` : ''}</div>`;
+  }
+  function asOfInput(k, label) {
+    const v = (cur.asOf || {})[k];
+    return `<input type="date" class="asof-in" data-t="asof" data-k="${k}" id="asof-${k}" value="${esc(v || '')}" aria-label="As of date for ${esc(label)}">`;
+  }
+  function marketPanel() {
+    const I = cur.inputs;
+    const mc = DCFModel.marketChecks(cur);
+    const warnFor = k => mc.filter(w => w.key === k).map(w => `<div class="mwarn ${w.level}">${esc(w.text)}</div>`).join('');
+    const row = (key, asOfKey, showDate = true, note = '') => {
+      const f = FBY[key];
+      return `<div class="mrow">
+        <div class="mlab"><div class="name"><button class="help" data-help="${key}" aria-label="Where to find ${esc(f.label)}">?</button>${esc(f.label)}</div>
+          <div class="tags">${f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag">${esc(f.unitText || UNIT_TXT[f.unit])}</span></div>
+          <details class="mini"><summary>Where to find it</summary><div class="footnote">${esc(f.source)}${f.guide && f.guide.example ? `<br><b>Example:</b> ${esc(f.guide.example)}` : ''} <button class="linkbtn" data-help="${key}">Step-by-step guide</button></div></details></div>
+        <div class="mval">${inputHtml(f, null)}</div>
+        <div class="mdate">${showDate ? asOfInput(asOfKey, f.label) : `<span class="footnote">${note}</span>`}</div>
+        <div class="msrc">${srcBadge(key, asOfKey)}${warnFor(key)}</div></div>`;
+    };
+    const mcap = isNum(I.price) && isNum(I.basic) ? I.price * I.basic : null;
+    return `<section class="panel" id="grp-market">
+      <div class="panel-head"><h2>Market data</h2><span class="footnote">Market quotes are current prices; share counts come from SEC filings. Each value keeps its date.</span></div>
+      <div class="mgrid"><div class="mrow mhead"><div>Input</div><div>Value</div><div>As of</div><div>Source and status</div></div>
+        ${row('price', 'price')}${row('hi52', 'range')}${row('lo52', 'range', false, 'Same date as the high')}${row('basic', 'basic')}
+        <div class="mrow calc"><div class="mlab"><div class="name">Market capitalisation on actual shares</div><div class="tags"><span class="tag calc">Calculated</span><span class="tag">$ millions</span></div></div><div class="mval"><div class="calcv">${fmt.mm(mcap)}</div></div><div></div><div class="msrc footnote">Price × actual shares outstanding. Compare this with a quote site's market cap, which also uses actual shares, not diluted.</div></div>
+      </div></section>`;
+  }
+  function dilInput(path, unit, label, ph = 'Enter') {
+    const v = path.split('.').reduce((o, k) => o == null ? o : o[k], cur.dilution);
+    const id = 'dil-' + path.replace(/\./g, '-'), err = parseErrors[id];
+    const u = unit === 'usd' ? '$' : unit === 'usd_mm' ? '$mm' : unit === 'shares' ? 'mm' : '';
+    if (unit === 'text') return `<input type="text" class="txt dil-t" data-t="dil" data-k="${path}" data-unit="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" aria-label="${esc(label)}">`;
+    return `<div class="inwrap ${err ? 'err' : ''}"><input type="text" inputmode="decimal" data-t="dil" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${ph}" aria-label="${esc(label)}"><span class="unit">${u}</span></div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}`;
+  }
+  const dilChk = (k, label, path) => `<label class="check"><input type="checkbox" data-t="dilchk" data-k="${path || k}" ${((path || k).split('.').reduce((o, x) => o == null ? o : o[x], cur.dilution)) ? 'checked' : ''}> ${label}</label>`;
+  function dilutionCalcHtml(d, I) {
+    if (!d.method) return '';
+    const n = v => isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) : '—';
+    let rows = '';
+    rows = d.rows.length ? `<div class="tbl-wrap"><table class="fin dtab"><thead><tr><th>Security</th><th>Units (mm)</th><th>Exercise / conversion price</th><th>Gross new shares</th><th>Repurchased (TSM)</th><th>Net new shares</th><th>Treatment</th></tr></thead><tbody>
+      ${d.rows.map(r => `<tr><td>${esc(r.label)}<div class="footnote">${esc(r.type)}</div></td><td>${n(r.n)}</td><td>${isNum(r.k) ? '$' + n(r.k) : '—'}</td><td>${n(r.gross)}</td><td>${r.buyback ? '(' + n(r.buyback) + ')' : n(0)}</td><td><b>${n(r.net)}</b></td><td class="note">${esc(r.note)}${r.type !== 'RSUs' && r.type !== 'Estimate' && isNum(r.k) && isNum(I.price) && r.itm ? `<div class="footnote">${n(r.n)} × $${n(r.k)} ÷ $${n(I.price)} = ${n(r.buyback)} repurchased</div>` : ''}${r.type === 'RSUs' && r.buyback ? `<div class="footnote">$${n(cur.dilution.rsu.unrecog)}mm ÷ $${n(I.price)} = ${n(r.buyback)} repurchased</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '';
+    const sum = d.ok ? `<div class="dsum">
+        <div><span>Actual common shares outstanding</span><b>${n(I.basic)}</b><small>${cur.asOf && cur.asOf.basic ? 'as of ' + esc(cur.asOf.basic) : 'date not set'}</small></div>
+        <div class="op">+</div><div><span>Gross new shares</span><b>${n(d.gross)}</b><small>dilutive securities</small></div>
+        <div class="op">−</div><div><span>Repurchased (treasury stock method)</span><b>${n(d.buyback)}</b><small>hypothetical buyback</small></div>
+        <div class="op">=</div><div class="tot"><span>Estimated diluted shares</span><b>${n(d.diluted)}</b><small>used to divide equity value</small></div></div>
+        <p class="footnote">Net new shares ${n(d.net)} million (${isNum(I.basic) && I.basic ? (d.net / I.basic * 100).toFixed(2) : '—'}% of actual shares). In the workbook these are “Options + RSUs” ${n(d.gross)} and “Treasury shares” ${n(d.buyback)}.</p>`
+      : `<div class="notice bad">${esc(d.problem || 'Incomplete')}</div>`;
+    return rows + sum + (d.warnings.length ? `<div class="notice"><ul>${d.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '');
+  }
+  function dilutionPanel() {
+    const D = cur.dilution, I = cur.inputs, d = DCFModel.dilution(cur), R = cur.ref || {};
+    const m = D.method;
+    const meth = [['simple', 'Simple', 'Actual shares, plus an optional estimate'], ['advanced', 'Advanced', 'Options, RSUs, warrants, convertibles'], ['totals', 'Workbook totals', 'Type the two totals, as in the spreadsheet']];
+    let body = '';
+    if (!m) body = '<div class="notice">Choose how to get from actual shares to diluted shares. New to this? Start with <b>Simple</b>.</div>';
+    if (m === 'simple') {
+      const refs = ['dilutedWA', 'incrementalWA', 'basicWA'].filter(k => R[k]);
+      body = `<div class="dgrid2"><div><div class="flabel"><div class="name"><button class="help" data-help="dil.est">?</button>Estimated diluted shares (optional)</div><div class="tags"><span class="tag">millions of shares</span></div></div>${dilInput('est', 'shares', 'Estimated diluted shares')}</div>
+        <div class="dopts">${dilChk('ignore', 'Value on actual shares only (no dilution adjustment)')}<p class="footnote">Leave the estimate blank only if you tick this. The model never assumes zero dilution for you.</p></div></div>
+        ${refs.length ? `<div class="refbox"><h3>Reference from filings, not used automatically</h3>${refs.map(k => `<div class="ref"><div><span>${esc(R[k].label)}</span><small>${esc(R[k].source)}, ${esc(R[k].period)}</small><small>${esc(R[k].notes || '')}</small></div><b>${plain(fmt.n(R[k].v, 1))} mm</b>${k === 'dilutedWA' ? '<button class="btn tiny" data-use-dilwa>Use as my estimate</button>' : ''}</div>`).join('')}</div>` : ''}`;
+    }
+    if (m === 'advanced') {
+      const tr = (arr, i, type) => `<tr><td>${dilInput(`${arr}.${i}.label`, 'text', `${type} ${i + 1} name`, `${type} ${i + 1}`)}</td><td>${dilInput(`${arr}.${i}.n`, 'shares', `${type} ${i + 1} units`)}</td><td>${dilInput(`${arr}.${i}.k`, 'usd', `${type} ${i + 1} price`)}</td>${arr === 'converts' ? `<td>${dilChk('', 'Net share settlement', `converts.${i}.net`)}</td>` : ''}</tr>`;
+      body = `${dilChk('none', 'No dilutive securities outstanding')}
+        ${D.none ? '' : `<div class="dsec"><h3><button class="help" data-help="dil.options">?</button> Stock options <span class="footnote">10-K stock-based compensation note: options outstanding at year end</span></h3>
+          <table class="dtbl"><thead><tr><th>Tranche</th><th>Options outstanding (mm)</th><th>Weighted-avg exercise price (USD/share)</th></tr></thead><tbody>${D.options.map((r, i) => tr('options', i, 'Options')).join('')}</tbody></table></div>
+        <div class="dsec"><h3><button class="help" data-help="dil.rsu">?</button> Unvested RSUs / PSUs <span class="footnote">same note: unvested at period end, and unrecognised compensation cost</span></h3>
+          <table class="dtbl"><thead><tr><th>Unvested units (mm)</th><th>Unrecognised compensation ($ mm, optional)</th></tr></thead><tbody><tr><td>${dilInput('rsu.n', 'shares', 'Unvested RSUs')}</td><td>${dilInput('rsu.unrecog', 'usd_mm', 'Unrecognised compensation')}</td></tr></tbody></table></div>
+        <div class="dsec"><h3><button class="help" data-help="dil.warrants">?</button> Warrants</h3>
+          <table class="dtbl"><thead><tr><th>Name</th><th>Warrants (mm shares)</th><th>Exercise price (USD/share)</th></tr></thead><tbody>${D.warrants.map((r, i) => tr('warrants', i, 'Warrants')).join('')}</tbody></table></div>
+        <div class="dsec"><h3><button class="help" data-help="dil.converts">?</button> Convertible securities <span class="footnote">debt note: conversion rate and price</span></h3>
+          <table class="dtbl"><thead><tr><th>Name</th><th>Shares on conversion (mm)</th><th>Conversion price (USD/share)</th><th>Settlement</th></tr></thead><tbody>${D.converts.map((r, i) => tr('converts', i, 'Convertible')).join('')}</tbody></table></div>`}`;
+    }
+    if (m === 'totals') body = `<div class="fgrid single">${['options', 'treasury'].map(k => `<div>${labelCell(FBY[k])}</div><div>${inputHtml(FBY[k], null)}</div><div class="blank"></div>`).join('')}</div><p class="footnote">The original workbook's two cells. Simple or Advanced calculate them for you.</p>`;
+    return `<section class="panel" id="f-dilution-v" tabindex="-1">
+      <div class="panel-head"><h2>Share dilution</h2><div class="btns"><a class="btn" href="#guide">Learn about diluted shares</a><button class="help" data-help="dil.method" aria-label="About the dilution methods">?</button></div></div>
+      <div class="meth" role="radiogroup" aria-label="Dilution method">${meth.map(([k, l, s]) => `<button role="radio" aria-checked="${m === k}" data-dil-method="${k}"><b>${l}</b><small>${s}</small></button>`).join('')}</div>
+      ${body}
+      ${m ? `<h3 class="sub-h">Diluted share calculation <a class="footnote" href="#guide">How this works</a></h3>${dilutionCalcHtml(d, I)}` : ''}
+    </section>`;
+  }
   // ---------- pages ----------
   const P = {};
   // ---------- dashboard ----------
@@ -441,6 +535,11 @@
     }
     vals = vals.filter(isNum);
     return vals.length ? { lo: Math.min(...vals), hi: Math.max(...vals) } : null;
+  }
+  function dilSummaryRow() {
+    const d = DCFModel.dilution(cur);
+    const mname = { simple: 'Simple', advanced: 'Advanced', totals: 'Workbook totals' }[d.method];
+    return `<div class="di-row"><div class="di-lab"><button class="help" data-help="dil.method" aria-label="About share dilution">?</button><span>Diluted shares</span></div><div class="di-in"><span class="di-val">${d.ok ? fmt.n(d.diluted, 2) + ' mm' : `<span class="na">${esc(d.problem || 'Not set')}</span>`}</span>${mname ? `<small class="footnote">${mname}</small>` : ''} <button class="linkbtn" data-goto="dilution">Edit</button> <a class="linkbtn" href="#guide">Learn</a></div></div>`;
   }
   function dashInput(key, s, label) {
     const f = FBY[key]; if (!f) return '';
@@ -485,6 +584,7 @@
       ${ovRow('Company name', 'company.name', C.name)}${ovRow('Ticker', 'company.ticker', C.ticker)}${ovRow('Industry', 'company.industry', C.industry)}${ovRow('Currency', 'company.currency', C.currency)}
       ${ovRow('Valuation date', 'company.valDate', C.valDate)}${ovRow('Analyst', 'company.analyst', C.analyst)}
       ${ovRow('Share price', 'price', inp.price, isNum(inp.price) ? fmt.usd(inp.price) : null)}
+      <tr><th scope="row">Shares outstanding (mm)</th><td><span class="ovc">${provDot(isNum(inp.basic) ? provOf('basic', inp.basic) : null, srcTitle('basic'))}<button class="cellbtn" data-help="basic">${isNum(cur.inputs.basic) ? fmt.n(cur.inputs.basic, 0) : '<span class="na">Not set</span>'}</button></span>${cur.asOf && cur.asOf.basic ? `<div class="footnote">as of ${esc(cur.asOf.basic)} · SEC filing data</div>` : ''}</td></tr>
       ${ovRow('52-week range', 'hi52', isNum(inp.lo52) && isNum(inp.hi52) ? inp.hi52 : null, isNum(inp.lo52) && isNum(inp.hi52) ? `${fmt.usd(inp.lo52)} – ${fmt.usd(inp.hi52)}` : null)}
       <tr><th scope="row">Market cap ($ mm)</th><td><span class="ovc">${provDot(isNum(sh) && isNum(inp.price) ? 'calc' : null, 'Calculated: diluted shares × price')}${isNum(sh) && isNum(inp.price) ? fmt.mm(sh * inp.price) : '<span class="na">needs shares</span>'}</span>${ref.marketCap ? `<div class="footnote">Provider: ${fmt.mm(ref.marketCap.v)}</div>` : ''}</td></tr>
       </tbody></table>
@@ -527,7 +627,7 @@
         <tr><th scope="row">Beta</th>${tri('beta', v => fmt.n(v, 2))}</tr>
         <tr><th scope="row">Revenue growth, yrs 1–3</th>${tri('g1', v => fmt.pct(v, 1))}</tr>
         <tr><th scope="row">EBITDA margin, yr 5</th>${tri('em5', v => fmt.pct(v, 1))}</tr>
-        <tr><th scope="row">Diluted shares (mm)</th><td colspan="3">${isNum(sh) ? fmt.n(sh, 0) : '<span class="na">needs options & treasury shares</span>'}</td></tr>
+        <tr><th scope="row">Diluted shares (mm)</th><td colspan="3">${isNum(sh) ? fmt.n(sh, 0) : '<span class="na">needs share dilution</span>'} <a class="footnote" href="#guide">Learn</a></td></tr>
       </tbody></table>
       <h3 class="sub-h">Reference from data <span class="footnote">use as a starting point for the ${cur.active} case</span></h3>
       ${refs.length ? `<div class="refs">${refs.map(r => `<div class="ref"><div><span>${esc(r.label)}</span><small title="${esc(r.src)}">${esc(r.src)}</small></div><b>${plain(r.f(r.v))}</b><button class="btn tiny" data-use-ref="${r.k}" title="Copy into ${esc(FBY[r.target].label)}${r.all ? ' for all scenarios' : ' (' + cur.active + ')'}">Use</button></div>`).join('')}</div>` : '<p class="footnote">Import a company to see market references and historical drivers here.</p>'}
@@ -536,7 +636,7 @@
     const s = cur.active;
     const tabs = [['key', 'Key inputs'], ['scen', 'Scenarios'], ['adv', 'Advanced']];
     let body = '';
-    if (dashTab === 'key') body = ['g1', 'g2', 'g3', 'em1', 'em5', 'em10', 'tg', 'rf', 'erp', 'beta', 'kd'].map(k => dashInput(k, s)).join('') + dashInput('options', null) + dashInput('treasury', null);
+    if (dashTab === 'key') body = ['g1', 'g2', 'g3', 'em1', 'em5', 'em10', 'tg', 'rf', 'erp', 'beta', 'kd'].map(k => dashInput(k, s)).join('') + dilSummaryRow();
     else if (dashTab === 'scen') body = `<div class="di-grid"><div></div>${SC.map(x => `<b>${x}</b>`).join('')}
         <div class="di-lab"><button class="help" data-help="prob">?</button><span>Probability</span></div>${SC.map(x => `<div>${inputHtml(FBY.prob, x)}</div>`).join('')}
         <div class="di-lab"><button class="help" data-help="tvMethod">?</button><span>Terminal method</span></div>${SC.map(x => `<div>${inputHtml(FBY.tvMethod, x)}</div>`).join('')}
@@ -607,6 +707,173 @@
     return `<div class="dash">${status ? `<div style="grid-area:status">${status}</div>` : ''}${header}${overview}${summary}${drivers}${inputs}${football}${sensitivity}${scen}${fcf}${comp}</div>`;
   };
 
+  // ---------- source guide (drawer) ----------
+  function guideHtml(g) {
+    const li = a => (a || []).map(x => `<li>${esc(x)}</li>`).join('');
+    return `<div class="gsteps">
+      ${g.kind ? `<div class="gkind"><span class="badge-s ${/market/i.test(g.kind) ? 'b-mkt' : 'b-fil'}">${esc(g.kind)}</span></div>` : ''}
+      ${g.where && g.where.length ? `<details open><summary>Where exactly to find it</summary><ol>${li(g.where)}</ol></details>` : ''}
+      ${g.statement || g.date || g.units ? `<details><summary>Statement, date and units</summary><dl class="gdl">${g.statement ? `<div><dt>Statement or disclosure</dt><dd>${esc(g.statement)}</dd></div>` : ''}${g.date ? `<div><dt>Reporting date</dt><dd>${esc(g.date)}</dd></div>` : ''}${g.units ? `<div><dt>Units</dt><dd>${esc(g.units)}</dd></div>` : ''}</dl></details>` : ''}
+      ${g.example ? `<details><summary>Example</summary><p>${esc(g.example)}</p></details>` : ''}
+      ${g.terms && g.terms.length ? `<details><summary>Common terms in filings</summary><ul>${li(g.terms)}</ul></details>` : ''}
+      ${g.watch && g.watch.length ? `<details><summary>Watch out for</summary><ul>${li(g.watch)}</ul></details>` : ''}
+    </div>`;
+  }
+
+  // ---------- share dilution guide ----------
+  // A teaching calculator. It has its own state and never writes to the DCF model.
+  const gcDefaults = () => ({ basic: 100, price: 100, opts: 8, k: 40, rsu: 2, other: 0, equity: 10000, src: 'example' });
+  let gc = gcDefaults();
+  function gcFromModel() {
+    const I = cur.inputs, D = cur.dilution || {};
+    const o = { basic: isNum(I.basic) ? I.basic : null, price: isNum(I.price) ? I.price : null, opts: null, k: null, rsu: null, other: null, equity: null, src: 'model' };
+    if (D.method === 'advanced' && !D.none) {
+      const rows = (D.options || []).filter(r => isNum(r.n) && isNum(r.k) && r.n > 0 && (!isNum(o.price) || r.k < o.price));
+      const n = rows.reduce((a, r) => a + r.n, 0);
+      if (n > 0) { o.opts = n; o.k = rows.reduce((a, r) => a + r.n * r.k, 0) / n; } else { o.opts = 0; o.k = 0; }
+      o.rsu = D.rsu && isNum(D.rsu.n) ? D.rsu.n : 0;
+      const d = DCFModel.dilution(cur);
+      o.other = d.rows.filter(r => r.type === 'Warrants' || r.type === 'Convertible').reduce((a, r) => a + (r.net || 0), 0);
+    }
+    const { all } = calc(); const b = all.scen.Base;
+    if (b && b.ok && isNum(b.equity)) o.equity = Math.round(b.equity);
+    return o;
+  }
+  function gcCalc(g) {
+    const need = ['basic', 'price', 'opts', 'k', 'rsu', 'other'].filter(k => !isNum(g[k]));
+    if (need.length) return { ok: false, need };
+    if (['basic', 'price', 'opts', 'k', 'rsu', 'other', 'equity'].some(k => isNum(g[k]) && g[k] < 0)) return { ok: false, need: [], neg: true };
+    if (!(g.price > 0) || !(g.basic > 0)) return { ok: false, need: [], zero: true };
+    const itm = g.opts > 0 && g.k < g.price;
+    const proceeds = itm ? g.opts * g.k : 0;
+    const repurchased = itm ? proceeds / g.price : 0;
+    const netOpts = itm ? g.opts - repurchased : 0;
+    const diluted = g.basic + netOpts + g.rsu + g.other;
+    const r = { ok: true, itm, proceeds, repurchased, netOpts, diluted, pct: (diluted - g.basic) / g.basic, gross: (itm ? g.opts : 0) + g.rsu + g.other };
+    if (isNum(g.equity)) { r.ivBasic = g.equity / g.basic; r.ivDil = g.equity / diluted; r.diff = r.ivDil / r.ivBasic - 1; }
+    return r;
+  }
+  const tip = t => `<span class="tip" tabindex="0" role="note" aria-label="${esc(t)}" data-tip="${esc(t)}">i</span>`;
+  const gn = (v, d = 2) => isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—';
+  function gcInput(k, label, unit, t) {
+    const id = 'gc-' + k, err = parseErrors[id];
+    const u = unit === 'usd' ? '$' : unit === 'usd_mm' ? '$mm' : 'mm';
+    return `<label class="gcf"><span class="gl">${esc(label)} ${t ? tip(t) : ''}</span><div class="inwrap ${err ? 'err' : ''}"><input type="text" inputmode="decimal" data-t="gc" data-k="${k}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(gc[k], unit))}" placeholder="Enter" aria-label="${esc(label)}"><span class="unit">${u}</span></div>${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</label>`;
+  }
+  function liveExample() {
+    const I = cur.inputs, d = DCFModel.dilution(cur), A = cur.asOf || {};
+    const { all } = calc(); const b = all.scen.Base;
+    const eq = b && b.ok ? b.equity : null;
+    const mname = { simple: 'Simple', advanced: 'Advanced', totals: 'Workbook totals' }[d.method] || 'Not chosen yet';
+    const cell = (l, v, s) => `<div><span>${l}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+    return `<section class="panel glive" id="g-live"><div class="panel-head"><h2>Your model, as a live example</h2><span class="badge-s b-man">Read only</span></div>
+      <p class="footnote">These are the share counts in <b>${esc(cur.name)}</b>. Nothing on this page changes them. To edit, go to <a href="#company">Company &amp; market data</a>.</p>
+      <div class="dsum">
+        ${cell('Actual common shares outstanding', isNum(I.basic) ? gn(I.basic) + ' mm' : '<span class="na">not entered</span>', A.basic ? 'as of ' + esc(A.basic) + ' · SEC filing data' : 'date not set')}
+        <div class="op">+</div>${cell('Net new shares', d.ok ? gn(d.net) + ' mm' : '<span class="na">—</span>', 'method: ' + mname)}
+        <div class="op">=</div><div class="tot">${cell('Estimated diluted shares', d.ok ? gn(d.diluted) + ' mm' : '<span class="na">—</span>', d.ok ? 'used to divide equity value' : esc(d.problem || ''))}</div>
+      </div>
+      ${isNum(eq) && d.ok && isNum(I.basic) && I.basic > 0 ? `<div class="gcmp"><div><span>Base case equity value</span><b>${fmt.bn(eq)}</b></div><div><span>Per actual share</span><b>${fmt.usd(eq / I.basic)}</b></div><div><span>Per diluted share</span><b>${fmt.usd(eq / d.diluted)}</b></div><div><span>Difference</span><b class="${d.diluted > I.basic ? 'neg' : ''}">${((I.basic / d.diluted - 1) * 100).toFixed(2)}%</b><small>per diluted vs per actual share</small></div></div>` : '<p class="footnote">The comparison appears once the Base case calculates and dilution is complete.</p>'}
+      <div class="btns"><button class="btn" data-gc-load>Load these into the calculator below</button>${isNum(I.price) ? `<span class="footnote">Price ${fmt.usd(I.price)}${A.price ? ', market quote as of ' + esc(A.price) : ''}</span>` : ''}</div>
+    </section>`;
+  }
+  P.guide = () => {
+    const r = gcCalc(gc);
+    const G = { basic: 'Common shares actually issued and outstanding on a specific date, from the 10-Q or 10-K cover page.', diluted: 'Actual shares plus the net new shares that options, RSUs, warrants and convertibles would create.', tsm: 'Treasury stock method: assume in-the-money options are exercised and the cash received buys back shares at the current price.', itm: 'In the money: the exercise price is below the current share price, so a holder would exercise.', wa: 'Weighted average: the average share count over the reporting period, used for EPS. Not a count on any single date.' };
+    const steps = [
+      ['Open the filing on SEC EDGAR', 'Go to <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener">EDGAR full-text search</a>, type the company or ticker, and open its most recent 10-Q or 10-K. Use the latest one: share counts go stale every quarter.'],
+      ['Read the cover page for actual shares', 'The first page states, for example, “As of October 24, 2026, there were X shares of the registrant\'s common stock outstanding.” That is your <b>actual common shares outstanding</b> and its date. It is usually a few weeks after the period end, which is fine.'],
+      ['Find the EPS share table', 'In the <b>Consolidated Statements of Operations</b>, or the <b>Earnings per share</b> footnote, look for “Weighted-average shares used in computation of earnings per share: Basic / Diluted”. Note the period (three months, nine months or year).'],
+      ['Note the dilutive effect line', 'The EPS footnote reconciles basic to diluted weighted-average shares with a line such as “Total dilutive effect of outstanding stock awards”. This tells you how much dilution the company itself counted, on average, for the period.'],
+      ['Open the stock-based compensation footnote', 'Find <b>Stock-Based Compensation</b> (sometimes “Stockholders\' Equity”). It lists options outstanding with their weighted-average exercise price, unvested RSUs, and the unrecognised compensation cost. The 10-K has the full table; the 10-Q often has an update.'],
+      ['Check debt and equity notes for other securities', 'Look in the <b>Debt</b> note for convertible notes (conversion rate and price) and the <b>Equity</b> note for warrants. These are handled separately from options and RSUs.'],
+    ];
+    const mistakes = [
+      ['Using weighted-average shares as a current count', 'Weighted-average shares are an average over the quarter. Use the cover-page count for actual shares outstanding.'],
+      ['Treating diluted EPS shares as current diluted shares', 'Diluted weighted-average shares from the EPS table describe the past quarter, at that quarter\'s average price. Today\'s dilution can differ.'],
+      ['Counting out-of-the-money options', 'If the exercise price is above today\'s share price, no one would exercise. They add no shares.'],
+      ['Adding options at gross with no buyback', 'The treasury stock method subtracts the shares the exercise cash could repurchase. Gross counting overstates dilution.'],
+      ['Double-counting', 'Do not add an estimated diluted count on top of individual securities, or count shares already in the cover-page figure (for example, vested RSUs that have been settled).'],
+      ['Mixing units', 'Keep shares in millions and prices in USD per share. A share count typed in thousands or units throws the value per share off by 1,000 times or more.'],
+      ['Ignoring convertibles and warrants, or treating them like options', 'Convertibles use the if-converted method; their debt should then come out of the equity bridge. Warrants use the treasury stock method with their own strike.'],
+    ];
+    const v = r.ok;
+    const calcOut = v ? `<div class="gsteps-out">
+        <ol class="gcalc">
+          <li><span>Are the options in the money?</span><b>${gc.opts > 0 ? (r.itm ? `Yes: $${gn(gc.k)} &lt; $${gn(gc.price)}` : `No: $${gn(gc.k)} ≥ $${gn(gc.price)}, so they are excluded`) : 'No options entered'}</b></li>
+          <li><span>Exercise proceeds = options × exercise price</span><b>${r.itm ? `${gn(gc.opts)} × $${gn(gc.k)} = $${gn(r.proceeds)} mm` : '$0'}</b></li>
+          <li><span>Shares repurchased = proceeds ÷ share price</span><b>${r.itm ? `$${gn(r.proceeds)} ÷ $${gn(gc.price)} = ${gn(r.repurchased)} mm` : '0'}</b></li>
+          <li><span>Net new shares from options = options − repurchased</span><b>${r.itm ? `${gn(gc.opts)} − ${gn(r.repurchased)} = ${gn(r.netOpts)} mm` : '0'}</b></li>
+          <li><span>Add unvested RSUs and other dilutive securities</span><b>${gn(gc.rsu)} + ${gn(gc.other)} = ${gn(gc.rsu + gc.other)} mm</b></li>
+          <li class="tot"><span>Estimated diluted shares</span><b>${gn(gc.basic)} + ${gn(r.netOpts)} + ${gn(gc.rsu + gc.other)} = ${gn(r.diluted)} mm</b></li>
+        </ol>
+        <div class="gbreak">
+          <div class="gbar" role="img" aria-label="Diluted shares breakdown">
+            <span style="flex:${gc.basic}" class="b0" title="Actual shares"></span><span style="flex:${r.netOpts || 0}" class="b1" title="Net option shares"></span><span style="flex:${gc.rsu || 0}" class="b2" title="RSUs"></span><span style="flex:${gc.other || 0}" class="b3" title="Other"></span>
+          </div>
+          <div class="glegend"><span><i class="b0"></i>Actual ${gn(gc.basic)}</span><span><i class="b1"></i>Net options ${gn(r.netOpts)}</span><span><i class="b2"></i>RSUs ${gn(gc.rsu)}</span><span><i class="b3"></i>Other ${gn(gc.other)}</span><span>Dilution <b>${(r.pct * 100).toFixed(2)}%</b></span></div>
+        </div>
+        ${isNum(r.ivBasic) ? `<div class="gcmp"><div><span>Intrinsic value per actual share</span><b>$${gn(r.ivBasic)}</b><small>$${gn(gc.equity, 0)} mm ÷ ${gn(gc.basic)} mm</small></div><div><span>Intrinsic value per diluted share</span><b>$${gn(r.ivDil)}</b><small>$${gn(gc.equity, 0)} mm ÷ ${gn(r.diluted)} mm</small></div><div><span>Difference</span><b class="${r.diff < 0 ? 'neg' : ''}">${(r.diff * 100).toFixed(2)}%</b><small>what ignoring dilution would overstate</small></div></div>` : '<p class="footnote">Enter an equity value to compare value per share.</p>'}
+      </div>` : `<div class="notice">${r.neg ? 'Values must be at least 0.' : r.zero ? 'Shares and price must be above 0.' : 'Fill in every box to see the calculation: ' + r.need.join(', ') + '.'}</div>`;
+    const toc = [['g1', 'Basic vs diluted'], ['g2', 'Finding it on EDGAR'], ['g3', 'The formula'], ['g4', 'Amazon example'], ['g5', 'Calculator'], ['g6', 'Common mistakes']];
+    return `<div class="ghead"><div><h1>Share dilution guide</h1><p class="lead">How to get from the shares a company has today to the shares that equity value should be divided by, and where each number lives in an SEC filing.</p></div><a class="btn" href="#company">Back to market data</a></div>
+      <nav class="gtoc" aria-label="Guide sections">${toc.map(([id, l], i) => `<button data-scroll-to="${id}"><span>${i + 1}</span>${l}</button>`).join('')}</nav>
+      ${liveExample()}
+      <section class="panel gsec" id="g1"><h2><span class="gnum">1</span>Basic vs diluted shares</h2>
+        <div class="grid2"><div class="gdef"><h3>Basic shares ${tip(G.basic)}</h3><p>Shares that exist today. Holders can vote and receive dividends. Reported on the filing's cover page with a date.</p></div>
+        <div class="gdef"><h3>Diluted shares ${tip(G.diluted)}</h3><p>Basic shares plus the shares that would be created if in-the-money options, RSUs, warrants and convertibles turned into stock. A DCF values all of the equity, so it should be split across every share that will exist.</p></div></div>
+        <details class="gex"><summary>Example: why it matters</summary>
+          <p>A company has an equity value of <b>$10 billion</b>.</p>
+          <div class="gcmp"><div><span>On 100 million basic shares</span><b>$100.00</b><small>$10,000 mm ÷ 100 mm</small></div><div><span>On 110 million diluted shares</span><b>$90.91</b><small>$10,000 mm ÷ 110 mm</small></div><div><span>Difference</span><b class="neg">−9.09%</b><small>overstated if you ignore dilution</small></div></div>
+          <p class="footnote">The same business, the same cash flows, nine percent less per share. If the stock trades at $95, the basic figure says “cheap” and the diluted one says “expensive”.</p></details>
+      </section>
+      <section class="panel gsec" id="g2"><h2><span class="gnum">2</span>Finding share counts on SEC EDGAR</h2>
+        <ol class="gstep">${steps.map(([h, t], i) => `<li><details ${i < 2 ? 'open' : ''}><summary><span class="sn">${i + 1}</span>${h}</summary><p>${t}</p></details></li>`).join('')}</ol>
+        <div class="notice"><b>Diluted weighted-average EPS shares are not current diluted shares.</b> They average the quarter, use that quarter's average share price for the treasury stock method, and exclude anti-dilutive awards. They are a sense check for your estimate, not a substitute for it. ${tip(G.wa)}</div>
+      </section>
+      <section class="panel gsec" id="g3"><h2><span class="gnum">3</span>The formula</h2>
+        <div class="gformula">Estimated diluted shares = <b>Actual common shares outstanding</b> + <b>Potential dilutive shares</b> − <b>Treasury stock method repurchased shares</b></div>
+        <dl class="gvars">
+          <div><dt>Actual common shares outstanding</dt><dd>Cover page of the latest 10-Q or 10-K, with its date. Millions of shares.</dd></div>
+          <div><dt>Potential dilutive shares</dt><dd>In-the-money options and warrants, unvested RSUs and PSUs, and convertibles if converting is worthwhile. From the stock-based compensation, equity and debt notes.</dd></div>
+          <div><dt>Treasury stock method repurchased shares ${tip(G.tsm)}</dt><dd>The exercise cash holders would pay, divided by today's share price: the shares the company could buy back with it.</dd></div>
+        </dl>
+        <details class="gex"><summary>How the treasury stock method works</summary><ol><li>Keep only options whose exercise price is below today's price ${tip(G.itm)}. Out-of-the-money options add nothing.</li><li>Exercise proceeds = options × weighted-average exercise price.</li><li>Assume the company uses the proceeds to buy back shares at today's price: repurchased = proceeds ÷ price.</li><li>Net new shares = options − repurchased.</li></ol><p class="footnote">10 million options at $40 with the stock at $100: proceeds $400 mm, repurchased 4 million, net 6 million new shares, not 10.</p></details>
+        <details class="gex"><summary>RSUs, contingent shares, warrants and convertibles</summary><ul>
+          <li><b>RSUs / PSUs:</b> no exercise price. Count unvested units; some analysts deduct unrecognised compensation ÷ price as a buyback. PSUs count only the shares expected to vest.</li>
+          <li><b>Contingently issuable shares</b> (earn-outs, performance awards): include only if the condition is met or likely; note your judgment.</li>
+          <li><b>Warrants:</b> treasury stock method with their own exercise price.</li>
+          <li><b>Convertibles:</b> if-converted method. If the share price is above the conversion price, add the conversion shares and remove the principal from debt in the equity bridge, so it is not counted twice. Net share settlement adds only the value above par.</li></ul></details>
+      </section>
+      <section class="panel gsec" id="g4"><h2><span class="gnum">4</span>Example: Amazon's Q3 2026 10-Q</h2>
+        <p>From Amazon's Form 10-Q for the quarter ended <b>September 30, 2026</b>, the earnings per share calculation for the three months ended that date, in millions of shares:</p>
+        <table class="fin gamzn"><tbody>
+          <tr><td>Weighted-average shares used in computation of basic earnings per share</td><td>10,797</td></tr>
+          <tr><td>Total dilutive effect of outstanding stock awards</td><td>+ 132</td></tr>
+          <tr class="tot"><td>Weighted-average shares used in computation of diluted earnings per share</td><td>10,929</td></tr>
+        </tbody></table>
+        <div class="tags"><span class="badge-s b-fil">SEC filing data</span><span class="tag">Quarterly weighted average</span><span class="tag">Not a current share count</span></div>
+        <details class="gex"><summary>How the EPS denominator is built</summary><p>Amazon starts with the average basic shares over the quarter (10,797 mm) and adds the net shares its stock awards would create, measured at the quarter's average price (132 mm, about 1.2%). Diluted EPS = net income ÷ 10,929 mm. For your DCF, take actual shares from the cover page (a single date, a few weeks after September 30) and estimate dilution from the stock-based compensation note, using this 1.2% as a sense check.</p></details>
+        <p class="footnote">Source: <a href="https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm" target="_blank" rel="noopener">Amazon.com, Inc. Form 10-Q, quarter ended September 30, 2026 (SEC EDGAR)</a>. Statements of Operations and Note 1, “Earnings per share”.</p>
+      </section>
+      <section class="panel gsec" id="g5"><h2><span class="gnum">5</span>Diluted share calculator</h2>
+        <p class="footnote">A sandbox. It ${gc.src === 'model' ? 'started from your model\'s figures' : 'starts with a teaching example'} and never changes your DCF inputs. Use it to see how each input moves the result.</p>
+        <div class="gcgrid">
+          ${gcInput('basic', 'Actual common shares outstanding', 'shares', 'From the cover page of the latest 10-Q or 10-K.')}
+          ${gcInput('price', 'Current share price', 'usd', 'A current market quote, in USD per share.')}
+          ${gcInput('opts', 'In-the-money options', 'shares', 'Options with exercise price below the current price. From the stock-based compensation note.')}
+          ${gcInput('k', 'Weighted-average exercise price', 'usd', 'Of those in-the-money options, in USD per share.')}
+          ${gcInput('rsu', 'Unvested RSUs', 'shares', 'Unvested restricted stock units at period end. Counted in full here.')}
+          ${gcInput('other', 'Other dilutive securities (handled separately)', 'shares', 'Net shares from warrants and convertibles, worked out with their own method.')}
+          ${gcInput('equity', 'Equity value (to compare value per share)', 'usd_mm', 'Optional. From the equity bridge: enterprise value plus cash, minus debt.')}
+        </div>
+        <div class="btns"><button class="btn" data-gc-load>Use my model's figures</button><button class="btn" data-gc-reset>Reset to the example</button></div>
+        ${calcOut}
+      </section>
+      <section class="panel gsec" id="g6"><h2><span class="gnum">6</span>Common mistakes</h2>
+        <div class="gmist">${mistakes.map(([h, t], i) => `<details><summary><span class="sn">${i + 1}</span>${h}</summary><p>${t}</p></details>`).join('')}</div>
+      </section>`;
+  };
   P.start = () => {
     const ws = [
       ['Read the checklist', 'Open the completion checklist. It shows what each input is and what is still missing.', 'checklist'],
@@ -686,7 +953,7 @@
     if (!l.length) return '<p class="footnote">Checks appear once the active scenario calculates.</p>';
     return `<div class="checks">${l.map(([t, d, cls, lab]) => `<div class="row"><div>${t}<small>${d}</small></div><span class="pill ${cls}">${lab}</span></div>`).join('')}</div>`;
   }
-  P.company = () => `<div><h1>Company & market data</h1><p class="lead">Who you are valuing, as of when, and the share data that turns equity value into a price per share.</p></div>${groupPanel('company')}${groupPanel('market')}`;
+  P.company = () => `<div><h1>Company & market data</h1><p class="lead">Who you are valuing, as of when, and the share data that turns equity value into a value per share. Market quotes are current prices; share counts come from the latest SEC filing.</p></div>${groupPanel('company')}${marketPanel()}${dilutionPanel()}`;
   P.assumptions = () => `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}`;
   P.terminal = () => `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10, usually 60–80% of the total.</p></div>${groupPanel('terminal')}`;
   P.bridge = () => `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${groupPanel('bridge')}${groupPanel('scenarios')}`;
@@ -776,8 +1043,8 @@
       ${face && isNum(inp.debt) && Math.abs(face - inp.debt) / inp.debt > 0.01 ? `<div class="notice">Tranches add to ${fmt.mm(face)} but Total debt is ${fmt.mm(inp.debt)} $mm. The difference is usually finance leases, commercial paper or other borrowings. Make sure Total debt includes all of them.</div>` : ''}
       ${isNum(wc) && isNum(inp.kd.Base) ? `<p class="footnote">The weighted coupon (${plain(fmt.pct(wc, 2))}) is what the company pays on old debt. The model uses the pre-tax cost of debt you entered (${plain(fmt.pct(inp.kd.Base, 2))} Base), which should be today's yield to maturity.</p>` : ''}
     </section>
-    <div class="grid2"><section class="panel"><h2>Diluted share count (treasury stock method)</h2><div class="tbl-wrap"><table class="fin"><tbody>
-      <tr><td>Basic shares outstanding</td><td>${fmt.n(inp.basic, 0)}</td></tr><tr><td>+ Options and RSUs in the money</td><td>${fmt.n(inp.options, 0)}</td></tr><tr><td>− Treasury shares from proceeds</td><td>${fmt.n(inp.treasury, 0)}</td></tr><tr class="total"><td>Diluted shares (mm)</td><td>${fmt.n(sh, 0)}</td></tr></tbody></table></div></section>
+    <div class="grid2"><section class="panel"><h2>Diluted share count</h2><p class="footnote">From the share dilution panel on <a href="#company">Company &amp; market data</a>. <a href="#guide">How it works</a></p><div class="tbl-wrap"><table class="fin"><tbody>
+      <tr><td>Actual common shares outstanding${cur.asOf && cur.asOf.basic ? ` <span class="footnote">as of ${esc(cur.asOf.basic)}</span>` : ''}</td><td>${fmt.n(inp.basic, 2)}</td></tr><tr><td>+ Gross new shares from dilutive securities</td><td>${fmt.n(inp.options, 2)}</td></tr><tr><td>− Shares repurchased with proceeds (treasury stock method)</td><td>${fmt.n(inp.treasury, 2)}</td></tr><tr class="total"><td>Diluted shares (mm)</td><td>${fmt.n(sh, 0)}</td></tr></tbody></table></div></section>
     <section class="panel"><h2>Market vs DCF enterprise value</h2><div class="tbl-wrap"><table class="fin"><tbody>
       <tr><td>Market capitalisation</td><td>${fmt.mm(mcap)}</td></tr><tr><td>+ Debt + operating leases − cash − short-term investments</td><td>${fmt.mm(nd)}</td></tr><tr class="total"><td>Trading enterprise value</td><td>${fmt.mm(tev)}</td></tr>
       <tr><td>DCF enterprise value (${cur.active})</td><td>${fmt.mm(dcfEv)}</td></tr><tr class="key"><td>Market premium / (discount) to DCF</td><td>${fmt.pct(isNum(tev) && isNum(dcfEv) ? tev / dcfEv - 1 : null)}</td></tr></tbody></table></div>
@@ -995,7 +1262,7 @@
     const root = $('#drawer-root');
     if (!drawerKey) { root.innerHTML = ''; return; }
     const isHist = drawerKey.startsWith('hist.');
-    const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : FBY[drawerKey];
+    const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : (FBY[drawerKey] || DIL_HELP[drawerKey]);
     const gs = GUIDE_SECTIONS[GUIDE_IDX[f.group]];
     const src = cur.sources[drawerKey] || {};
     const vids = cur.videos || {};
@@ -1013,8 +1280,9 @@
         ${f.source ? `<div><dt>Where to find it</dt><dd>${esc(f.source)}</dd></div>` : ''}
         ${f.backup ? `<div><dt>Cross-check with</dt><dd>${esc(f.backup)}</dd></div>` : ''}
         ${f.tip ? `<div><dt>Tip</dt><dd>${esc(f.tip)}</dd></div>` : ''}
-        <div><dt>Workbook cell</dt><dd><code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></dd></div>
+        ${f.cell || isHist ? `<div><dt>Workbook cell</dt><dd><code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></dd></div>` : ''}
       </dl>
+      ${f.guide ? guideHtml(f.guide) : ''}${String(drawerKey).startsWith('dil') || drawerKey === 'basic' ? '<a class="btn" href="#guide" data-close>Open the share dilution guide</a>' : ''}
       <a class="video" href="${esc(custom || VIDEO(f.video || f.label + ' DCF'))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>Watch how to fill this in</b><br><span class="footnote">${custom ? 'Video chosen for this model' : 'YouTube videos on “' + esc(f.video || f.label) + '”'}</span></span></a>
       ${links ? `<div><h3>Useful links</h3><ul style="margin:6px 0 0;padding-left:18px">${links}</ul></div>` : ''}
       <details><summary class="footnote">Section guide: why, think, watch out</summary><div class="guide-box" style="margin-top:8px;grid-template-columns:1fr"><div><b>Why</b>${esc(gs.why)}</div><div><b>Think</b>${esc(gs.think)}</div><div><b>Watch out</b>${esc(gs.watch)}</div></div></details>
@@ -1066,6 +1334,14 @@
     else if (t === 'wb') { field = 'wb.' + el.dataset.k; from = cur.wb[el.dataset.k]; cur.wb[el.dataset.k] = v; }
     else if (t === 'tr') { const i = +el.dataset.i, k = el.dataset.k; field = `tranche ${i + 1} ${k}`; from = cur.tranches[i][k]; cur.tranches[i][k] = v; }
     else if (t === 'st') { field = 'street.' + el.dataset.k; from = cur.street[el.dataset.k]; cur.street[el.dataset.k] = v; }
+    else if (t === 'dil') {
+      const path = el.dataset.k, parts = path.split('.'); field = 'dilution.' + path;
+      if (unit !== 'text' && isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; render(); return; }
+      let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
+      const last = parts[parts.length - 1]; from = o[last]; o[last] = v;
+    }
+    else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
+    else if (t === 'gc') { gc[el.dataset.k] = v; if (isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; } setTimeout(render, 0); return; }
     else if (t === 'sens') { const a = el.dataset.k, i = +el.dataset.i; if (v === null) { render(); return; } cur.sens[a][i] = v; persist(); render(); return; }
     if (from !== v) { DCFModel.logChange(cur, field, s, from, v); }
     if (t === 'in' && cur.defaults && cur.defaults[field]) delete cur.defaults[field];
@@ -1074,6 +1350,7 @@
   }
   document.addEventListener('change', e => {
     const el = e.target;
+    if (el.dataset && el.dataset.t === 'dilchk') { const parts = el.dataset.k.split('.'); let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; const last = parts[parts.length - 1]; DCFModel.logChange(cur, 'dilution.' + el.dataset.k, null, !!o[last], el.checked); o[last] = el.checked; persist(); render(); return; }
     if (el.dataset && el.dataset.t) return setInput(el);
     if (el.id === 'model-select') { cur = models[el.value]; try { localStorage.setItem('dcfcalc.current', cur.id); } catch (x) {} parseErrors = {}; render(); return; }
     if (el.id === 'mode-select') { DCFModel.logChange(cur, 'method', null, cur.mode, el.value); cur.mode = el.value; persist(); render(); toast(el.value === 'corrected' ? 'Using the corrected method' : 'Using the exact original workbook method'); return; }
@@ -1108,6 +1385,11 @@
     if (b.id === 'run-dcf') { runDcf(); return; }
     if (b.dataset.tab) { dashTab = b.dataset.tab; render(); return; }
     if (b.dataset.useRef) { useRef(b.dataset.useRef); return; }
+    if (b.dataset.dilMethod) { const m = b.dataset.dilMethod; if (cur.dilution.method === m) return; const from = cur.dilution.method; if (from === 'totals' || !from) cur.dilution.savedTotals = { options: cur.inputs.options, treasury: cur.inputs.treasury }; if (m === 'totals' && cur.dilution.savedTotals) { cur.inputs.options = cur.dilution.savedTotals.options; cur.inputs.treasury = cur.dilution.savedTotals.treasury; } cur.dilution.method = m; DCFModel.logChange(cur, 'dilution method', null, from, m); persist(); render(); toast(m === 'totals' ? 'Using the workbook totals' : m === 'simple' ? 'Simple dilution: enter an estimate or value on actual shares' : 'Advanced dilution: enter each security'); return; }
+    if (b.dataset.useDilwa !== undefined) { const r = (cur.ref || {}).dilutedWA; if (!r) return; const from = cur.dilution.est; cur.dilution.est = r.v; cur.dilution.ignore = false; DCFModel.logChange(cur, 'dilution.est', null, from, r.v + ' (diluted weighted-average shares, ' + (r.period || '') + ', chosen by you)'); cur.sources['dil.est'] = { name: r.source || 'Filing', type: '10-Q quarterly report', period: r.period || '', notes: 'Diluted weighted-average shares from the EPS calculation, used as an estimate of current diluted shares by your choice. This is a period average, not a period-end count.' }; persist(); render(); toast('Used the filing figure as your estimate. It is a period average, not a current count.'); return; }
+    if (b.dataset.gcLoad !== undefined) { gc = gcFromModel(); parseErrors = Object.fromEntries(Object.entries(parseErrors).filter(([k]) => !k.startsWith('gc-'))); render(); toast('Loaded your model\'s figures into the guide calculator. Your DCF inputs are unchanged.'); return; }
+    if (b.dataset.gcReset !== undefined) { gc = gcDefaults(); parseErrors = Object.fromEntries(Object.entries(parseErrors).filter(([k]) => !k.startsWith('gc-'))); render(); return; }
+    if (b.dataset.scrollTo) { const t = document.getElementById(b.dataset.scrollTo); if (t) { t.scrollIntoView({ block: 'start', behavior: 'smooth' }); if (t.tagName === 'DETAILS') t.open = true; } return; }
     if (b.dataset.confirmDefault) { b.dataset.confirmDefault.split(',').forEach(k => { if (cur.defaults && cur.defaults[k]) { delete cur.defaults[k]; DCFModel.logChange(cur, k, null, null, 'kept default (' + (FBY[k].tri ? SC.map(x => cur.inputs[k][x]).join(' / ') : cur.inputs[k]) + ')'); } }); persist(); render(); toast('Defaults confirmed'); return; }
     if (b.dataset.reviewGroup) { const g = b.dataset.reviewGroup; FIELDS.filter(f => f.group === g && f.kind === 'forecast').forEach(f => cur.reviewed[f.key] = true); DCFModel.logChange(cur, 'reviewed section', null, null, GROUPS[g].title); persist(); render(); return; }
     if (b.dataset.dismissImport !== undefined) { importStatus = null; render(); return; }
@@ -1128,6 +1410,7 @@
     if (b.closest('#rail') && b.tagName === 'A') { $('#rail').classList.remove('open'); return; }
     if (b.dataset.goto) {
       const k = b.dataset.goto;
+      if (k === 'dilution' || k.startsWith('dil.')) return goField('company', 'f-dilution-v');
       if (k.startsWith('hist.')) return goField('historicals', `h-${k.slice(5)}-${b.dataset.i || 4}`);
       return goField(fieldPage(k), fid(k, b.dataset.s || null));
     }

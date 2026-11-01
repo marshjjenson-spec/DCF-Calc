@@ -18,7 +18,13 @@ const DCFModel = (() => {
       sources: {}, reviewed: {}, log: [], snapshots: [],
       imported: {}, ref: {}, meta: {}, importNotes: [], savedAt: null, lastRun: null,
       // choices that start with a default value: they don't count as complete until the analyst confirms them
-      defaults: { tvMethod: true, midYear: true } };
+      defaults: { tvMethod: true, midYear: true },
+      asOf: { price: null, range: null, basic: null },
+      dilution: blankDilution() };
+  }
+  function blankDilution(method = null) {
+    const row = () => ({ label: null, n: null, k: null });
+    return { method, est: null, ignore: false, none: false, options: [row(), row(), row(), row()], rsu: { n: null, unrecog: null }, warrants: [row(), row()], converts: [Object.assign(row(), { net: false }), Object.assign(row(), { net: false })] };
   }
   function fromSample(s, name) {
     const m = blank(name || s.company.name);
@@ -29,6 +35,8 @@ const DCFModel = (() => {
     m.street = Object.assign({}, s.street);
     m.sample = true;
     m.defaults = {};
+    m.dilution = blankDilution('totals');
+    m.asOf = { price: s.company.valDate || null, range: s.company.valDate || null, basic: null };
     return m;
   }
   const isNum = v => typeof v === 'number' && isFinite(v);
@@ -55,6 +63,101 @@ const DCFModel = (() => {
     if (f.key === 'exitMult') return !s || model.inputs.tvMethod[s] === 'Exit Multiple';
     return true;
   }
+  // ---- share dilution ----
+  // Turns the dilution inputs into the workbook's two cells: gross new shares (options) and shares repurchased (treasury).
+  // Options and warrants: treasury stock method, only when in the money. Unvested RSUs: all units, less shares bought back
+  // with unrecognised compensation (ASC 260 treasury stock method). Convertibles: if-converted, only when in the money;
+  // net share settlement issues shares only for the excess over principal. Awards already vested are in shares outstanding.
+  function dilution(model) {
+    const D = model.dilution || blankDilution();
+    const P = model.inputs.price, B = model.inputs.basic;
+    const out = { method: D.method, ok: false, problem: null, gross: null, buyback: null, net: null, diluted: null, rows: [], warnings: [], invalid: [] };
+    const okP = isNum(P) && P > 0, okB = isNum(B) && B > 0;
+    const fin = (g, bb) => { out.gross = g; out.buyback = bb; out.net = g - bb; out.diluted = okB ? B + g - bb : null; out.ok = okB; if (!okB) out.problem = 'Enter actual shares outstanding'; if (okB && B > 0 && out.net / B > 0.15) out.warnings.push(`Net dilution is ${(out.net / B * 100).toFixed(1)}% of shares outstanding. Check the inputs.`); return out; };
+    if (!D.method) { out.problem = 'Choose a dilution method'; return out; }
+    if (D.method === 'totals') {
+      const o = model.inputs.options, t = model.inputs.treasury;
+      if (!isNum(o) || !isNum(t)) { out.problem = 'Missing'; return out; }
+      if (o < 0 || t < 0) { out.problem = 'Must be at least 0.'; return out; }
+      return fin(o, t);
+    }
+    if (D.method === 'simple') {
+      if (D.ignore) { out.warnings.push('Valuing on actual shares outstanding only: dilution from options, RSUs, warrants and convertibles is ignored.'); return fin(0, 0); }
+      if (!isNum(D.est)) { out.problem = 'Enter estimated diluted shares, or tick "Value on actual shares only"'; return out; }
+      if (!okB) { out.problem = 'Enter actual shares outstanding'; return out; }
+      if (D.est < B) { out.problem = 'Estimated diluted shares are below actual shares outstanding'; out.invalid.push('est'); return out; }
+      out.rows.push({ type: 'Estimate', label: 'Estimated diluted shares − actual shares', n: D.est, gross: D.est - B, buyback: 0, net: D.est - B, note: 'Your estimate' });
+      return fin(D.est - B, 0);
+    }
+    // advanced
+    if (D.none) { out.rows = []; return fin(0, 0); }
+    if (!okP) { out.problem = 'Enter the share price first (the treasury stock method needs it)'; return out; }
+    let g = 0, bb = 0, any = false;
+    const tsm = (type, r, i) => {
+      const has = isNum(r.n) || isNum(r.k); if (!has) return;
+      if (!isNum(r.n) || !isNum(r.k) || r.n < 0 || r.k < 0) { out.invalid.push(`${type} ${i + 1}`); return; }
+      any = true; const itm = P > r.k;
+      const rg = itm ? r.n : 0, rb = itm ? r.n * r.k / P : 0;
+      out.rows.push({ type, label: r.label || `${type} ${i + 1}`, n: r.n, k: r.k, itm, gross: rg, buyback: rb, net: rg - rb, note: itm ? 'Treasury stock method' : 'Out of the money: not dilutive' });
+      g += rg; bb += rb;
+    };
+    (D.options || []).forEach((r, i) => tsm('Options', r, i));
+    if (D.rsu && (isNum(D.rsu.n) || isNum(D.rsu.unrecog))) {
+      if (!isNum(D.rsu.n) || D.rsu.n < 0 || (isNum(D.rsu.unrecog) && D.rsu.unrecog < 0)) out.invalid.push('RSUs');
+      else {
+        any = true; const rb = isNum(D.rsu.unrecog) ? Math.min(D.rsu.n, D.rsu.unrecog / P) : 0;
+        out.rows.push({ type: 'RSUs', label: 'Unvested RSUs / PSUs', n: D.rsu.n, k: null, itm: true, gross: D.rsu.n, buyback: rb, net: D.rsu.n - rb, note: isNum(D.rsu.unrecog) ? 'Treasury stock method (unrecognised cost as proceeds)' : 'Counted in full (no unrecognised cost entered)' });
+        g += D.rsu.n; bb += rb;
+        if (!isNum(D.rsu.unrecog)) out.warnings.push('Unvested RSUs are counted in full because no unrecognised compensation cost was entered. This is conservative.');
+      }
+    }
+    (D.warrants || []).forEach((r, i) => tsm('Warrants', r, i));
+    (D.converts || []).forEach((r, i) => {
+      const has = isNum(r.n) || isNum(r.k); if (!has) return;
+      if (!isNum(r.n) || !isNum(r.k) || r.n < 0 || r.k <= 0) { out.invalid.push(`Convertible ${i + 1}`); return; }
+      any = true; const itm = P > r.k;
+      let rg = 0, rb = 0;
+      if (itm) { rg = r.n; rb = r.net ? r.n * r.k / P : 0; }
+      out.rows.push({ type: 'Convertible', label: r.label || `Convertible ${i + 1}`, n: r.n, k: r.k, itm, gross: rg, buyback: rb, net: rg - rb, note: !itm ? 'Out of the money: stays as debt' : r.net ? 'Net share settlement: shares for the excess over principal' : 'If-converted: all conversion shares' });
+      if (itm && !r.net) out.warnings.push(`${r.label || 'Convertible ' + (i + 1)} is counted as converted. Remove its principal from Total debt in the equity bridge so it isn't counted twice.`);
+      g += rg; bb += rb;
+    });
+    if (out.invalid.length) { out.problem = 'Complete or clear: ' + out.invalid.join(', '); return out; }
+    if (!any) { out.problem = 'Enter at least one dilutive security, or tick "No dilutive securities outstanding"'; return out; }
+    return fin(g, bb);
+  }
+  // Writes the calculated dilution into the workbook's two cells, so Excel export and the engine agree
+  function syncDilution(model) {
+    const d = dilution(model);
+    if (!d.method || d.method === 'totals') return d;
+    model.inputs.options = d.ok ? d.gross : null; model.inputs.treasury = d.ok ? d.buyback : null;
+    return d;
+  }
+  // Dates, staleness, units and consistency for the market data
+  const days = (a, b) => (new Date(b) - new Date(a)) / 864e5;
+  const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  function marketChecks(model, today) {
+    const I = model.inputs, A = model.asOf || {}, vd = I.company.valDate, ref = isDate(vd) ? vd : (today || new Date().toISOString().slice(0, 10));
+    const w = [];
+    const add = (level, key, text) => w.push({ level, key, text });
+    if (!isNum(I.price)) add('bad', 'price', 'Share price is missing.');
+    else if (!isDate(A.price)) add('warn', 'price', 'Add the date of the share price (As of).');
+    else if (Math.abs(days(A.price, ref)) > 5) add('warn', 'price', `The share price is from ${A.price}, ${Math.round(Math.abs(days(A.price, ref)))} days ${days(A.price, ref) > 0 ? 'before' : 'after'} the ${isDate(vd) ? 'valuation date' : 'current date'} (${ref}). Use the close on the valuation date.`);
+    if (isNum(I.hi52) && isNum(I.lo52) && I.hi52 < I.lo52) add('bad', 'hi52', 'The 52-week high is below the 52-week low.');
+    else if (isNum(I.hi52) && isNum(I.lo52) && isNum(I.price) && (I.price > I.hi52 * 1.02 || I.price < I.lo52 * 0.98)) add('warn', 'price', 'The share price is outside the 52-week range. Check that both use the same date and are split-adjusted.');
+    if ((isNum(I.hi52) || isNum(I.lo52)) && !isDate(A.range)) add('warn', 'hi52', 'Add the end date of the 52-week range (As of).');
+    if (!isNum(I.basic)) add('bad', 'basic', 'Actual shares outstanding are missing.');
+    else {
+      if (I.basic > 60000) add('warn', 'basic', `Shares outstanding of ${Math.round(I.basic).toLocaleString('en-US')} million looks too high. Is it in shares instead of millions?`);
+      if (I.basic < 1) add('warn', 'basic', 'Shares outstanding below 1 million. Is it in billions instead of millions?');
+      if (!isDate(A.basic)) add('warn', 'basic', 'Add the cover-page date of the share count (As of).');
+      else if (days(A.basic, ref) > 120) add('warn', 'basic', `The share count is from ${A.basic}, more than 4 months before ${ref}. Check for a newer 10-Q.`);
+    }
+    const r = model.ref && model.ref.marketCap, d = dilution(model);
+    if (r && isNum(r.v) && isNum(I.price) && isNum(I.basic)) { const mc = I.price * I.basic, gap = mc / r.v - 1; if (Math.abs(gap) > 0.1) add('warn', 'basic', `Price × actual shares (${Math.round(mc).toLocaleString('en-US')} $mm) differs from the provider's market cap by ${(gap * 100).toFixed(0)}%. Check the share count and units.`); }
+    d.warnings.forEach(t => add('warn', 'dilution', t));
+    return w;
+  }
   // Build the flat engine input, dropping invalid values (they count as missing, never as zero)
   function engineInputs(model) {
     const out = {}, invalid = [];
@@ -65,15 +168,19 @@ const DCFModel = (() => {
       else { const e = fieldError(f, v); if (e) invalid.push({ key: f.key, e }); out[f.key] = e ? null : v; }
     });
     if (model.mode === 'corrected') { const r = model.hist.rev[4]; out.rev0 = isNum(r) && r > 0 ? r : null; }
-    return { inp: out, invalid };
+    const d = dilution(model);
+    if (d.method && d.method !== 'totals') { out.options = d.ok ? d.gross : null; out.treasury = d.ok ? d.buyback : null; }
+    return { inp: out, invalid, dilution: d };
   }
   // Completion status per group. Required = needed by the valuation in the current mode.
   function completion(model) {
     const { invalid } = engineInputs(model);
     const groups = {};
     const add = (g, item) => { (groups[g] = groups[g] || { items: [], done: 0, total: 0 }).items.push(item); groups[g].total++; if (item.ok) groups[g].done++; };
+    const dil = dilution(model);
     F.forEach(f => {
       if (!f.required || !relevant(f, model)) return;
+      if ((f.key === 'options' || f.key === 'treasury') && dil.method !== 'totals') return;
       const cols = f.tri ? SC : [null];
       cols.forEach(s => {
         if (f.key === 'exitMult' && model.inputs.tvMethod[s] !== 'Exit Multiple') return;
@@ -83,6 +190,7 @@ const DCFModel = (() => {
         add(f.group, { key: f.key, s, label: f.label + (s ? ` (${s})` : ''), ok, problem: bad ? bad.e : (ok ? null : 'Missing') });
       });
     });
+    if (dil.method !== 'totals') add('market', { key: 'dilution', s: null, label: dil.method ? 'Share dilution' : 'Share dilution: choose a method', ok: dil.ok, problem: dil.ok ? null : (dil.problem && dil.problem !== 'Missing' && dil.method ? dil.problem : 'Missing') });
     // historicals: revenue required for the latest year in corrected mode; others recommended
     HF.forEach(h => model.hist[h.key].forEach((v, i) => {
       const need = h.key === 'rev' ? (i === 4 && model.mode === 'corrected') : false;
@@ -143,7 +251,8 @@ const DCFModel = (() => {
     const complete = out.every(s => s.status === 'complete');
     let pct = pts ? Math.floor(done / pts * 100) : 0;
     if (!complete) pct = Math.min(pct, 99);
-    const warnings = [].concat(failing.map(c => ({ level: 'bad', text: c.title, detail: c.detail })), warns.map(c => ({ level: 'warn', text: c.title, detail: c.detail })),
+    const mkt = marketChecks(model).filter(w => w.level === 'warn' || isNum(model.inputs[w.key]));
+    const warnings = [].concat(mkt.map(w => ({ level: w.level, key: w.key === 'dilution' ? null : w.key, text: w.text })), failing.map(c => ({ level: 'bad', text: c.title, detail: c.detail })), warns.map(c => ({ level: 'warn', text: c.title, detail: c.detail })),
       [].concat(...out.filter(s => s.flagged).map(s => s.flagged.map(k => ({ level: 'warn', key: k, text: 'Check imported figure: ' + labelOf(k), detail: model.sources[k].notes })))));
     return { sections: out, pct, complete, ready: calcItems.every(i => i.ok), warnings, points: pts, done };
   }
@@ -164,8 +273,11 @@ const DCFModel = (() => {
     out.inputs = Object.assign(blank().inputs, m.inputs || {});
     ['sources', 'reviewed', 'imported', 'ref', 'meta'].forEach(k => out[k] = m[k] || {}); ['log', 'snapshots', 'importNotes'].forEach(k => out[k] = m[k] || []);
     out.defaults = m.defaults || {}; // older files: their choices were made by the analyst
+    out.asOf = Object.assign({ price: null, range: null, basic: null }, m.asOf || {});
+    // older files typed the workbook's two totals directly: keep that method
+    out.dilution = m.dilution ? Object.assign(blankDilution(), m.dilution) : blankDilution(isNum(out.inputs.options) || isNum(out.inputs.treasury) ? 'totals' : null);
     return out;
   }
-  return { SC, SECTIONS, blank, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

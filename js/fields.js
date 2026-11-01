@@ -1191,4 +1191,93 @@ const GUIDE_SECTIONS = [
 "watch": "Bear and Bull that are just \"flex every input the same direction\" — real scenarios have offsetting effects. Probabilities that don't sum to 100%. No mid-year convention applied (understates value by ~5–7%)."
 }
 ];
-if (typeof module !== 'undefined') module.exports = { FIELDS, GROUPS, HIST_FIELDS, GUIDE_SECTIONS };
+
+// ---- Market data: precise labels and step-by-step source guidance (expandable in the help panel) ----
+(function () {
+  const by = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+  Object.assign(by.price, {
+    label: 'Current share price', unitText: 'USD per share',
+    what: 'The market price of one share at the close on your valuation date. The model compares its value per share with this number.',
+    enter: 'US dollars per share, e.g. 241.75. Use the closing price on the valuation date.',
+    source: 'Market quote (not in SEC filings): the "Close" price on the valuation date.',
+    guide: {
+      kind: 'Current market data',
+      where: ['Open a quote site such as Nasdaq.com or Yahoo Finance and search the ticker.', 'Go to Historical Data (daily) and find the row for your valuation date.', 'Copy the "Close" column. If the valuation date is a weekend or holiday, use the previous trading day.'],
+      statement: 'Not in the 10-K or 10-Q. Share prices are market data, not reported financials.',
+      date: 'The valuation date. Record it in the "As of" box.',
+      units: 'US dollars per share (USD/share). Do not enter it in millions.',
+      example: 'AMZN closed at $241.75 on 30 Jun 2026, so enter 241.75 and as of 2026-06-30.',
+      terms: ['Close / Last price: the price you want', 'Adj. close: adjusted for later dividends and splits; don\'t use it for a current valuation', 'Intraday / bid / ask: prices during the day; don\'t use them'],
+      watch: ['A price more than a few days away from your valuation date', 'ADRs: one ADR can represent several or a fraction of ordinary shares', 'A price in another currency from the one your financials use'],
+    },
+    video: 'how to find historical closing stock price',
+  });
+  const range = (hi) => ({
+    unitText: 'USD per share',
+    what: `The ${hi ? 'highest' : 'lowest'} price in the 52 weeks up to your valuation date. Context only: it does not change the value, but it is drawn on the football field.`,
+    enter: 'US dollars per share.',
+    source: 'Market quote: the "52 Week Range" on the quote page.',
+    guide: {
+      kind: 'Current market data',
+      where: ['On the quote page, read the "52 Week Range" (e.g. 196.00 - 278.56).', `The ${hi ? 'second' : 'first'} number is the 52-week ${hi ? 'high' : 'low'}.`, 'For an exact range as of an older valuation date, take the max high and min low of daily prices over the 52 weeks ending that date.'],
+      statement: 'Not in SEC filings.',
+      date: 'The 52 weeks ending on the valuation date. Record the end date in the "As of" box.',
+      units: 'US dollars per share.',
+      example: hi ? '52 Week Range 196.00 - 278.56, so the high is 278.56.' : '52 Week Range 196.00 - 278.56, so the low is 196.00.',
+      terms: ['52-wk range / 52W high-low', 'Intraday high/low: most sites use these, not closing prices. Either is fine if you are consistent'],
+      watch: ['Stock splits inside the window: use split-adjusted prices', 'A current price outside the range usually means the dates don\'t line up'],
+    },
+  });
+  Object.assign(by.hi52, range(true)); Object.assign(by.lo52, range(false));
+  Object.assign(by.basic, {
+    label: 'Actual common shares outstanding (latest available date)', unitText: 'millions of shares',
+    what: 'The actual number of common shares in issue on the latest date the company reports, before any options, RSUs, warrants or convertibles. It is a count on one date, not an average.',
+    enter: 'Millions of shares from the cover page of the most recent 10-Q or 10-K. Add up every class of common stock.',
+    source: 'SEC 10-Q or 10-K cover page: "As of [date], there were X shares of common stock outstanding".',
+    backup: 'Balance sheet equity section ("shares issued and outstanding"), which is older: it is at the period end, not the cover-page date.',
+    tip: 'Use the cover-page count, not the weighted-average basic shares on the income statement. That is an average over the period and lags buybacks and issuance.',
+    guide: {
+      kind: 'Historical SEC filing data (most recent filing)',
+      where: ['Open the company\'s most recent 10-Q or 10-K on SEC EDGAR, whichever was filed later.', 'Stay on page 1, the cover page. Near the bottom is a sentence like "Indicate the number of shares outstanding of each of the issuer\'s classes of common stock, as of the latest practicable date."', 'Read the number and the date next to it, e.g. "10,731,000,000 shares of common stock, par value $0.01 per share, outstanding as of October 17, 2026".', 'If there are several classes (Class A, B, C), add them all.'],
+      statement: 'Cover page of the 10-Q or 10-K (not a financial statement).',
+      date: 'The "as of" date printed on the cover page, usually a few weeks after the quarter end. Enter it in the "As of" box.',
+      units: 'Millions of shares. Divide the cover-page number by 1,000,000: 10,731,000,000 becomes 10,731.',
+      example: '"10,731,234,567 shares outstanding as of October 17, 2026" → enter 10,731.23 with as of 2026-10-17.',
+      terms: ['Shares outstanding: the count you want', 'Latest practicable date: the date of the count', 'Shares issued: includes treasury stock the company holds, so it is too high', 'Weighted-average shares (basic): an average for the period on the income statement; don\'t use it here'],
+      watch: ['Copying weighted-average basic shares from the income statement', 'Using "shares issued" instead of "outstanding"', 'Forgetting a second share class', 'A count more than about 4 months older than your valuation date: check for a newer 10-Q'],
+    },
+    video: 'shares outstanding 10-K cover page',
+  });
+  Object.assign(by.options, { label: 'Gross new shares from dilutive securities', unitText: 'millions of shares', what: 'Shares that would be issued if in-the-money options, unvested RSUs, warrants and convertibles turned into stock. Calculated in Share dilution, or typed as a total in the workbook method.' });
+  Object.assign(by.treasury, { label: 'Shares repurchased with proceeds (treasury stock method)', unitText: 'millions of shares', what: 'Shares the company could buy back at today\'s price with the cash from exercises and unrecognised compensation. Calculated in Share dilution, or typed as a total in the workbook method.' });
+})();
+
+// Help for the share dilution inputs (they are not workbook cells; they calculate the workbook's options and treasury-share cells)
+const DIL_HELP = {
+  'dil.method': { key: 'dil.method', label: 'Share dilution method', group: 'market', unit: 'choice', kind: 'market', required: true, cell: 'Assumptions!C20:C21 (calculated)',
+    what: 'How the model turns actual shares outstanding into an estimated diluted share count.',
+    enter: 'Simple: actual shares plus, optionally, your estimate of diluted shares. Advanced: build dilution from options, RSUs, warrants and convertibles. Workbook totals: type the gross new shares and the shares repurchased yourself, as in the original spreadsheet.',
+    guide: { kind: 'Method', where: ['Beginners: start with Simple.', 'Use Advanced when dilution is material (net new shares above roughly 1–2% of shares outstanding) or the company has warrants or convertibles.'], terms: ['Treasury stock method: options and warrants add shares, and the exercise cash buys some back at today\'s price', 'If-converted method: convertibles add the shares they convert into, and the debt goes away', 'Anti-dilutive: an award that would reduce the share count, such as an out-of-the-money option; it is left out'], watch: ['Counting every award as dilutive', 'Adding RSUs that have already vested: those shares are already outstanding'] } },
+  'dil.est': { key: 'dil.est', label: 'Estimated diluted shares (optional)', group: 'market', unit: 'shares', kind: 'market', required: false, cell: '—',
+    what: 'Your estimate of the total share count after dilution. The model subtracts actual shares outstanding to get net new shares.',
+    enter: 'Millions of shares, at least as large as actual shares outstanding. Leave it blank and tick "Value on actual shares only" if you choose not to adjust for dilution.',
+    guide: { kind: 'Estimate', where: ['There is no filed "current diluted share count". The most defensible number comes from the Advanced method.', 'A quick proxy: the latest 10-Q income statement, "Weighted-average shares used in computing earnings per share: Diluted". It is an average for the quarter, not a count on one date, and it leaves out anti-dilutive awards. If you use it, say so in the source note.', 'A data provider\'s "diluted shares outstanding" can also be used; record the provider and its date.'], statement: 'Income statement, bottom (EPS section), or the EPS note.', date: 'The quarter the weighted average covers.', units: 'Millions of shares.', example: 'Latest 10-Q diluted weighted-average shares of 10,850 million: enter 10,850. Net new shares = 10,850 − 10,731 = 119.', watch: ['Using an annual 10-K average when a newer 10-Q exists', 'An estimate below actual shares outstanding'] } },
+  'dil.options': { key: 'dil.options', label: 'Stock options', group: 'market', unit: 'shares', kind: 'reported', required: false, cell: '—',
+    what: 'Employee stock options outstanding and their exercise prices. Only in-the-money options are dilutive (treasury stock method).',
+    enter: 'For each tranche: number of options outstanding (millions) and weighted-average exercise price (USD per share).',
+    guide: { kind: 'Historical SEC filing data', where: ['10-K, notes to the financial statements: "Stock-Based Compensation" or "Stockholders\' Equity" note.', 'Find the stock option activity table and read the "Outstanding at end of year" row: number of options and weighted-average exercise price.', 'If the note has a table by "range of exercise prices", enter each range as its own tranche: it is more precise.', 'A newer 10-Q sometimes updates the table; use it if so.'], statement: 'Notes to the financial statements (equity / stock-based compensation note).', date: 'The fiscal year end (10-K) or quarter end (10-Q) of the table.', units: 'Options in millions; exercise price in USD per share.', example: '20 million options at $50 with the share price at $200: shares repurchased = 20 × 50 ÷ 200 = 5 million, so net new shares = 15 million.', terms: ['Outstanding: use this row', 'Exercisable: vested options only; a subset of outstanding', 'Granted / exercised / forfeited: movements during the year; don\'t use them', 'Aggregate intrinsic value: a cross-check of in-the-money value'], watch: ['Options with an exercise price above today\'s price add nothing', 'Options already exercised are in shares outstanding'] } },
+  'dil.rsu': { key: 'dil.rsu', label: 'Unvested RSUs and PSUs', group: 'market', unit: 'shares', kind: 'reported', required: false, cell: '—',
+    what: 'Restricted stock units not yet vested. They become shares at no cost when they vest. Under the treasury stock method, unrecognised compensation counts as assumed proceeds.',
+    enter: 'Unvested units (millions) and, if disclosed, unrecognised compensation cost for them ($ millions).',
+    guide: { kind: 'Historical SEC filing data', where: ['10-K "Stock-Based Compensation" note: RSU activity table, row "Unvested (or nonvested / outstanding) at end of year".', 'In the same note, look for "As of [date], there was $X of total unrecognized compensation cost related to unvested stock-based awards, expected to be recognized over a weighted-average period of Y years."', 'Enter the unrecognised cost for RSUs only. If the note gives one total for options and RSUs, enter it once here and leave nothing extra on the option rows.'], statement: 'Notes to the financial statements (stock-based compensation note).', date: 'Fiscal year end or quarter end of the table.', units: 'Units in millions; unrecognised cost in $ millions.', example: '300 million unvested RSUs, $20,000 million unrecognised cost, price $200: repurchased = 20,000 ÷ 200 = 100 million, so net new shares = 200 million.', terms: ['Unvested / nonvested: count these', 'Vested and released: already shares outstanding, so don\'t add them', 'PSUs: performance units; use the target number unless the note says otherwise'], watch: ['Leaving unrecognised cost blank counts every unvested unit in full, which is conservative', 'Adding vested RSUs a second time'] } },
+  'dil.warrants': { key: 'dil.warrants', label: 'Warrants', group: 'market', unit: 'shares', kind: 'reported', required: false, cell: '—',
+    what: 'Rights to buy shares at a set price, often issued with financing. Dilutive only when in the money (treasury stock method).',
+    enter: 'Warrants outstanding (millions of shares they convert into) and exercise price (USD per share).',
+    guide: { kind: 'Historical SEC filing data', where: ['10-K "Stockholders\' Equity" note or a "Warrants" note; sometimes the debt note when warrants came with a loan.', 'Read the number outstanding, the exercise price and the expiry date.'], statement: 'Notes to the financial statements.', date: 'Fiscal year end or quarter end.', units: 'Millions of shares; USD per share.', example: '10 million warrants at $120 with the price at $200: repurchased = 10 × 120 ÷ 200 = 6 million, so net new shares = 4 million.', watch: ['Expired warrants', 'Warrants that settle in cash, which are not dilutive'] } },
+  'dil.converts': { key: 'dil.converts', label: 'Convertible securities', group: 'market', unit: 'shares', kind: 'reported', required: false, cell: '—',
+    what: 'Convertible notes or preferred stock that can turn into common shares. If-converted method: dilutive only when the share price is above the conversion price.',
+    enter: 'Shares issued on conversion (millions) and the conversion price (USD per share). Tick "net share settlement" if the company repays the principal in cash and only the excess in shares.',
+    guide: { kind: 'Historical SEC filing data', where: ['10-K "Debt" or "Convertible Senior Notes" note.', 'Read the principal, the "conversion rate" (shares per $1,000 of principal) and the "conversion price".', 'Shares on conversion = principal ÷ 1,000 × conversion rate. In millions: $1,000 million of notes at 5 shares per $1,000 → 5 million shares.'], statement: 'Notes to the financial statements (debt note).', date: 'Fiscal year end or quarter end.', units: 'Millions of shares; USD per share.', example: '5 million conversion shares at a $200 conversion price, share price $250: full conversion adds 5 million shares. With net share settlement, only 5 × (250 − 200) ÷ 250 = 1 million.', terms: ['Conversion rate: shares per $1,000 of principal', 'Conversion price: $1,000 ÷ conversion rate', 'Net share settlement: principal paid in cash, excess in shares'], watch: ['When you count conversion shares (full conversion), remove that note\'s principal from Total debt in the equity bridge, or it is counted twice', 'Out-of-the-money convertibles stay as debt and add no shares'] } },
+};
+
+if (typeof module !== 'undefined') module.exports = { FIELDS, GROUPS, HIST_FIELDS, GUIDE_SECTIONS, DIL_HELP };

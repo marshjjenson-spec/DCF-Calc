@@ -45,6 +45,14 @@ confirm, and whether each reported figure has a source and has been verified. It
 calculates, failing and warning checks, reviewed assumptions, and whether the model was saved after the last change.
 The model shows Complete, and 100%, only when all of these pass; defaults and placeholders never count as done.
 
+## Market data and share dilution
+
+- **Actual common shares outstanding (latest available date)** comes from the cover page of the latest 10-Q or 10-K. Imports never substitute weighted-average shares for it. Each market input has an as-of date, a source badge (market quote or SEC filing data) and a "Where to find it" guide.
+- **Share dilution** has three methods: *Simple* (an estimated diluted count, or value on actual shares only), *Advanced* (options and warrants by treasury stock method, unvested RSUs with optional unrecognised cost, convertibles by if-converted or net share settlement; out-of-the-money securities are excluded) and *Workbook totals* (the spreadsheet's two cells). Simple and Advanced fill the workbook's options and treasury cells, so the engine and Excel export are unchanged. Typed totals are kept and restored if you switch back.
+- Diluted weighted-average EPS shares from filings are shown only as a reference; they are used only if you press "Use as my estimate".
+- Warnings cover a missing or stale price or share date, a 52-week high below the low, a price outside the range, likely unit errors, and a market cap that differs from the provider's.
+- **Share dilution guide** (sidebar, or "Learn about diluted shares") explains basic vs diluted shares, where to find each figure on EDGAR, the formula and treasury stock method, Amazon's Q3 2026 EPS share table, a sandbox calculator and common mistakes. It shows your model's share counts read-only and never changes your inputs.
+
 ## Structure
 
 | Path | What it is |

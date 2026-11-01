@@ -26,7 +26,9 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('FMP: debt flagged for review', fm.values.debt.review === true);
   ok('FMP: beta and Treasury are references, not inputs', fm.ref.beta.v === 1.31 && near(fm.ref.rf.v, 0.0445) && !fm.values.beta && !fm.values.rf);
   const fmd = D.mapFMP('X', { profile: [{ symbol: 'X', companyName: 'X' }], income: [{ date: '2025-12-31', fiscalYear: '2025', revenue: 1e9, weightedAverageShsOut: 10.5e9, weightedAverageShsOutDil: 10.72e9 }] });
-  ok('FMP: options = diluted − basic shares, treasury 0, flagged', near(fmd.values.options.v, 220) && fmd.values.treasury.v === 0 && fmd.values.options.review);
+  ok('FMP: weighted-average shares are references only, never inputs', !fmd.values.options && !fmd.values.treasury && !fmd.values.basic && near(fmd.ref.dilutedWA.v, 10720) && near(fmd.ref.basicWA.v, 10500));
+  ok('FMP: missing share count is reported, not substituted', fmd.notes.some(n => /not used as a substitute/.test(n)));
+  ok('FMP: share count carries its own date, market price its quote date', fm.values.basic.asOf === '2026-06-30' && fm.values.basic.cls === 'filing' && fm.values.price.cls === 'market' && fm.values.price.asOf === '2026-07-01');
   ok('FMP: effective tax is calculated', near(fm.ref.effTax.v, 0.2) && fm.ref.effTax.calculated);
   ok('FMP: every historical has a source with period', ['rev', 'gp', 'opex', 'da', 'interest', 'sbc', 'dnwc', 'capex'].every(k => fm.histSrc[k] && fm.histSrc[k].period === 'FY2021–FY2025'));
   // missing statements stay missing, never zero
@@ -37,7 +39,7 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   const fakeFetch = async url => { const ep = url.split('/stable/')[1].split('?')[0]; const body = routes[ep]; return { ok: !(body && body['Error Message']), status: body && body['Error Message'] ? 402 : 200, json: async () => body }; };
   const fi = await D.fetchFMP('AMZN', 'k', fakeFetch);
   ok('FMP fetch: tolerates a refused optional endpoint', fi.values.price.v === 200 && fi.notes.some(n => /shares outstanding/.test(n)));
-  ok('FMP fetch: falls back to weighted-average shares, flagged', fi.values.basic && fi.values.basic.review === true);
+  ok('FMP fetch: no weighted-average fallback for shares outstanding', !fi.values.basic && fi.ref.basicWA);
   let threw = false; try { await D.fetchFMP('AMZN', 'k', async () => ({ ok: false, status: 401, json: async () => ({ 'Error Message': 'Invalid API KEY.' }) })); } catch (e) { threw = /Invalid API KEY/.test(e.message); }
   ok('FMP fetch: bad key reports the provider message', threw);
   // ---------- Alpha Vantage mapping ----------
@@ -77,7 +79,8 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('SEC: no price imported', !sec.values.price);
   const f2 = JSON.parse(JSON.stringify(facts)); f2.facts['us-gaap'].IncrementalCommonSharesAttributableToShareBasedPaymentArrangements = { units: { shares: [dur(2024, 150e6), dur(2025, 180e6)] } };
   const sec2 = D.mapSEC(f2);
-  ok('SEC: options from incremental dilutive shares (latest year)', near(sec2.values.options.v, 180) && sec2.values.treasury.v === 0);
+  ok('SEC: incremental dilutive shares are a reference only', near(sec2.ref.incrementalWA.v, 180) && !sec2.values.options && !sec2.values.treasury);
+  ok('SEC: cover-page share count dated', sec.values.basic.asOf === '2026-04-15');
   const ms = M.blank(); D.applyImport(ms, sec);
   ok('SEC: valuation date set to the import date when there is no price', ms.inputs.company.valDate === sec.retrieved.slice(0, 10));
   let bad = false; try { D.mapSEC({ foo: 1 }); } catch (e) { bad = /not an SEC company facts file/.test(e.message); }
@@ -91,7 +94,8 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('apply: never fills forecast assumptions', m.inputs.tax.Base === null && m.inputs.g1.Base === null && m.inputs.erp.Base === null && m.inputs.kd.Base === null);
   ok('apply: 10-year Treasury fills every scenario', ['Base', 'Bear', 'Bull'].every(x => near(m.inputs.rf[x], 0.0445)) && m.sources.rf.auto);
   ok('apply: provider beta starts the Base case only', m.inputs.beta.Base === 1.31 && m.inputs.beta.Bear === null && m.inputs.beta.Bull === null && m.sources.beta.review);
-  ok('apply: options from reported dilution, treasury 0', m.inputs.options === null || m.inputs.treasury === 0);
+  ok('apply: options and treasury never imported', m.inputs.options === null && m.inputs.treasury === null && m.dilution.method === null);
+  ok('apply: as-of dates recorded', m.asOf.price === '2026-07-01' && m.asOf.range === '2026-07-01' && m.asOf.basic === '2026-06-30');
   ok('apply: source with period and retrieval time', m.sources.price.auto && m.sources.price.retrieved === fm.retrieved && /2026-07-01/.test(m.sources.price.period));
   ok('apply: change log records the provider', m.log.some(l => l.field === 'price' && l.by === fm.provider));
   ok('apply: provenance imported', D.provenance(m, 'price', m.inputs.price) === 'imported' && D.provenance(m, 'hist.rev', m.hist.rev) === 'imported');
@@ -132,6 +136,47 @@ const near = (a, b, t = 1e-9) => Math.abs(a - b) < t;
   ok('tracker: invalid input listed', ti.sections.find(s => s.id === 'forecast').invalid.some(i => i.key === 'tax'));
   // old saved files keep their choices as made
   ok('upgrade: older models have no default flags', Object.keys(M.upgrade(JSON.parse(JSON.stringify(Object.assign(M.fromSample(sample), { defaults: undefined })))).defaults).length === 0);
+  // ---------- share dilution ----------
+  const dm = () => { const x = M.blank(); x.inputs.price = 200; x.inputs.basic = 1000; return x; };
+  let x = dm();
+  ok('dilution: no method → not ok, missing', !M.dilution(x).ok && M.completion(x).market.items.some(i => i.key === 'dilution' && !i.ok));
+  x.dilution.method = 'simple';
+  ok('simple: blank estimate is missing, not zero', !M.dilution(x).ok && M.engineInputs(x).inp.options === null);
+  x.dilution.est = 1030;
+  let d = M.dilution(x);
+  ok('simple: net = estimate − actual', d.ok && d.net === 30 && d.diluted === 1030 && M.engineInputs(x).inp.options === 30 && M.engineInputs(x).inp.treasury === 0);
+  x.dilution.est = 900; ok('simple: estimate below actual is invalid', !M.dilution(x).ok && /below/.test(M.dilution(x).problem));
+  x.dilution.est = null; x.dilution.ignore = true; d = M.dilution(x);
+  ok('simple: explicit no-dilution choice warns', d.ok && d.net === 0 && d.warnings.length === 1);
+  x = dm(); x.dilution.method = 'advanced';
+  x.dilution.options[0] = { label: 'ITM', n: 20, k: 50 }; x.dilution.options[1] = { label: 'OTM', n: 10, k: 250 };
+  d = M.dilution(x);
+  ok('advanced: in-the-money options by treasury stock method', d.ok && near(d.rows[0].net, 15) && d.rows[1].net === 0 && !d.rows[1].itm);
+  x.dilution.rsu = { n: 30, unrecog: 2000 }; d = M.dilution(x);
+  ok('advanced: RSUs net of unrecognised cost / price', near(d.rows.find(r => r.type === 'RSUs').net, 20));
+  x.dilution.rsu = { n: 30, unrecog: null }; d = M.dilution(x);
+  ok('advanced: RSUs without unrecognised cost counted in full, with a note', near(d.rows.find(r => r.type === 'RSUs').net, 30) && d.warnings.some(w => /in full/.test(w)));
+  x.dilution.warrants[0] = { label: 'W', n: 10, k: 120 }; x.dilution.converts[0] = { label: 'Notes', n: 5, k: 160, net: false }; x.dilution.converts[1] = { label: 'Net', n: 5, k: 160, net: true };
+  d = M.dilution(x);
+  ok('advanced: warrants TSM', near(d.rows.find(r => r.type === 'Warrants').net, 4));
+  ok('advanced: if-converted adds all shares and warns about debt', near(d.rows.find(r => r.label === 'Notes').net, 5) && d.warnings.some(w => /Remove its principal/.test(w)));
+  ok('advanced: net share settlement adds only the excess', near(d.rows.find(r => r.label === 'Net').net, 5 * (200 - 160) / 200));
+  ok('advanced: totals tie out', near(d.net, 15 + 0 + 30 + 4 + 5 + 1) && near(d.diluted, 1055) && near(d.gross - d.buyback, d.net));
+  const ei = M.engineInputs(x).inp; ok('advanced: engine gets gross and buyback', near(ei.options - ei.treasury, d.net));
+  x.dilution.options[2] = { label: null, n: 5, k: null }; ok('advanced: half-filled row is invalid', !M.dilution(x).ok && /Options 3/.test(M.dilution(x).problem));
+  x = dm(); x.dilution.method = 'advanced'; ok('advanced: nothing entered is missing', !M.dilution(x).ok);
+  x.dilution.none = true; ok('advanced: explicit none', M.dilution(x).ok && M.dilution(x).net === 0);
+  x = dm(); x.dilution.method = 'advanced'; x.inputs.price = null; x.dilution.options[0] = { n: 1, k: 1 }; ok('advanced: needs a price', !M.dilution(x).ok);
+  // the example and old files keep the workbook's typed totals
+  const ex = M.fromSample(sample); ok('example keeps workbook totals', ex.dilution.method === 'totals' && M.dilution(ex).ok && M.dilution(ex).net === 222);
+  const old = JSON.parse(JSON.stringify(M.fromSample(sample))); delete old.dilution; ok('older files upgrade to workbook totals', M.upgrade(old).dilution.method === 'totals');
+  // market checks
+  const mc = M.fromSample(sample); mc.asOf = { price: '2026-06-01', range: '2026-07-01', basic: '2026-01-01' };
+  const w = M.marketChecks(mc);
+  ok('market: stale price flagged', w.some(z => z.key === 'price' && /days before/.test(z.text)));
+  ok('market: stale share count flagged', w.some(z => z.key === 'basic' && /more than 4 months/.test(z.text)));
+  mc.inputs.basic = 10731000000; ok('market: share units checked', M.marketChecks(mc).some(z => /in shares instead of millions/.test(z.text)));
+  mc.inputs.hi52 = 100; ok('market: high below low', M.marketChecks(mc).some(z => z.level === 'bad'));
   console.log(`${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
