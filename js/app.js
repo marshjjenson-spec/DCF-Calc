@@ -213,7 +213,8 @@
   }
 
   // ---------- routing ----------
-  const compsOn = () => /^#comps(\/|$)/.test(location.hash);
+  const compsOn = () => /^#(comps|sim)(\/|$)/.test(location.hash);
+  const simOn = () => /^#sim(\/|$)/.test(location.hash);
   function page() { const h = location.hash.slice(1); return PAGES.find(p => p.id === h) ? h : 'dashboard'; }
   window.addEventListener('hashchange', () => { if (compsOn()) return; render(); $('#main').scrollTop = 0; });
   function goField(pageId, elId) { pendingFocus = elId; if (page() === pageId) render(); else location.hash = pageId; }
@@ -293,7 +294,7 @@
     top.querySelector('#search-sel').innerHTML = selName ? `<span class="chip">${esc(selName)}</span>` : '<span class="chip muted">No company selected</span>';
     renderSearchResults();
     $('#hdr-sub').innerHTML = `
-      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a></div>
+      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#sim">Stock Price Simulator</a></div>
       <div class="model-pick"><label for="model-select" class="footnote">Model</label>
         <select id="model-select" class="plain">${opts}</select></div>
       <div class="model-pick"><label for="mode-select" class="footnote">Method</label>
@@ -2188,8 +2189,9 @@
 
   // ---------- render ----------
   function render() {
+    if (simOn()) { if (typeof SimApp !== 'undefined') SimApp.render(); return; }
     if (compsOn()) { if (typeof CompsApp !== 'undefined') CompsApp.render(); return; }
-    ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && r.dataset.owner === 'comps') { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
+    ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && (r.dataset.owner === 'comps' || r.dataset.owner === 'sim')) { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
     calcCache = null;
     const active = document.activeElement && document.activeElement.id;
     renderTop(); renderRail();
