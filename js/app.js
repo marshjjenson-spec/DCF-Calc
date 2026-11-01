@@ -727,8 +727,10 @@
   async function exportXlsx(tpl) {
     const st = $('#xl-status'); st.textContent = 'Building the workbook…';
     try {
-      const res = await fetch(`templates/dcf-template-${tpl}.xlsx`); if (!res.ok) throw new Error('The workbook template could not be loaded (' + res.status + ').');
-      const bytes = await DCFExcel.exportModel(JSZip, await res.arrayBuffer(), cur, FIELDS, HIST_FIELDS, tpl === 'original' ? 'workbook' : 'corrected');
+      let buf;
+      if (window.DCF_TEMPLATES && window.DCF_TEMPLATES[tpl]) buf = Uint8Array.from(atob(window.DCF_TEMPLATES[tpl]), c => c.charCodeAt(0)).buffer;
+      else { const res = await fetch(`templates/dcf-template-${tpl}.xlsx`); if (!res.ok) throw new Error('The workbook template could not be loaded (' + res.status + ').'); buf = await res.arrayBuffer(); }
+      const bytes = await DCFExcel.exportModel(JSZip, buf, cur, FIELDS, HIST_FIELDS, tpl === 'original' ? 'workbook' : 'corrected');
       download(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${safeName(cur.name)} DCF (${tpl}).xlsx`);
       st.textContent = 'Exported. Excel recalculates every formula when you open the file.';
     } catch (e) { st.textContent = 'Export failed: ' + e.message; }
@@ -745,7 +747,7 @@
 
   // ---------- boot ----------
   async function boot() {
-    try { const r = await fetch('data/amzn-sample.json'); if (r.ok) sample = await r.json(); } catch (e) {}
+    if (!window.DCF_SAMPLE) { try { const r = await fetch('data/amzn-sample.json'); if (r.ok) sample = await r.json(); } catch (e) {} }
     if (!sample && window.DCF_SAMPLE) sample = window.DCF_SAMPLE;
     let id = null; try { id = localStorage.getItem('dcfcalc.current'); } catch (e) {}
     cur = (id && models[id]) || Object.values(models)[0] || null;

@@ -5,7 +5,9 @@ It walks an analyst through every input (what it is, what to enter, where to fin
 record the source), tracks completion, and calculates a ten-year FCFF valuation with Base, Bear and Bull
 scenarios, sensitivity grids and a probability-weighted value.
 
-Open `index.html` through any static web server (`npm start`, then http://localhost:8000). No build step,
+**Run it locally:** download `dist/DCF-Workbench.html` and double-click it. It is one self-contained file (example data and Excel templates embedded) and needs no server or install; only the fonts load from the internet, with system fonts as the fallback. Rebuild it with `python3 tools/build-standalone.py`.
+
+Or serve the folder (`npm start`, then http://localhost:8000). No build step,
 no server code, no paid services. Models save in the browser; model files (.json) and Excel files carry work between computers.
 
 ## Structure
