@@ -54,7 +54,8 @@ const DCFSec = (() => {
   }
   function latest(json, subs) {
     const all = filings(json, subs);
-    const q = all.find(f => /^10-Q/.test(f.form)), k = all.find(f => /^10-K/.test(f.form));
+    // the latest original report: a 10-K/A that only adds Part III (directors, pay) has no financial statements, so it is listed under amendments
+    const q = all.find(f => f.form === '10-Q') || all.find(f => /^10-Q/.test(f.form)), k = all.find(f => f.form === '10-K') || all.find(f => /^10-K/.test(f.form));
     // the newest period: the filing with the latest period end (an amendment of an old period is not "newer")
     const newest = all.slice().sort((a, b) => String(b.periodEnd).localeCompare(String(a.periodEnd)) || String(b.filed).localeCompare(String(a.filed)))[0] || null;
     return { all, q: q || null, k: k || null, newest, amendments: all.filter(f => /\/A$/.test(f.form)) };

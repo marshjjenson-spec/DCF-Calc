@@ -1,0 +1,55 @@
+// Analysis helpers: TTM column, anchors, consistency checks, effect on value, estimators (read-only)
+global.FIELDS = require('../js/fields.js').FIELDS; global.HIST_FIELDS = require('../js/fields.js').HIST_FIELDS;
+global.DCFSec = require('../js/sec.js'); global.DCF = require('../js/engine.js'); global.DCFModel = require('../js/model.js');
+const D = require('../js/data.js'), A = require('../js/analysis.js'), M = DCFModel;
+let pass = 0, fail = 0; const ok = (n, c) => { if (c) pass++; else { fail++; console.log('FAIL', n); } };
+const near = (a, b, t = 1e-6) => a != null && Math.abs(a - b) < t;
+const m = M.blank(); D.applyImport(m, D.mapSEC(require('./fixtures/sec-amzn.json'))); m.inputs.company.valDate = '2026-11-01';
+const tc = A.ttmColumn(m);
+ok('TTM column: revenue 797,455 to 2026-09-30', near(tc.v.rev, 797455) && tc.end === '2026-09-30' && !tc.isFY);
+ok('TTM column: CapEx negative as in the table', near(tc.v.capex, -215192));
+ok('TTM column: opex = GP − EBITDA', near(tc.v.opex, 409682 - 183719));
+const an = A.anchors(m);
+ok('growth anchor: FY2025 12.4%', near(an.g1.latestFY, 716924 / 637959 - 1));
+ok('growth anchor: TTM growth vs TTM a year earlier', near(an.g1.ttm, 797455 / 691330 - 1));
+ok('growth anchor: 3-year CAGR FY2022–FY2025', near(an.g1.cagr3, Math.pow(716924 / 513983, 1 / 3) - 1));
+ok('growth anchor: 5-year CAGR not invented', an.g1.cagr5 === null);
+ok('growth anchor: latest quarter YoY', near(an.g1.quarterYoY, 201944 / 180169 - 1, 1e-6));
+ok('gross margin anchor FY2025 and TTM', near(an.gm1.latestFY, 360510 / 716924) && near(an.gm1.ttm, 409682 / 797455));
+ok('CapEx anchor TTM 27.0%', near(an.capex1.ttm, 215192 / 797455));
+ok('effective tax anchor FY2025', near(an.tax.latestFY, 19087 / 97311));
+ok('acquisitions not in imported data: no anchor invented', an.acq.n === 0 && an.acq.latestFY === null);
+ok('average over 3 years needs 3 years', an.gm1.avg3 != null && an.gm1.avg5 != null);
+// manual TTM
+const mt = A.manualTTM({ end: '2026-09-30', priorEnd: '2025-09-30', fyEnd: '2025-12-31', ytdLabel: 'nine months', rows: { rev: { fy: 716924, ytd: 584069, prior: 503538 }, capex: { fy: 1, ytd: null, prior: 2 } } });
+ok('manual TTM: 716,924 + 584,069 − 503,538 = 797,455', near(mt.items.rev.value, 797455) && mt.items.rev.parts.length === 3);
+ok('manual TTM: incomplete line left out, not zero', !mt.items.capex);
+ok('manual TTM date checks pass for consistent dates', A.manualTTMChecks({ end: '2026-09-30', priorEnd: '2025-09-30', fyEnd: '2025-12-31' }).length === 0);
+ok('manual TTM date checks catch a wrong prior period', A.manualTTMChecks({ end: '2026-09-30', priorEnd: '2025-06-30', fyEnd: '2025-12-31' }).some(f => f.level === 'bad'));
+const m2 = JSON.parse(JSON.stringify(m)); m2.ttm = null; m2.ttmManual = { use: true, result: mt }; m2.base.mode = 'ttm';
+ok('manual TTM can be the forecast base', near(M.baseInfo(m2).rev, 797455));
+// estimators
+const rp = A.revenuePath(716924, [0.12, 0.08, 0.05]);
+ok('revenue tool: 716,924 × 1.12 = 802,954.88', near(rp[0].rev, 802954.88, 1e-6) && rp.length === 10 && near(rp[3].g, 0.08));
+const mp = A.marginPath(0.2, 0.25, 0.3);
+ok('margin path: years 1, 5, 10 hit the inputs, straight lines between', near(mp[0], 0.2) && near(mp[4], 0.25) && near(mp[9], 0.3) && near(mp[2], 0.225));
+const nb = A.nolBenefit(1000, 5000, 0.21);
+ok('NOL worksheet: 1,000 × 21% ÷ 5,000 = 4.2 points', near(nb.rateCut, 0.042) && nb.leftover === 0);
+ok('NOL worksheet: no EBIT, no benefit', A.nolBenefit(1000, 0, 0.21) === null);
+// consistency + effect with the sample model
+const s = M.fromSample(require('../data/amzn-sample.json'));
+const all = DCF.runAll(M.engineInputs(s).inp, s.mode);
+const c0 = A.consistency(s, all);
+ok('sample: no EBITDA-above-gross-margin error', !c0.some(x => /above gross margin/.test(x.text)));
+const s2 = JSON.parse(JSON.stringify(s)); s2.inputs.gm1.Base = 0.1; s2.inputs.em1.Base = 0.2;
+ok('EBITDA margin above gross margin is flagged', A.consistency(s2, all).some(x => x.level === 'bad' && x.key === 'em1' && x.s === 'Base'));
+const s3 = JSON.parse(JSON.stringify(s)); s3.inputs.nol.Base = 0.5;
+ok('NOL above tax rate is flagged', A.consistency(s3, all).some(x => x.key === 'nol'));
+const e = A.effect(s, ['em1', 'em5', 'em10'], 'Base', 0.01);
+ok('effect of +1 point EBITDA margin raises value and saves nothing', e && e.diff > 0 && s.inputs.em1.Base === require('../data/amzn-sample.json').em1.Base);
+const e2 = A.effect(s, 's2c', 'Base', 0.5);
+ok('sales-to-capital does not change value in this model (ROIC display only)', e2 && Math.abs(e2.diff) < 1e-9);
+const st = A.scenarioTable(all);
+ok('scenario table has revenue, EBIT, FCF and value per share', st.every(r => r.ok && r.rev10 > 0 && 'ebit10' in r && 'fcf1' in r && r.perShare > 0));
+console.log(`${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

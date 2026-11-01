@@ -11,6 +11,7 @@ const L = S.latest(amzn);
 ok('AMZN newest filing is the Q3 2026 10-Q', L.newest.accn === '0001018724-26-000040' && L.newest.form === '10-Q' && L.newest.periodEnd === '2026-09-30' && L.newest.filed === '2026-10-30');
 ok('AMZN latest 10-K is FY2025', L.k.accn === '0001018724-26-000004' && L.k.periodEnd === '2025-12-31');
 ok('AMZN filing link is the primary document', /000101872426000040\/amzn-20260930\.htm$/.test(L.newest.url));
+ok('TSLA latest 10-K is the original, the Part III 10-K/A is listed as an amendment', S.latest(tsla).k.form === '10-K' && S.latest(tsla).amendments.some(a => a.form === '10-K/A'));
 ok('MSTR newest filing is the Q2 2026 10-Q', S.latest(mstr).newest.periodEnd === '2026-06-30');
 
 // ---- share types ----
@@ -91,5 +92,8 @@ ok('proxy dilution uses the reported net 132, no extra buyback', pd.ok && pd.gro
 ok('proxy dilution is disclosed as a historical proxy', pd.warnings.some(w => /proxy/.test(w) && /past period/.test(w)));
 pm.dilution.proxy = { v: null }; ok('proxy with no value is missing, not zero', !M.dilution(pm).ok);
 
+global.DCFSec = S; const wm = M.blank(); D.applyImport(wm, imp); wm.inputs.basic = 10797;
+ok('10,797 typed as actual shares is flagged on the market data checks', M.marketChecks(wm).some(w => w.key === 'basic' && w.level === 'bad' && /weighted-average/.test(w.text)));
+wm.inputs.basic = 10813.138306; ok('the cover-page count is not flagged', !M.marketChecks(wm).some(w => w.level === 'bad' && w.key === 'basic'));
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

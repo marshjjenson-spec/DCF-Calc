@@ -69,3 +69,31 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
 | `tests/` | Reconciliation tests against Excel values; run `npm test` |
 | `docs/FIXES.md` | Each change from the workbook's method and why |
 | `docs/RECONCILIATION.md` | Excel vs website results |
+
+## Latest filings, TTM and forecast guides
+
+- **SEC filing reader** (`js/sec.js`): picks the newest 10-Q/10-K, keeps accession numbers, filing dates, the reporting
+  period and the measurement date separately, and lets amendments replace the facts they restate. Actual shares
+  (cover page), weighted-average basic/diluted shares and the reported net dilutive effect are kept as separate types.
+- **TTM** = latest fiscal year + current year to date − same period a year earlier, for each line, with the three
+  source figures, accession numbers and dates shown. Historicals run newest first: TTM, then five fiscal years. TTM can
+  also be built by hand from the 10-K and 10-Q.
+- **Forecast base**: latest fiscal year or TTM, with a preview before switching. New models line the forecast years up
+  with the valuation date (the elapsed part of year 1 is taken off each discount period); older saved models keep the
+  workbook timing, so their values do not move.
+- **Imports never overwrite your values**: differences are listed with old and new values and dates, and replacing a
+  value you entered needs an explicit confirmation. Every change is in the change log.
+- **Share dilution**: reported net dilution (Mode A, a historical proxy, no extra buyback) or a detailed estimate
+  (Mode B, marked incomplete when disclosures are missing). Market cap uses actual shares; value per share uses
+  diluted shares.
+- **Help (?) on every field**: what it is, why it matters, where to find it (filing, statement, heading, Ctrl+F terms
+  linked to EDGAR full-text search), real examples from named filings, calculation, common mistakes, and the source
+  record (form, accession, period, filed date, raw value, units).
+- **Forecast assumptions**: historical anchors (latest FY, TTM, 3- and 5-year averages, high/low, trend), worked
+  examples, effect of each input on value, estimators (revenue growth with segments, margin path, NOL worksheet,
+  CapEx), sales-to-capital explained, research notes per input and scenario, consistency checks, and a scenario
+  overview. Guides can be hidden with one switch.
+
+Limitations: browsers cannot read the SEC company facts file directly (no CORS), so it is downloaded and loaded by
+hand; facts tagged with dimensions (for example Amazon's RSU count) and company-specific tags are not in that file;
+some companies do not tag D&A or working-capital totals, and those lines are left blank rather than estimated.

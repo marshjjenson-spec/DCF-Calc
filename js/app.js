@@ -96,7 +96,7 @@
   function dataCfg() {
     if (dataMem) return dataMem;
     let c = null; try { c = JSON.parse(localStorage.getItem('dcfcalc.data')); } catch (e) {}
-    dataMem = Object.assign({ provider: 'fmp', keys: {}, remember: true, replace: false }, c || {});
+    dataMem = Object.assign({ provider: 'fmp', keys: {}, remember: true }, c || {}); delete dataMem.replace;
     return dataMem;
   }
   function saveDataCfg() { const c = dataCfg(); try { if (c.remember) localStorage.setItem('dcfcalc.data', JSON.stringify(c)); else localStorage.setItem('dcfcalc.data', JSON.stringify(Object.assign({}, c, { keys: {} }))); } catch (e) {} }
@@ -136,11 +136,11 @@
   function finishImport(imp, match, label) {
     const m = targetModelFor(match);
     const isNew = m !== cur;
-    const res = DCFData.applyImport(m, imp, { replace: dataCfg().replace });
-    cur = m; persist(); setCurrent();
-    importStatus = { ok: true, label, provider: imp.provider, at: imp.retrieved, changed: res.changed.length, kept: res.kept, notes: res.notes, isNew };
+    const res = DCFData.applyImport(m, imp);
+    cur = m; persist(); setCurrent(); pendSel = null; pendConfirm = false;
+    importStatus = { ok: true, label, provider: imp.provider, at: imp.retrieved, changed: res.changed.length, kept: res.kept, pending: res.pending.length, notes: res.notes, isNew };
     if (page() !== 'dashboard') location.hash = 'dashboard'; else render();
-    toast(`Imported ${res.changed.length} figures from ${imp.provider}`);
+    toast(`Imported ${res.changed.length} figures from ${imp.provider}${res.pending.length ? `. ${res.pending.length} change${res.pending.length > 1 ? 's' : ''} wait for your approval` : ''}`);
   }
   function loadSecFile(el) {
     const file = el.files[0]; if (!file) return;
@@ -178,7 +178,7 @@
           <label class="form keyrow">API key for ${p.name}<span class="row"><input type="password" autocomplete="off" data-key="${p.id}" value="${esc(c.keys[p.id] || '')}" placeholder="Paste your key"><a class="btn" href="${p.keyUrl}" target="_blank" rel="noopener">Get a free key</a></span></label>`).join('')}
       </fieldset>
       <label class="check"><input type="checkbox" id="cfg-remember" ${c.remember ? 'checked' : ''}> Remember my keys on this computer</label>
-      <label class="check"><input type="checkbox" id="cfg-replace" ${c.replace ? 'checked' : ''}> When importing, replace values I've typed in (otherwise they are kept)</label>
+      <p class="footnote">Imports never overwrite a value you typed or changed: differences are listed for you to approve. FMP and Alpha Vantage figures are shown as provider data, not as SEC-verified.</p>
       <div class="btns"><button class="btn primary" id="cfg-save">Save and close</button></div>
       <hr>
       <h3>No API key? Use the SEC's own data</h3>
@@ -202,7 +202,7 @@
     const act = all.scen[cur.active];
     const wb = DCF.waccBuilder(inp, cur.wb, mode);
     const comp = DCFModel.completion(cur);
-    calcCache = { mode, inp, invalid, all, act, wb, comp };
+    calcCache = { mode, inp, invalid, all, act, wb, comp, anchors: DCFAnalysis.anchors(cur) };
     return calcCache;
   }
   function blockers() {
@@ -336,9 +336,8 @@
     t.push(`<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span>`);
     t.push(`<span class="tag">${UNIT_TXT[f.unit]}</span>`);
     const pv = f.tri ? null : provOf(f.key, f.key.startsWith('company.') ? cur.inputs.company[f.key.split('.')[1]] : cur.inputs[f.key]);
-    if (pv === 'imported') t.push(`<span class="tag imp" title="${esc(srcTitle(f.key))}">Imported</span>`);
-    else if (pv === 'overridden') t.push(`<span class="tag ovr" title="${esc(srcTitle(f.key))}">Overridden</span>`);
-    else if (cur.sources[f.key]) t.push('<span class="tag src">Source noted</span>');
+    if (!f.tri) { const val0 = f.key.startsWith('company.') ? cur.inputs.company[f.key.split('.')[1]] : cur.inputs[f.key]; const c = catOf(f.key, val0); if (c !== 'manual' && c !== 'analyst' && !(c === 'missing' && f.kind === 'company')) t.push(catBadge(c, srcTitle(f.key))); if (cur.sources[f.key] && cur.sources[f.key].stale) t.push('<span class="cat c-miss" title="A newer filing exists than the one this value came from">Older filing</span>'); }
+    if (pv !== 'imported' && pv !== 'overridden' && cur.sources[f.key]) t.push('<span class="tag src">Source noted</span>');
     if (cur.reviewed[f.key] && f.kind !== 'forecast') t.push('<span class="tag src">Verified</span>');
     if (cur.defaults && cur.defaults[f.key]) t.push('<span class="tag ovr">Default: confirm</span>');
     if (f.key === 'gm1' || f.key === 'gm5' || f.key === 'gm10') t.push('<span class="tag memo">Display only</span>');
@@ -380,14 +379,14 @@
       if (!tri && f.tri) return;
       const rel = DCFModel.relevant(f, cur);
       if (f.key === 'rev0' && cur.mode === 'corrected') {
-        rows += calcRow('Base-year revenue ($ mm)', fmt.mm(inp.rev0), false, `Linked to the latest year on <a href="#historicals">Historical financials</a>${cur.hist.years[4] ? ' (FY' + esc(cur.hist.years[4]) + ')' : ''}.`, true);
+        { const bi = DCFModel.baseInfo(cur); rows += calcRow('Base-year revenue ($ mm)', isNum(inp.rev0) ? fmt.mm(inp.rev0) : '<span class="na">Not available</span>', false, `Linked to the forecast base: ${esc(bi.label || 'latest fiscal year')}. <button class="linkbtn" data-scroll-to="base-panel">Change the base</button>`, true); }
         return;
       }
       if ((f.key === 'we' || f.key === 'tcapex') && cur.mode === 'corrected') return;
       let note = '';
       if (f.key === 'exitMult') note = 'Needed only for scenarios that use Exit Multiple.';
       if (!rel && f.key !== 'exitMult') note = 'Not used by the current method.';
-      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}`;
+      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : '');
       else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}`;
     });
     // calculated rows for some groups
@@ -472,14 +471,15 @@
         <div class="op">+</div><div><span>Gross new shares</span><b>${n(d.gross)}</b><small>dilutive securities</small></div>
         <div class="op">−</div><div><span>Repurchased (treasury stock method)</span><b>${n(d.buyback)}</b><small>hypothetical buyback</small></div>
         <div class="op">=</div><div class="tot"><span>Estimated diluted shares</span><b>${n(d.diluted)}</b><small>used to divide equity value</small></div></div>
-        <p class="footnote">Net new shares ${n(d.net)} million (${isNum(I.basic) && I.basic ? (d.net / I.basic * 100).toFixed(2) : '—'}% of actual shares). In the workbook these are “Options + RSUs” ${n(d.gross)} and “Treasury shares” ${n(d.buyback)}.</p>`
+        <p class="footnote">Net new shares ${n(d.net)} million (${isNum(I.basic) && I.basic ? (d.net / I.basic * 100).toFixed(2) : '—'}% of actual shares). ${cur.dilution.method === 'proxy' ? `The workbook's two share cells receive ${n(d.gross)} as gross new shares and 0 as shares repurchased, because the reported figure is already net of the treasury stock method.` : `These fill the workbook's two share cells: gross new shares ${n(d.gross)} and shares repurchased ${n(d.buyback)}.`} Diluted shares here are an estimate, not a count reported by the SEC.</p>`
       : `<div class="notice bad">${esc(d.problem || 'Incomplete')}</div>`;
     return rows + sum + (d.warnings.length ? `<div class="notice"><ul>${d.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '');
   }
   function dilutionPanel() {
     const D = cur.dilution, I = cur.inputs, d = DCFModel.dilution(cur), R = cur.ref || {};
     const m = D.method;
-    const meth = [['simple', 'Simple', 'Actual shares, plus an optional estimate'], ['advanced', 'Advanced', 'Options, RSUs, warrants, convertibles'], ['totals', 'Workbook totals', 'Type the two totals, as in the spreadsheet']];
+    const meth = [['simple', 'Simple', 'Actual shares, plus an optional estimate'], ['proxy', 'Reported net dilution', 'Mode A: the latest EPS note\'s net effect, a historical proxy'], ['advanced', 'Detailed estimate', 'Mode B: options, RSUs, warrants, convertibles'], ['totals', 'Workbook totals', 'Type the two totals, as in the spreadsheet']];
+    const SD = cur.shareData || {};
     let body = '';
     if (!m) body = '<div class="notice">Choose how to get from actual shares to diluted shares. New to this? Start with <b>Simple</b>.</div>';
     if (m === 'simple') {
@@ -488,9 +488,26 @@
         <div class="dopts">${dilChk('ignore', 'Value on actual shares only (no dilution adjustment)')}<p class="footnote">Leave the estimate blank only if you tick this. The model never assumes zero dilution for you.</p></div></div>
         ${refs.length ? `<div class="refbox"><h3>Reference from filings, not used automatically</h3>${refs.map(k => `<div class="ref"><div><span>${esc(R[k].label)}</span><small>${esc(R[k].source)}, ${esc(R[k].period)}</small><small>${esc(R[k].notes || '')}</small></div><b>${plain(fmt.n(R[k].v, 1))} mm</b>${k === 'dilutedWA' ? '<button class="btn tiny" data-use-dilwa>Use as my estimate</button>' : ''}</div>`).join('')}</div>` : ''}`;
     }
+    if (m === 'proxy') {
+      const q = SD.netDilQ, fy = SD.netDilFY, P = D.proxy || {};
+      const recBtn = (r, k, label) => r && isNum(r.value) ? `<div class="ref"><div><span>${esc(label)}</span><small>${esc(r.periodText || '')}${r.form ? ' · ' + esc(r.form) : ''}${r.accn ? ' · ' + esc(r.accn) : ''}${r.filed ? ' · filed ' + esc(r.filed) : ''}${r.cat === 'calc' ? ' · calculated as diluted − basic weighted average' : ''}</small></div><b>${nf(r.value, 1)} mm</b><button class="btn tiny" data-dil-fill="${k}">Use this</button></div>` : '';
+      body = `<div class="notice">The net dilutive effect from the EPS calculation is already net of the treasury stock method, so no buyback is subtracted. It is an average for a past period at that period's average share price: a historical proxy, not a measure of current dilution.</div>
+        <div class="dgrid2"><div><div class="flabel"><div class="name"><button class="help" data-help="dil.proxy">?</button>Reported net dilutive effect</div><div class="tags"><span class="tag">millions of shares</span>${isNum(P.v) ? catBadge('proxy') : catBadge('missing')}</div></div>${dilInput('proxy.v', 'shares', 'Reported net dilutive effect')}</div>
+        <div><div class="flabel"><div class="name">Period it covers</div></div>${dilInput('proxy.period', 'text', 'Period', 'e.g. three months ended 2026-09-30')}</div></div>
+        ${q || fy ? `<div class="refbox"><h3>From the filings</h3>${recBtn(q, 'netDilQ', 'Latest quarter (recommended)')}${recBtn(fy, 'netDilFY', 'Last fiscal year (older)')}</div>` : '<p class="footnote">Load the SEC company facts file to fill this from the filing, or type it from the EPS note of the latest 10-Q.</p>'}`;
+    }
     if (m === 'advanced') {
+      const miss = [];
+      if (!D.none) {
+        if (!SD.rsu) miss.push('Unvested RSUs: not in the SEC company facts file for this company (often tagged by award type). Read the stock award note of the latest 10-Q.');
+        if (!SD.options) miss.push('Stock options: none found in the company facts file. Check the stock-based compensation note; many companies no longer grant options.');
+        [['rsu', 'RSUs'], ['options', 'Options'], ['unrecog', 'Unrecognised compensation']].forEach(([k, l]) => { if (SD[k] && SD[k].stale) miss.push(`${l} figure is from an older filing (${SD[k].periodText}). A newer 10-Q may have changed it.`); });
+      }
+      const canFill = SD.rsu || SD.unrecog || SD.options;
       const tr = (arr, i, type) => `<tr><td>${dilInput(`${arr}.${i}.label`, 'text', `${type} ${i + 1} name`, `${type} ${i + 1}`)}</td><td>${dilInput(`${arr}.${i}.n`, 'shares', `${type} ${i + 1} units`)}</td><td>${dilInput(`${arr}.${i}.k`, 'usd', `${type} ${i + 1} price`)}</td>${arr === 'converts' ? `<td>${dilChk('', 'Net share settlement', `converts.${i}.net`)}</td>` : ''}</tr>`;
       body = `${dilChk('none', 'No dilutive securities outstanding')}
+        ${canFill && !D.none ? '<div class="btns"><button class="btn" data-dil-fill-adv>Fill empty boxes from the filing</button><span class="footnote">Only empty boxes are filled. Each figure keeps its filing and date.</span></div>' : ''}
+        ${miss.length && !D.none ? `<div class="notice"><b>Detailed estimate incomplete</b><ul>${miss.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
         ${D.none ? '' : `<div class="dsec"><h3><button class="help" data-help="dil.options">?</button> Stock options <span class="footnote">10-K stock-based compensation note: options outstanding at year end</span></h3>
           <table class="dtbl"><thead><tr><th>Tranche</th><th>Options outstanding (mm)</th><th>Weighted-avg exercise price (USD/share)</th></tr></thead><tbody>${D.options.map((r, i) => tr('options', i, 'Options')).join('')}</tbody></table></div>
         <div class="dsec"><h3><button class="help" data-help="dil.rsu">?</button> Unvested RSUs / PSUs <span class="footnote">same note: unvested at period end, and unrecognised compensation cost</span></h3>
@@ -508,6 +525,316 @@
       ${m ? `<h3 class="sub-h">Diluted share calculation <a class="footnote" href="#guide">How this works</a></h3>${dilutionCalcHtml(d, I)}` : ''}
     </section>`;
   }
+  // ---------- source categories ----------
+  const CAT = { sec: ['SEC reported', 'c-sec'], market: ['Market data', 'c-mkt'], provider: ['Provider imported', 'c-prov'], calc: ['Calculated', 'c-calc'], analyst: ['Analyst assumption', 'c-an'], proxy: ['Historical proxy', 'c-proxy'], override: ['User override', 'c-ovr'], missing: ['Missing data', 'c-miss'], manual: ['Entered by you', 'c-man'] };
+  const CAT_TIP = { sec: 'Read from an SEC filing (XBRL company facts), with the accession number saved', market: 'A market quote: changes every trading day', provider: 'From a data provider. Not checked against the SEC filing', calc: 'Calculated by the calculator from other figures', analyst: 'Your forecast assumption', proxy: 'A past-period figure used in place of a current one', override: 'Imported, then changed by you', missing: 'Not available: enter it or leave it blank. It is never treated as zero', manual: 'Typed by you' };
+  function catOf(key, value) {
+    const empty = value === null || value === undefined || value === '' || (Array.isArray(value) && !value.some(isNum));
+    if (empty) return 'missing';
+    const pv = provOf(key, value);
+    if (pv === 'overridden') return 'override';
+    const s = cur.sources[key];
+    if (s && s.cat === 'proxy') return 'proxy';
+    if (pv === 'imported' && s) return s.cat || (s.cls === 'market' ? 'market' : 'provider');
+    const f = FBY[key]; if (f && f.kind === 'forecast') return 'analyst';
+    return 'manual';
+  }
+  const catBadge = (c, extra) => c && CAT[c] ? `<span class="cat ${CAT[c][1]}" title="${esc(CAT_TIP[c] + (extra ? '. ' + extra : ''))}">${CAT[c][0]}</span>` : '';
+  const nf = (v, d = 0) => isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: Math.min(d, 2) }) : 'Not available';
+  function fmtVal(key, v) {
+    const f = FBY[key] || {};
+    if (!isNum(v)) return v == null || v === '' ? 'Not available' : esc(v);
+    if (f.unit === 'pct') return (v * 100).toFixed(2) + '%';
+    if (f.unit === 'usd') return '$' + v.toFixed(2);
+    if (f.unit === 'shares') return nf(v, 3) + ' mm';
+    if (f.unit === 'x') return v.toFixed(2) + '×';
+    return nf(v, 0) + (f.unit === 'usd_mm' ? ' $mm' : '');
+  }
+
+  // ---------- import approvals ----------
+  let pendSel = null, pendConfirm = false;
+  const PEND_KIND = { update: ['Newer data', 'This value came from an earlier import. The new figure is from a newer filing or quote.'], override: ['Replaces your value', 'You entered or changed this value. It is only replaced if you tick it and confirm.'], blocked: ['Not applied', 'The new figure failed a check, so it cannot be applied.'] };
+  function pendingPanel() {
+    const P = cur.pending, flags = cur.importFlags || [];
+    if ((!P || !P.items.length) && !flags.length) return '';
+    let html = '';
+    if (P && P.items.length) {
+      if (!pendSel) pendSel = Object.fromEntries(P.items.filter(p => p.kind === 'update').map(p => [p.id, true]));
+      const anyOv = P.items.some(p => pendSel[p.id] && p.kind === 'override');
+      const val = (p, which) => p.key === 'hist' ? esc(p[which] || '—') : fmtVal(p.key.split('.')[0] === 'company' ? '' : p.key, p[which]);
+      html += `<section class="panel pend" id="pending"><div class="panel-head"><h2>Review imported changes</h2><span class="footnote">${esc(P.provider)}, ${new Date(P.at).toLocaleString()}. Nothing below has been applied yet. Your current values stay until you approve a change.</span></div>
+        <div class="tbl-wrap"><table class="fin ptab"><thead><tr><th>Apply</th><th>Field</th><th>Current value</th><th>New value</th><th>Why it is waiting</th></tr></thead><tbody>
+        ${P.items.map(p => `<tr class="pk-${p.kind}"><td>${p.kind === 'blocked' ? '—' : `<input type="checkbox" data-pend-id="${esc(p.id)}" ${pendSel[p.id] ? 'checked' : ''} aria-label="Apply ${esc(p.label)}">`}</td><td><b>${esc(p.label)}</b></td><td>${val(p, 'from')}${p.fromDate ? `<div class="footnote">${esc(p.fromDate)}</div>` : ''}</td><td>${val(p, 'to')}${p.toDate ? `<div class="footnote">${esc(p.toDate)}</div>` : ''}</td><td><span class="pkind">${PEND_KIND[p.kind][0]}</span> <span class="footnote">${esc(p.reason || PEND_KIND[p.kind][1])}</span></td></tr>`).join('')}
+        </tbody></table></div>
+        ${anyOv ? `<label class="check warnbox"><input type="checkbox" id="pend-confirm" ${pendConfirm ? 'checked' : ''}> I understand the ticked “Replaces your value” rows will overwrite figures I entered. The old values stay in the change log.</label>` : ''}
+        <div class="btns"><button class="btn primary" data-pend-apply ${anyOv && !pendConfirm ? 'disabled' : ''}>Apply ticked changes</button><button class="btn" data-pend-dismiss>Keep my current values</button></div></section>`;
+    }
+    if (flags.length) html += `<section class="panel"><div class="panel-head"><h2>Import checks</h2><span class="footnote">Problems found in the imported data. Values with a red check were not applied.</span></div><ul class="flags">${flags.map(f => `<li class="${f.level}">${esc(f.text)}</li>`).join('')}</ul><div class="btns"><button class="btn" data-flags-dismiss>Hide these checks</button></div></section>`;
+    return html;
+  }
+
+  // ---------- TTM ----------
+  const TTM_ITEMS = [['rev', 'Revenue'], ['gp', 'Gross profit'], ['ebitda', 'EBITDA (calculated)'], ['ebit', 'Operating income (EBIT)'], ['da', 'D&A'], ['interest', 'Interest expense'], ['tax', 'Income taxes'], ['ni', 'Net income'], ['cfo', 'Operating cash flow'], ['capex', 'Capital expenditures'], ['sbc', 'Stock-based compensation'], ['fcf', 'Free cash flow (CFO − CapEx)']];
+  function partsHtml(t) {
+    if (!t || !t.parts || !t.parts.length) return '';
+    const lab = ['Fiscal year', 'Current year to date', 'Prior year to date'], op = ['', '+', '−'];
+    return `<table class="fin parts"><thead><tr><th></th><th>Part</th><th>$ millions</th><th>Period</th><th>Filing</th></tr></thead><tbody>${t.parts.map((p, i) => `<tr><td>${t.parts.length === 1 ? '' : op[i]}</td><td>${lab[i]}</td><td class="num">${nf(p.value, 0)}</td><td>${esc(p.periodText || (p.end ? 'ended ' + p.end : '—'))}</td><td>${p.accn ? `${esc(p.form)} <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.accn)}</a><div class="footnote">filed ${esc(p.filed)}</div>` : p.cat === 'manual' ? 'Entered by you' + (p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">source</a>` : '') : '—'}</td></tr>`).join('')}<tr class="total"><td>=</td><td>TTM</td><td class="num"><b>${nf(t.value, 0)}</b></td><td>${esc(t.periodText || '')}</td><td>Calculated</td></tr></tbody></table>`;
+  }
+  function ttmDrawerHtml(k) {
+    const T = DCFModel.ttmOf(cur), t = T && T.items && T.items[k];
+    const lab = (TTM_ITEMS.find(x => x[0] === k) || [k, HBY[k] ? HBY[k].label : k])[1];
+    let body;
+    if (!t) body = '<div class="notice">Not available for TTM. Either the company does not tag this line in a way that matches its fiscal-year figure, or no quarterly filing has it. It is left blank rather than estimated.</div>';
+    else body = `<p>${esc(t.method || '')}</p>${partsHtml(t)}
+      ${t.deps ? `<p class="footnote">Built from the TTM figures for ${t.deps.map(d => esc((TTM_ITEMS.find(x => x[0] === d) || [d, d])[1])).join(' and ')}, each calculated the same way.</p>` : ''}
+      ${t.note ? `<p class="footnote">${esc(t.note)}</p>` : ''}
+      <dl><div><dt>Units</dt><dd>$ millions. SEC data is in dollars and divided by 1,000,000.</dd></div><div><dt>Category</dt><dd>${catBadge('calc')} TTM is calculated, not a figure the company reports.</dd></div>${t.mismatch ? '<div><dt>Problem</dt><dd>This line ends on a different date from the others, so it was left out.</dd></div>' : ''}</dl>`;
+    return `<div><h3>Trailing twelve months</h3><h2 id="dr-title">${esc(lab)}</h2></div>
+      <div class="formula">TTM = latest fiscal year + current year to date − same period of the prior year</div>${body}
+      <p class="footnote">Why: the fiscal year can be up to a year old. Adding the months since and removing the same months a year earlier gives the most recent twelve months without counting any month twice.</p>`;
+  }
+  function ttmCompareHtml() {
+    const T = DCFModel.ttmOf(cur); if (!T || !T.items) return '';
+    const fy = cur.fin && cur.fin.years && cur.fin.years[0];
+    const H = cur.hist, li = 4;
+    const fyv = k => {
+      if (fy && fy.values && isNum(fy.values[k])) return fy.values[k];
+      const h = { rev: H.rev[li], gp: H.gp[li], da: H.da[li], interest: H.interest[li], sbc: H.sbc[li], capex: isNum(H.capex[li]) ? -H.capex[li] : null, ebitda: isNum(H.gp[li]) && isNum(H.opex[li]) ? H.gp[li] - H.opex[li] : null }[k];
+      return isNum(h) ? h : null;
+    };
+    const tv = k => T.items[k] && isNum(T.items[k].value) ? T.items[k].value : null;
+    const fr = fyv('rev'), tr = tv('rev');
+    const fl = fy ? fy.label : (H.years[li] ? 'FY' + H.years[li] : 'Latest FY');
+    const rows = TTM_ITEMS.map(([k, l]) => { const a = fyv(k), b = tv(k); return `<tr><td>${esc(l)}</td><td class="num">${fmt.mm(a)}</td><td class="num ttm"><button class="ttmv" data-ttm="${k}">${isNum(b) ? fmt.mm(b) : '<span class="na">Not available</span>'}</button></td><td class="num">${isNum(a) && isNum(b) ? fmt.mm(b - a) : '<span class="na">—</span>'}</td><td class="num">${k === 'rev' ? '' : fmt.pct(isNum(a) && fr ? a / fr : null)}</td><td class="num ttm">${k === 'rev' ? '' : fmt.pct(isNum(b) && tr ? b / tr : null)}</td></tr>`; }).join('');
+    return `<section class="panel"><div class="panel-head"><h2>TTM compared with the latest fiscal year</h2><span class="footnote">${esc(fl)}${fy && fy.end ? ' (ended ' + esc(fy.end) + ')' : ''} vs TTM to ${esc(T.end || '?')}. Click a TTM figure to see its three parts. Margins are % of revenue.</span></div>
+      <div class="tbl-wrap"><table class="fin cmp"><thead><tr><th>$ millions</th><th>${esc(fl)}</th><th class="ttm">TTM</th><th>Change</th><th>${esc(fl)} margin</th><th class="ttm">TTM margin</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${T.isFY ? '<div class="notice">No 10-Q has been filed since the fiscal year ended, so TTM equals the fiscal year.</div>' : ''}</section>`;
+  }
+  function ttmBuilderHtml() {
+    const M = cur.ttmManual || {}, R = M.rows || {};
+    const keys = [['rev', 'Revenue'], ['cogs', 'Cost of revenue'], ['ebit', 'Operating income'], ['da', 'D&A'], ['interest', 'Interest expense'], ['ebt', 'Pre-tax income'], ['tax', 'Income taxes'], ['ni', 'Net income'], ['cfo', 'Operating cash flow'], ['capex', 'CapEx (positive)'], ['sbc', 'Stock-based compensation']];
+    const inp = (path, unit, label) => { const id = 'tm-' + path.replace(/\./g, '-'); const v = path.split('.').reduce((o, k) => o == null ? o : o[k], M); return unit === 'date' ? `<input type="date" data-t="ttmm" data-k="${path}" data-unit="date" id="${id}" value="${esc(v || '')}" aria-label="${esc(label)}">` : unit === 'text' ? `<input type="text" class="txt" data-t="ttmm" data-k="${path}" data-unit="text" id="${id}" value="${esc(v || '')}" placeholder="https://" aria-label="${esc(label)}">` : `<input type="text" inputmode="decimal" data-t="ttmm" data-k="${path}" data-unit="num" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="Enter" aria-label="${esc(label)}">${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`; };
+    const res = DCFAnalysis.manualTTM(M), chk = DCFAnalysis.manualTTMChecks(M);
+    return `<details class="panel" id="ttm-build" ${aidOpen['ttm-build'] || (!cur.ttm && Object.keys(R).length) ? 'open' : ''} data-aid="ttm-build"><summary><b>Build TTM by hand</b> <span class="footnote">for when no SEC file is loaded, or to check one: type three figures per line from the 10-K and the latest 10-Q</span></summary>
+      <div class="tmgrid"><label>Fiscal year ended ${inp('fyEnd', 'date', 'Fiscal year end')}</label><label>Current period ended (latest 10-Q) ${inp('end', 'date', 'Current period end')}</label><label>Same period a year earlier ended ${inp('priorEnd', 'date', 'Prior period end')}</label>
+        <label>Year to date covers <select data-t="ttmm" data-k="ytdLabel" data-unit="choice" id="tm-ytdLabel"><option value="">Choose…</option>${['three months', 'six months', 'nine months'].map(o => `<option ${M.ytdLabel === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label><label>10-K link ${inp('fyUrl', 'text', '10-K link')}</label><label>10-Q link ${inp('ytdUrl', 'text', '10-Q link')}</label></div>
+      ${chk.map(c => `<div class="notice ${c.level}">${esc(c.text)}</div>`).join('')}
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th><th>Fiscal year</th><th>+ Year to date</th><th>− Prior year to date</th><th class="ttm">= TTM</th></tr></thead><tbody>
+      ${keys.map(([k, l]) => `<tr><td>${l}</td><td>${inp(`rows.${k}.fy`, 'num', l + ' fiscal year')}</td><td>${inp(`rows.${k}.ytd`, 'num', l + ' year to date')}</td><td>${inp(`rows.${k}.prior`, 'num', l + ' prior year to date')}</td><td class="num ttm">${res && res.items[k] ? fmt.mm(res.items[k].value) : '<span class="na">—</span>'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <label class="check"><input type="checkbox" id="tm-use" ${M.use ? 'checked' : ''} ${res ? '' : 'disabled'}> Use my TTM${cur.ttm ? ' instead of the one calculated from the SEC filings' : ''}</label>
+      <p class="footnote">Lines you leave blank stay blank: nothing is assumed to be zero. Interest, taxes and CapEx are typed as positive amounts.</p></details>`;
+  }
+
+  // ---------- forecast base ----------
+  function basePanel(compact) {
+    if (cur.mode === 'workbook') return `<section class="panel"><div class="panel-head"><h2>Forecast base</h2></div><p class="footnote">In original-workbook mode the base-year revenue is typed on this page and the forecast uses the workbook's timing. Switch to the corrected method to base the forecast on the latest fiscal year or TTM.</p></section>`;
+    const b = DCFModel.baseInfo(cur), T = DCFModel.ttmOf(cur);
+    const alt = JSON.parse(JSON.stringify(cur)); alt.base = Object.assign({}, alt.base, { mode: b.mode === 'ttm' ? 'fy' : 'ttm' }); const ab = DCFModel.baseInfo(alt);
+    const run = m => { const { inp } = DCFModel.engineInputs(m); const r = DCF.run(inp, cur.active, m.mode); return r.ok ? r : null; };
+    const r0 = run(cur), r1 = isNum(ab.rev) ? run(alt) : null;
+    const card = (mode, info, r, inUse) => `<div class="bcard ${inUse ? 'on' : ''}"><div class="bh"><b>${mode === 'ttm' ? 'Trailing twelve months' : 'Latest fiscal year'}</b>${inUse ? '<span class="pill good">In use</span>' : ''}</div>
+      <div class="bk"><span>Base revenue</span><b>${isNum(info.rev) ? fmt.mm(info.rev) + ' $mm' : '<span class="na">Not available</span>'}</b></div>
+      <div class="bk"><span>Period</span><b>${esc(info.label || '—')}</b></div>
+      <div class="bk"><span>Year 1</span><b>${info.periods ? esc(info.periods[0].start + ' to ' + info.periods[0].end) : '<span class="na">dates not set</span>'}</b></div>
+      <div class="bk"><span>Year 1 revenue (${esc(cur.active)})</span><b>${r ? fmt.mm(r.years[0].rev) : '—'}</b></div>
+      <div class="bk"><span>Value per share (${esc(cur.active)})</span><b>${r ? fmt.usd(r.perShare) : '—'}</b></div>
+      ${!inUse && isNum(info.rev) ? `<button class="btn ${mode === 'ttm' ? 'primary' : ''}" data-base-set="${mode}">Switch to this base</button>` : !inUse ? `<p class="footnote">${mode === 'ttm' ? 'Load the SEC company facts file or build TTM by hand on Historical financials.' : 'Enter the latest fiscal year on Historical financials.'}</p>` : ''}</div>`;
+    const fyInfo = b.mode === 'fy' ? b : ab, ttmInfo = b.mode === 'ttm' ? b : ab;
+    const rf = b.mode === 'fy' ? r0 : r1, rt = b.mode === 'ttm' ? r0 : r1;
+    return `<section class="panel" id="base-panel"><div class="panel-head"><h2>Forecast base</h2><span class="footnote">The revenue the forecast grows from, and when year 1 starts. Switching shows its effect first and changes nothing until you click.</span></div>
+      <div class="bcards">${card('fy', fyInfo, rf, b.mode === 'fy')}${card('ttm', ttmInfo, rt, b.mode === 'ttm')}</div>
+      <div class="brow"><label>Timing <select id="base-timing"><option value="dated" ${cur.timing === 'dated' ? 'selected' : ''}>Line up with the valuation date</option><option value="workbook" ${cur.timing !== 'dated' ? 'selected' : ''}>Workbook timing (year 1 starts on the valuation date)</option></select></label>
+        <span class="footnote">${cur.timing === 'dated' ? (isNum(b.stub) ? `The base period ended ${(b.stub * 12).toFixed(1)} months before the valuation date (${esc(cur.inputs.company.valDate || '')}). Each cash flow is discounted ${b.stub.toFixed(3)} years less, because that part of year 1 has already passed.` : 'Needs the base period end date and a valuation date.') : 'Each forecast year is discounted as if it starts on the valuation date, as in the original workbook.'}</span></div>
+      ${b.warnings.map(w => `<div class="notice ${w.level === 'bad' ? 'bad' : ''}">${esc(w.text)}</div>`).join('')}
+      ${!compact && b.periods ? `<details><summary class="footnote">Forecast periods</summary><div class="periods">${b.periods.map((p, i) => `<span><b>Year ${i + 1}</b> ${esc(p.start)} to ${esc(p.end)}</span>`).join('')}</div></details>` : ''}
+    </section>`;
+  }
+
+  // ---------- final share and value display ----------
+  function shareSummary() {
+    const d = DCFModel.dilution(cur), I = cur.inputs, { act } = calc();
+    const n = (v, dd = 2) => isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: dd, minimumFractionDigits: dd }) : '<span class="na">Not available</span>';
+    const mcap = isNum(I.price) && isNum(I.basic) ? I.price * I.basic : null;
+    return `<section class="panel" id="share-summary"><div class="panel-head"><h2>Shares and value per share</h2><span class="footnote">${esc(cur.active)} scenario. Market cap uses actual shares, as quote sites do; value per share uses diluted shares.</span></div>
+      <div class="ssum">
+        <div><span>Actual (basic) shares</span><b>${n(I.basic, 3)}</b><small>${cur.asOf && cur.asOf.basic ? 'as of ' + esc(cur.asOf.basic) : 'date not set'} · ${catBadge(catOf('basic', I.basic))}</small></div>
+        <div><span>Incremental shares</span><b>${d.ok ? n(d.net, 3) : '<span class="na">Not available</span>'}</b><small>${d.method === 'proxy' ? catBadge('proxy') + ' reported net dilution' : d.method === 'advanced' ? 'treasury stock method' : d.method === 'simple' ? (d.net ? 'your estimate' : 'none') : d.method === 'totals' ? 'workbook totals' : 'method not chosen'}</small></div>
+        <div><span>Diluted shares</span><b>${d.ok ? n(d.diluted, 3) : '<span class="na">Not available</span>'}</b><small>${d.ok ? catBadge('calc') + ' ' : ''}an estimate, not an SEC-reported count</small></div>
+        <div><span>Market cap on actual shares</span><b>${isNum(mcap) ? fmt.mm(mcap) + ' $mm' : '<span class="na">Not available</span>'}</b><small>price × actual shares</small></div>
+        <div><span>DCF equity value</span><b>${act && act.ok ? fmt.mm(act.equity) + ' $mm' : '<span class="na">Not available</span>'}</b><small>enterprise value + bridge</small></div>
+        <div class="tot"><span>Value per diluted share</span><b>${act && act.ok ? fmt.usd(act.perShare) : '<span class="na">Not available</span>'}</b><small>equity value ÷ diluted shares</small></div>
+      </div></section>`;
+  }
+
+  // ---------- help drawer sections ----------
+  function whereHtml(w, cik) {
+    if (!w) return '';
+    const row = (l, v) => v ? `<div><span>${l}</span><p>${esc(v)}</p></div>` : '';
+    return `<div class="where">${row('Document', w.doc)}${row('Statement or note', w.statement)}${row('Heading to look for', w.heading)}${row('Period', w.period)}${w.find && w.find.length ? `<div><span>Search (Ctrl+F)</span><p>${w.find.map(t => `<a class="chip" href="${DCFHelp.edgarSearch(t, cik)}" target="_blank" rel="noopener" title="Search “${esc(t)}” in ${cik ? 'this company\'s' : 'all'} filings on EDGAR">${esc(t)}</a>`).join(' ')}</p></div>` : ''}</div>`;
+  }
+  function exampleHtml(key) {
+    const e = DCFHelp.example(key, cur); let out = '';
+    if (e.company) out += `<div class="ex ex-co"><b>This company's filing</b>${esc(e.company.text)}${e.company.url ? ` <a href="${esc(e.company.url)}" target="_blank" rel="noopener">Open the filing</a>` : ''}</div>`;
+    if (e.verified) out += e.verified.kind === 'none' ? `<div class="ex"><b>Example</b>${esc(e.verified.text)}</div>` : `<div class="ex"><b>Real example</b>${esc(e.verified.text)}<span class="footnote">Source: ${esc(e.verified.cite)}${e.verified.url ? ` · <a href="${esc(e.verified.url)}" target="_blank" rel="noopener">Open the filing</a>` : ''}</span></div>`;
+    return out;
+  }
+  function sourceVerifHtml(key, value) {
+    const s = cur.sources[key];
+    const c = catOf(key, value);
+    if (!s) return `<div class="srcv"><div class="sv-head">${catBadge(c)}</div><p class="footnote">${c === 'missing' ? 'Not available. Enter it, or leave it blank: a blank is never treated as zero.' : 'No source recorded yet. Note where it came from below.'}</p></div>`;
+    const R = [['Company', s.company], ['Ticker', s.ticker], ['Metric', s.metric], ['Raw value', isNum(s.raw) ? s.raw.toLocaleString('en-US') + (s.rawUnit ? ' ' + s.rawUnit : '') : null], ['Converted value', isNum(value) ? value.toLocaleString('en-US', { maximumFractionDigits: 6 }) + (s.unit ? ' ' + s.unit : '') : null], ['Scale', s.scale ? (s.scale === 1e6 ? 'divided by 1,000,000' : String(s.scale)) : null], ['Provider', s.provider || s.name], ['Document', s.type], ['Form', s.form], ['Accession number', s.accn], ['Fiscal period', s.fy ? s.fy + ' ' + (s.fp || '') : null], ['Reporting period', s.start ? s.start + ' to ' + s.end : s.period], ['Measured as of', s.asOf || s.end], ['Filed', s.filed], ['Retrieved', s.retrieved ? new Date(s.retrieved).toLocaleString() : null], ['XBRL tag', s.concept], ['Method', s.method], ['Import status', { imported: 'As imported', overridden: 'Changed by you after import', manual: 'Entered by you' }[provOf(key, value)] || null]].filter(([, v]) => v != null && v !== '');
+    return `<div class="srcv"><div class="sv-head">${catBadge(c)}${s.verified && c !== 'override' ? '<span class="footnote">Read from the SEC filing</span>' : c === 'provider' ? '<span class="footnote">Not checked against the SEC filing</span>' : ''}${s.stale ? '<span class="cat c-miss">Older filing</span>' : ''}</div>
+      <dl class="svl">${R.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>${s.notes ? `<p class="footnote">${esc(s.notes)}</p>` : ''}${s.url ? `<a class="btn" href="${esc(s.url)}" target="_blank" rel="noopener">Open the filing to verify</a>` : ''}</div>`;
+  }
+  // anchors table for a forecast input
+  function anchorHtml(key, withUse) {
+    const A = calc().anchors[key]; if (!A) return '';
+    const f = A.unit === 'x' ? v => isNum(v) ? v.toFixed(2) + '×' : '<span class="na">Not available</span>' : v => isNum(v) ? (v * 100).toFixed(1) + '%' : '<span class="na">Not available</span>';
+    const use = (v, l) => withUse && isNum(v) ? `<button class="btn tiny" data-suggest="${key}" data-v="${v}" data-l="${esc(l)}" title="Fills only the empty scenario cells. Values you entered are never replaced.">Use for empty cells</button>` : '';
+    const rows = [['Latest fiscal year' + (A.latestLabel ? ' (' + A.latestLabel + ')' : ''), A.latestFY], ['TTM' + (A.ttmLabel ? ' (' + A.ttmLabel + ')' : ''), A.ttm], ['3-year average', A.avg3], ['5-year average', A.avg5], ['High', A.hi], ['Low', A.lo]];
+    if (key.startsWith('g')) rows.push(['Latest quarter vs a year earlier' + (A.quarterEnd ? ' (' + A.quarterEnd + ')' : ''), A.quarterYoY], ['3-year CAGR', A.cagr3], ['4-year CAGR (all five fiscal years)', A.cagr4], ['5-year CAGR', A.cagr5], ['Acceleration (latest FY growth − prior FY growth)', A.accel], ['TTM growth − latest FY growth', A.ttmVsFY]);
+    if (key === 's2c') rows.push(['Cumulative (first to last fiscal year)', A.cumulative]);
+    const series = A.vals.some(isNum) ? `<div class="aser">${A.years.map((y, i) => `<span><small>${esc(y || '—')}</small>${f(A.vals[i])}</span>`).join('')}${isNum(A.ttm) ? `<span class="ttm"><small>TTM</small>${f(A.ttm)}</span>` : ''}</div>` : '<p class="footnote">No history loaded yet. Import the company or fill in Historical financials.</p>';
+    return `${series}<table class="fin anch"><tbody>${rows.map(([l, v]) => `<tr><td>${esc(l)}</td><td class="num">${f(v)}</td><td>${use(v, l)}</td></tr>`).join('')}<tr><td>Trend (last three years)</td><td class="num">${A.trend || '<span class="na">Not enough years</span>'}</td><td></td></tr></tbody></table>${A.note ? `<p class="footnote">${esc(A.note)}</p>` : ''}`;
+  }
+  // a worked example from this company's own figures, or a verified Amazon one
+  function exampleCalcHtml(key) {
+    const H = cur.hist, co = cur.inputs.company.name || 'This company', T = DCFModel.ttmOf(cur), fy = cur.fin && cur.fin.years;
+    const y = H.years, r = H.rev, n = v => nf(v, 0), p = v => isNum(v) ? (v * 100).toFixed(1) + '%' : '—';
+    const has = (...xs) => xs.every(isNum);
+    let own = null, amzn = null;
+    if (/^g\d/.test(key)) { if (has(r[4], r[3])) own = `${co} FY${y[4]} growth = ${n(r[4])} ÷ ${n(r[3])} − 1 = ${p(r[4] / r[3] - 1)}.${T && T.prior && isNum(T.prior.value) && T.items.rev ? ` TTM growth = ${n(T.items.rev.value)} ÷ ${n(T.prior.value)} − 1 = ${p(T.items.rev.value / T.prior.value - 1)}.` : ''}`; amzn = 'Amazon FY2025 growth = 716,924 ÷ 637,959 − 1 = 12.4%. Applying 12% to the FY2025 base: 716,924 × 1.12 = 802,954.88 $mm of revenue in year 1 (a hypothetical rate, not a forecast). Source: Amazon 10-K for 2025, accession 0001018724-26-000004.'; }
+    if (/^gm/.test(key)) { if (has(H.gp[4], r[4])) own = `${co} FY${y[4]} gross margin = ${n(H.gp[4])} ÷ ${n(r[4])} = ${p(H.gp[4] / r[4])}.`; amzn = 'Amazon 2025: (716,924 − 356,414 cost of sales) ÷ 716,924 = 50.3% (calculated; Amazon does not report gross profit). Source: 10-K for 2025.'; }
+    if (/^em|^tem/.test(key)) { if (has(H.gp[4], H.opex[4], r[4])) own = `${co} FY${y[4]} EBITDA margin = (${n(H.gp[4])} − ${n(H.opex[4])}) ÷ ${n(r[4])} = ${p((H.gp[4] - H.opex[4]) / r[4])}.`; amzn = 'Amazon 2025: (operating income 79,975 + D&A 65,756) ÷ 716,924 = 20.3%. TTM to 30 Sep 2026: (104,366 + 79,353) ÷ 797,455 = 23.0%. Sources: 10-K for 2025; 10-K plus Q3 2026 10-Q for TTM.'; }
+    if (key === 'da') { if (has(H.da[4], r[4])) own = `${co} FY${y[4]} D&A = ${n(H.da[4])} ÷ ${n(r[4])} = ${p(H.da[4] / r[4])} of revenue.`; amzn = 'Amazon 2025: 65,756 ÷ 716,924 = 9.2%. TTM: 79,353 ÷ 797,455 = 10.0%, rising because CapEx has grown faster than revenue.'; }
+    if (/^capex/.test(key)) { if (has(H.capex[4], r[4])) own = `${co} FY${y[4]} CapEx = ${n(-H.capex[4])} ÷ ${n(r[4])} = ${p(-H.capex[4] / r[4])} of revenue.`; amzn = 'Amazon 2025: 131,819 ÷ 716,924 = 18.4%. TTM to 30 Sep 2026: 215,192 ÷ 797,455 = 27.0%. Purchases of property and equipment, net of proceeds and incentives; excludes assets acquired under finance leases.'; }
+    if (key === 'tax') { const v = fy && fy[0] && fy[0].values; if (v && has(v.tax, v.ebt)) own = `${co} ${fy[0].label} effective rate = ${n(v.tax)} ÷ ${n(v.ebt)} = ${p(v.tax / v.ebt)}.`; amzn = 'Amazon 2025: income tax expense 19,087 ÷ pre-tax income 97,311 = 19.6% effective, against a 21% US federal statutory rate.'; }
+    if (key === 'nwc') { if (has(H.dnwc[4], r[4], r[3]) && r[4] !== r[3]) own = `${co} FY${y[4]}: −(${n(H.dnwc[4])}) ÷ (${n(r[4])} − ${n(r[3])}) = ${p(-H.dnwc[4] / (r[4] - r[3]))}.`; amzn = 'Amazon reports each working-capital change separately (no single tagged total), so no verified ratio is shown. Add the "Changes in operating assets and liabilities" lines, then divide by the change in revenue.'; }
+    if (key === 's2c') { const A = calc().anchors.s2c; if (isNum(A.latestFY)) own = `${co} ${A.latestLabel}: change in revenue ÷ (CapEx − D&A + increase in NWC) = ${A.latestFY.toFixed(2)}×.`; amzn = 'Amazon 2025: (716,924 − 637,959) ÷ (131,819 − 65,756) = 1.20×, leaving out working capital and acquisitions.'; }
+    if (key === 'nol') amzn = 'Hypothetical: $1,000 mm of usable NOLs, $5,000 mm of total EBIT in years 1–3 and a 21% tax rate: 1,000 × 21% ÷ 5,000 = 4.2 points off the tax rate in years 1–3.';
+    if (key === 'acq') amzn = 'No verified example on file. Read "Acquisitions, net of cash acquired" for each year in the cash flow statement and divide by revenue.';
+    return `${own ? `<div class="ex ex-co"><b>From this company's figures</b>${esc(own)}</div>` : ''}${amzn ? `<div class="ex"><b>${/Hypothetical/.test(amzn) ? 'Hypothetical example' : /No verified|no verified/.test(amzn) ? 'Example' : 'Real example (Amazon)'}</b>${esc(amzn)}</div>` : ''}`;
+  }
+  function effectHtml(key) {
+    const g = DCFHelp.G[key]; if (!g || !g.effect) return key.startsWith('gm') ? '<p>None directly: gross margin is shown for reference and to check the EBITDA path. The valuation uses EBITDA margin.</p>' : '';
+    const e = DCFAnalysis.effect(cur, g.effect.keys, cur.active, g.effect.delta);
+    if (!e) return '<p class="footnote">Complete the required inputs to see the effect on value.</p>';
+    return `<p><b>${esc(g.effect.label)}</b> (${esc(cur.active)}): value per share ${fmt.usd(e.from)} → ${fmt.usd(e.to)}, ${e.diff >= 0 ? '+' : ''}${plain(fmt.usd(e.diff))} (${(e.pct * 100).toFixed(1)}%). Re-run with the change; nothing is saved.</p>${key === 's2c' ? '<p class="footnote">Zero by design: sales-to-capital only sets invested capital for the ROIC check in this model.</p>' : ''}`;
+  }
+  function forecastDrawerHtml(key, f) {
+    const g = DCFHelp.G[key] || {};
+    const scen = SC.map(s => `<li><b>${s}</b> ${esc(g[s.toLowerCase()] || '')} <span class="footnote">Your value: ${fmtVal(key, cur.inputs[key][s])}</span></li>`).join('');
+    const links = (DCFHelp.SRC_FORECAST[key] || []).map(([l, u]) => `<li><a href="${u}" target="_blank" rel="noopener">${esc(l)}</a></li>`).join('');
+    const sec = (t, body, open) => body ? `<details class="dsec2" ${open ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>` : '';
+    return [
+      sec('What it is', `<p>${esc(f.what)}</p><p class="footnote">${esc(f.enter)}</p>`, true),
+      sec('Why it matters', g.why ? `<p>${esc(g.why)}</p>` : ''),
+      sec('How to estimate it', g.estimate ? `<ol>${g.estimate.map(x => `<li>${esc(x)}</li>`).join('')}</ol>${g.interp ? '<p class="footnote">The model draws a straight line from year 1 to year 5 and another from year 5 to year 10. Year 3 is halfway between years 1 and 5.</p>' : ''}` : ''),
+      sec('Where to find the evidence', g.where ? `<p>${esc(g.where)}</p>` : ''),
+      sec('Historical comparison', anchorHtml(key, true), true),
+      sec('Example calculation', exampleCalcHtml(key)),
+      sec('Bear, Base and Bull', `<ul>${scen}</ul><p class="footnote">Each scenario should tell one consistent story. The calculator does not create scenarios by adding or subtracting a fixed percentage.</p>`),
+      sec('Common mistakes', g.mistakes && g.mistakes.length ? `<ul>${g.mistakes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''),
+      sec('Effect on valuation', effectHtml(key)),
+      sec('Sources', links ? `<ul>${links}</ul>` : '<p class="footnote">Your own research notes and evidence links are kept under each assumption.</p>'),
+    ].join('');
+  }
+
+  // ---------- research notes ----------
+  const NOTE_FIELDS = [['assumption', 'My assumption', 'text'], ['why', 'Why I chose it', 'area'], ['calc', 'Supporting calculations', 'area'], ['evidence', 'Evidence (one link per line)', 'area'], ['risks', 'Risks to this assumption', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
+  let noteSaved = {};
+  function notesHtml(key) {
+    const N = (cur.notes && cur.notes[key]) || {};
+    return `<div class="notes">${SC.map(s => { const n = N[s] || {}; const id = f => `nt-${key}-${s}-${f}`;
+      const ctl = ([f, l, t]) => t === 'area' ? `<label>${l}<textarea rows="2" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}">${esc(n[f] || '')}</textarea></label>` : t === 'conf' ? `<label>${l}<select data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}"><option value="">Not set</option>${['Low', 'Medium', 'High'].map(o => `<option ${n[f] === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>` : `<label>${l}<input type="${t === 'date' ? 'date' : 'text'}" class="txt" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}" value="${esc(n[f] || '')}"></label>`;
+      const ev = String(n.evidence || '').split(/\n+/).map(x => x.trim()).filter(x => /^https?:\/\//i.test(x));
+      return `<fieldset><legend>${s}${n.saved ? ` <span class="saved" title="Saved ${esc(new Date(n.saved).toLocaleString())}">✓ saved</span>` : ''}</legend>${NOTE_FIELDS.map(ctl).join('')}${ev.length ? `<div class="evl">${ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').slice(0, 48))}</a>`).join('')}</div>` : ''}</fieldset>`; }).join('')}</div>`;
+  }
+  const hasNotes = key => cur.notes && cur.notes[key] && SC.some(s => cur.notes[key][s] && Object.entries(cur.notes[key][s]).some(([k, v]) => k !== 'saved' && v));
+  // inline guide under each forecast input
+  let aidOpen = {};
+  function aidRow(f) {
+    if (cur.ui && cur.ui.learn === false) return '';
+    const g = DCFHelp.G[f.key] || {};
+    const links = (DCFHelp.SRC_FORECAST[f.key] || []).map(([l, u]) => `<li><a href="${u}" target="_blank" rel="noopener">${esc(l)}</a></li>`).join('');
+    const sub = (id, t, body) => `<details class="asub" data-aid="${f.key}:${id}" ${aidOpen[f.key + ':' + id] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, history and notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>
+      ${sub('calc', 'How to calculate', `${g.estimate ? `<ol>${g.estimate.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${exampleCalcHtml(f.key)}`)}
+      ${sub('hist', 'Historical evidence', anchorHtml(f.key, true))}
+      ${sub('notes', 'My research notes' + (hasNotes(f.key) ? ' ✓' : ''), notesHtml(f.key))}
+      ${sub('scen', 'Scenario reasoning', `<ul>${SC.map(s => `<li><b>${s}</b> ${esc(g[s.toLowerCase()] || 'Write what has to be true for this case in your notes.')}</li>`).join('')}</ul>`)}
+      ${sub('src', 'Sources', links ? `<ul>${links}</ul>` : '<p class="footnote">Add evidence links in your notes.</p>')}
+    </details></div>`;
+  }
+
+  // ---------- forecast tools ----------
+  function toolState() { cur.tools = cur.tools || {}; const t = cur.tools; t.rev = t.rev || { g: [null, null, null], seg: [{}, {}, {}, {}] }; t.nol = t.nol || { status: '', bal: null }; t.capex = t.capex || { guide: null }; return t; }
+  const toolIn = (path, unit, label, ph = 'Enter') => { const id = 'tl-' + path.replace(/\./g, '-'); const v = path.split('.').reduce((o, k) => o == null ? o : o[k], toolState()); return unit === 'text' ? `<input type="text" class="txt" data-t="tool" data-k="${path}" data-unit="text" id="${id}" value="${esc(v || '')}" placeholder="${ph}" aria-label="${esc(label)}">` : `<div class="inwrap"><input type="text" inputmode="decimal" data-t="tool" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${ph}" aria-label="${esc(label)}"><span class="unit">${unit === 'pct' ? '%' : unit === 'usd_mm' ? '$mm' : ''}</span></div>`; };
+  function toolsHtml() {
+    const T = toolState(), b = DCFModel.baseInfo(cur), { all, inp } = calc(), s = cur.active;
+    const rev0 = isNum(b.rev) ? b.rev : inp.rev0;
+    // revenue growth estimator
+    const segs = T.rev.seg.filter(x => isNum(x.rev) && isNum(x.g));
+    const blend = segs.length ? segs.reduce((a, x) => a + x.rev * x.g, 0) / segs.reduce((a, x) => a + x.rev, 0) : null;
+    const rates = [0, 1, 2].map(i => isNum(T.rev.g[i]) ? T.rev.g[i] : (i === 0 && isNum(blend) ? blend : cur.inputs[['g1', 'g2', 'g3'][i]][s]));
+    const path = DCFAnalysis.revenuePath(rev0, rates);
+    const revTool = `<details class="panel tool" id="tool-rev" ${aidOpen['tool-rev'] ? 'open' : ''} data-aid="tool-rev"><summary><b>Estimate revenue growth</b> <span class="footnote">try rates and see revenue in dollars</span></summary>
+      <div class="notice">Hypothetical projection from the rates below. It does not change your inputs until you click a “Use” button.</div>
+      <div class="tgrid"><label>Years 1–3 ${toolIn('rev.g.0', 'pct', 'Tool growth years 1–3', plain(fmt.pct(cur.inputs.g1[s])))}</label><label>Years 4–7 ${toolIn('rev.g.1', 'pct', 'Tool growth years 4–7', plain(fmt.pct(cur.inputs.g2[s])))}</label><label>Years 8–10 ${toolIn('rev.g.2', 'pct', 'Tool growth years 8–10', plain(fmt.pct(cur.inputs.g3[s])))}</label></div>
+      <p class="footnote">Blank rates use your ${esc(s)} inputs. Base revenue ${fmt.mm(rev0)} $mm (${esc(b.label || 'base year')}).</p>
+      <h3 class="sub-h">Segments (optional)</h3><p class="footnote">Grow each reported segment separately (10-K segment note; for Amazon: North America, International, AWS). Type the segment revenue from the filing and your growth rate; the blend is revenue-weighted.</p>
+      <table class="fin seg"><thead><tr><th>Segment</th><th>Revenue ($mm)</th><th>Growth</th><th>Share</th></tr></thead><tbody>${T.rev.seg.map((x, i) => `<tr><td>${toolIn(`rev.seg.${i}.name`, 'text', 'Segment name', 'Segment ' + (i + 1))}</td><td>${toolIn(`rev.seg.${i}.rev`, 'usd_mm', 'Segment revenue')}</td><td>${toolIn(`rev.seg.${i}.g`, 'pct', 'Segment growth')}</td><td class="num">${segs.length && isNum(x.rev) ? fmt.pct(x.rev / segs.reduce((a, y) => a + y.rev, 0)) : ''}</td></tr>`).join('')}</tbody></table>
+      ${isNum(blend) ? `<p>Blended growth: <b>${plain(fmt.pct(blend, 2))}</b> ${segs.length && isNum(rev0) && Math.abs(segs.reduce((a, y) => a + y.rev, 0) / rev0 - 1) > 0.02 ? `<span class="footnote">Segments add up to ${fmt.mm(segs.reduce((a, y) => a + y.rev, 0))}, not the base revenue ${fmt.mm(rev0)}: check the period.</span>` : ''}</p>` : ''}
+      ${path.length ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>Year</th>${path.map(p => `<th>${p.t}</th>`).join('')}</tr></thead><tbody><tr><td>Growth</td>${path.map(p => `<td class="num">${fmt.pct(p.g)}</td>`).join('')}</tr><tr><td>Revenue $mm</td>${path.map(p => `<td class="num">${fmt.mm(p.rev)}</td>`).join('')}</tr><tr class="sub"><td>Added</td>${path.map(p => `<td class="num">${fmt.mm(p.add)}</td>`).join('')}</tr></tbody></table></div><p class="footnote">Year 1 = ${fmt.mm(rev0)} × (1 + ${plain(fmt.pct(rates[0], 2))}) = ${nf(path[0].rev, 2)}. Year 10 revenue is ${isNum(rev0) ? (path[path.length - 1].rev / rev0).toFixed(2) + '×' : '—'} today's.</p>` : '<p class="footnote">Needs base revenue and growth rates.</p>'}
+      <div class="btns">${[0, 1, 2].map(i => isNum(T.rev.g[i]) || (i === 0 && isNum(blend)) ? `<button class="btn" data-tool-use="${['g1', 'g2', 'g3'][i]}" data-v="${rates[i]}">Use ${plain(fmt.pct(rates[i], 2))} for ${esc(s)} ${['years 1–3', 'years 4–7', 'years 8–10'][i]}</button>` : '').join('')}</div></details>`;
+    // margin path
+    const mrow = (label, arr, cls = '') => `<tr class="${cls}"><td>${label}</td>${arr.map(v => `<td class="num">${fmt.pct(v)}</td>`).join('')}</tr>`;
+    const marg = `<details class="panel tool" data-aid="tool-mg" ${aidOpen['tool-mg'] ? 'open' : ''}><summary><b>Margin path</b> <span class="footnote">how years 1, 5 and 10 become ten yearly margins</span></summary>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th>${Array.from({ length: 10 }, (_, i) => `<th>Y${i + 1}</th>`).join('')}</tr></thead><tbody>${SC.map(x => { const em = DCFAnalysis.marginPath(cur.inputs.em1[x], cur.inputs.em5[x], cur.inputs.em10[x]); const gm = DCFAnalysis.marginPath(cur.inputs.gm1[x], cur.inputs.gm5[x], cur.inputs.gm10[x]); return mrow(x + ' EBITDA', em, 'total') + (gm.some(isNum) ? mrow(x + ' gross', gm, 'sub') : '') + (em.some((v, i) => isNum(v) && isNum(gm[i]) && v > gm[i]) ? `<tr><td colspan="11"><span class="pill bad">EBITDA above gross margin in some years</span></td></tr>` : ''); }).join('')}</tbody></table></div>
+      <p class="footnote">Years 2–4 step evenly from year 1 to year 5; years 6–9 step evenly from year 5 to year 10. Example: 20% in year 1 and 25% in year 5 gives 21.25%, 22.5% and 23.75% in years 2–4.</p>
+      ${(() => { const e = DCFAnalysis.effect(cur, ['em1', 'em5', 'em10'], s, 0.01); return e ? `<p>One extra point of EBITDA margin in every year moves the ${esc(s)} value per share by <b>${plain(fmt.usd(e.diff))}</b> (${(e.pct * 100).toFixed(1)}%).</p>` : ''; })()}
+      <p class="footnote">Reported vs adjusted vs calculated EBITDA: this model uses calculated EBITDA (operating income + D&A), with stock-based compensation still counted as a cost. Company "adjusted EBITDA" usually adds SBC and one-offs back and is higher.</p></details>`;
+    // NOL worksheet
+    const r = all.scen[s], ebit3 = r && r.ok ? r.years.slice(0, 3).reduce((a, y) => a + y.ebit, 0) : null;
+    const nb = DCFAnalysis.nolBenefit(T.nol.bal, ebit3, cur.inputs.tax[s]);
+    const nol = `<details class="panel tool" data-aid="tool-nol" ${aidOpen['tool-nol'] ? 'open' : ''}><summary><b>NOL worksheet</b> <span class="footnote">${{ none: 'checked: no usable NOLs', has: 'NOLs found', '': 'not reviewed yet' }[T.nol.status || '']}</span></summary>
+      <label>Status <select data-t="tool" data-k="nol.status" data-unit="choice" id="tl-nol-status"><option value="" ${!T.nol.status ? 'selected' : ''}>Not reviewed yet (no benefit assumed)</option><option value="none" ${T.nol.status === 'none' ? 'selected' : ''}>Checked the tax note: no usable NOLs</option><option value="has" ${T.nol.status === 'has' ? 'selected' : ''}>The tax note shows usable NOLs</option></select></label>
+      ${T.nol.status === 'has' ? `<label>Usable NOL carryforwards ($mm, after any valuation allowance) ${toolIn('nol.bal', 'usd_mm', 'NOL balance')}</label>
+      <p>EBIT in years 1–3 (${esc(s)}): ${fmt.mm(ebit3)} $mm. ${nb ? `Rate cut = ${fmt.mm(nb.used)} × ${plain(fmt.pct(cur.inputs.tax[s]))} ÷ ${fmt.mm(ebit3)} = <b>${plain(fmt.pct(nb.rateCut, 2))}</b>${nb.leftover > 0 ? `. ${fmt.mm(nb.leftover)} $mm would be left for later years, which this model does not use.` : '.'}` : 'Enter the balance to calculate.'}</p>
+      ${nb ? `<button class="btn" data-tool-use="nol" data-v="${nb.rateCut}">Use ${plain(fmt.pct(nb.rateCut, 2))} for ${esc(s)}</button>` : ''}` : '<p class="footnote">With no review, the NOL input should stay at 0: that means "no benefit assumed", not "the company has none". Record what you found here.</p>'}
+      <p class="footnote">Where: 10-K income taxes note, "net operating loss carryforwards" and "valuation allowance". Ctrl+F: <a class="chip" href="${DCFHelp.edgarSearch('net operating loss carryforwards', cur.meta && cur.meta.cik)}" target="_blank" rel="noopener">net operating loss carryforwards</a></p></details>`;
+    // CapEx estimator
+    const cxg = T.capex.guide, cxp = isNum(cxg) && isNum(rev0) && rev0 ? cxg / rev0 : null, A = calc().anchors;
+    const capex = `<details class="panel tool" data-aid="tool-cx" ${aidOpen['tool-cx'] ? 'open' : ''}><summary><b>CapEx estimator</b> <span class="footnote">turn a dollar outlook into a % of revenue</span></summary>
+      <label>CapEx outlook for the next year ($mm, from guidance or your estimate) ${toolIn('capex.guide', 'usd_mm', 'CapEx outlook')}</label>
+      <p>${isNum(cxp) ? `${fmt.mm(cxg)} ÷ ${fmt.mm(rev0)} base revenue = <b>${plain(fmt.pct(cxp))}</b> of revenue. Against year-1 revenue instead: ${r && r.ok ? plain(fmt.pct(cxg / r.years[0].rev)) : '—'}.` : 'Enter an amount.'}</p>
+      <p class="footnote">History: latest FY ${plain(fmt.pct(A.capex1.latestFY))}, TTM ${plain(fmt.pct(A.capex1.ttm))}; D&A latest FY ${plain(fmt.pct(A.da.latestFY))}. CapEx above D&A means the asset base is growing.</p>
+      ${isNum(cxp) ? `<button class="btn" data-tool-use="capex1" data-v="${cxp}">Use ${plain(fmt.pct(cxp))} for ${esc(s)} years 1–3</button>` : ''}
+      <p class="footnote">Definition: cash purchases of property and equipment. Finance leases are excluded: if the company acquires many assets under finance leases, add them yourself or note it.</p></details>`;
+    // sales-to-capital
+    const s2c = `<details class="panel tool" data-aid="tool-s2c" ${aidOpen['tool-s2c'] ? 'open' : ''}><summary><b>Sales-to-capital, explained</b> <span class="footnote">what it does and does not do in this model</span></summary>
+      <p>Sales-to-capital is revenue per dollar of invested capital. A ratio of 1.5× means every $1.50 of extra revenue needs $1 of net investment.</p>
+      <p><b>Its role here:</b> it sets year-1 invested capital (revenue ÷ ratio), from which the model tracks invested capital and ROIC. It does <b>not</b> change free cash flow or value per share. Reinvestment is already in CapEx, D&A, working capital and acquisitions, so nothing is counted twice.</p>
+      <p><b>Use it as a check:</b> marginal sales-to-capital = change in revenue ÷ net reinvestment. If your growth needs far more or far less reinvestment than the company's history shows, revisit growth or CapEx.</p>
+      ${anchorHtml('s2c', false)}
+      <table class="fin"><thead><tr><th></th>${SC.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody><tr><td>Your ratio</td>${SC.map(x => `<td class="num">${fmt.x(cur.inputs.s2c[x])}</td>`).join('')}</tr><tr><td>Year-1 ROIC</td>${SC.map(x => `<td class="num">${all.scen[x].ok ? fmt.pct(all.scen[x].years[0].roic) : '—'}</td>`).join('')}</tr><tr><td>Implied ratio from your inputs, years 1–5</td>${SC.map(x => { const R = all.scen[x]; if (!R.ok) return '<td>—</td>'; const re = R.years.slice(1, 5).reduce((a, y) => a + y.capex + y.dnwc + y.acq - y.da, 0); return `<td class="num">${re > 0 ? fmt.x((R.years[4].rev - R.years[0].rev) / re) : '<span class="na">no net reinvestment</span>'}</td>`; }).join('')}</tr></tbody></table></details>`;
+    return `<h2 class="sec-h">Estimators</h2>${revTool}${marg}${nol}${capex}${s2c}`;
+  }
+  function checksPanelHtml() {
+    const { all } = calc(); const list = DCFAnalysis.consistency(cur, all);
+    return `<section class="panel" id="consistency"><div class="panel-head"><h2>Consistency checks</h2><span class="footnote">Warnings only. Nothing is changed for you.</span></div>
+      ${list.length ? `<ul class="flags">${list.map(c => `<li class="${c.level}">${c.key && FBY[c.key] ? `<button class="linkbtn" data-goto="${c.key}" ${c.s ? `data-s="${c.s}"` : ''}>${esc(FBY[c.key].label)}</button>: ` : ''}${esc(c.text)}</li>`).join('')}</ul>` : '<p class="pill good">No conflicts found between your assumptions.</p>'}</section>`;
+  }
+  function scenarioAssistHtml() {
+    const { all } = calc(); const T = DCFAnalysis.scenarioTable(all);
+    const c = (k, f = fmt.mm) => T.map(r => `<td class="num">${r.ok ? f(r[k]) : '—'}</td>`).join('');
+    return `<section class="panel"><div class="panel-head"><h2>Scenario overview</h2><span class="footnote">What each scenario's inputs produce. Scenarios are only what you enter: the calculator never builds Bear and Bull by adding or subtracting a fixed percentage, and it does not suggest probabilities.</span></div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th>${SC.map(s => `<th>${s}</th>`).join('')}</tr></thead><tbody>
+      <tr><td>Revenue, year 1</td>${c('rev1')}</tr><tr><td>Revenue, year 5</td>${c('rev5')}</tr><tr><td>Revenue, year 10</td>${c('rev10')}</tr><tr><td>EBIT, year 1</td>${c('ebit1')}</tr><tr><td>EBIT, year 10</td>${c('ebit10')}</tr><tr><td>Free cash flow, year 1</td>${c('fcf1')}</tr><tr><td>Free cash flow, year 10</td>${c('fcf10')}</tr><tr><td>Enterprise value</td>${c('ev')}</tr><tr class="key"><td>Value per share</td>${c('perShare', fmt.usd)}</tr><tr class="sub"><td>Terminal value share of EV</td>${c('tvShare', v => fmt.pct(v))}</tr>
+      <tr><td>Your probability</td>${SC.map(s => `<td class="num">${isNum(cur.inputs.prob[s]) ? fmt.pct(cur.inputs.prob[s]) : '<span class="na">not set</span>'}</td>`).join('')}</tr></tbody></table></div></section>`;
+  }
+
   // ---------- pages ----------
   const P = {};
   // ---------- dashboard ----------
@@ -561,7 +888,7 @@
     if (importStatus && importStatus.busy) status = `<div class="notice info"><span class="spinner" aria-hidden="true"></span> ${esc(importStatus.msg)}</div>`;
     else if (importStatus && importStatus.error) status = `<div class="notice bad"><b>Import failed.</b> ${esc(importStatus.error)} <button class="linkbtn" data-open-data>Data source settings</button> <button class="linkbtn" data-dismiss-import>Dismiss</button></div>`;
     else if (importStatus && importStatus.ok) status = `<div class="notice good"><b>${importStatus.isNew ? 'New model created. ' : ''}Imported ${importStatus.changed} figures for ${esc(importStatus.label || '')}</b> from ${esc(importStatus.provider)} at ${new Date(importStatus.at).toLocaleString()}. Each one has its source on the <a href="#record">Sources</a> page. Review them, then fill in the inputs marked as yours.
-      ${importStatus.kept && importStatus.kept.length ? `<div class="footnote">Kept your own values for: ${importStatus.kept.map(k => esc(DCFModel.labelOf(k))).join(', ')}.</div>` : ''}
+      ${importStatus.pending ? `<div class="footnote"><b>${importStatus.pending} value${importStatus.pending > 1 ? 's' : ''} differ from what you have.</b> Nothing was replaced: review them below.</div>` : ''}
       ${importStatus.notes && importStatus.notes.length ? `<ul class="footnote">${importStatus.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''} <button class="linkbtn" data-dismiss-import>Dismiss</button></div>`;
     const empty = !C.name && !M.retrieved;
     const header = `<section class="card hero" style="grid-area:hero">
@@ -704,6 +1031,7 @@
     const comp = `<section class="card completion" style="grid-area:mc"><div class="card-h">${icon('check')}<h2>Model completion</h2><a class="more" href="#checklist">Details</a></div>
       <div class="mc-body">${DCFCharts.ring(T.pct, T.complete)}<ul class="mc-list">${T.sections.map(secLine).join('')}</ul></div>
       <p class="footnote mc-status">${T.complete ? '<b class="pos">Complete.</b> Every required input is filled in, valid and sourced, all cases calculate and no check fails.' : T.ready ? `<b>Calculates, not complete yet.</b> ${T.warnings.filter(w => w.level === 'bad').length ? T.warnings.filter(w => w.level === 'bad').length + ' check(s) fail. ' : ''}Click a line to go to the next item.` : '<b>Not ready.</b> Click a line to jump to the next missing input.'}</p></section>`;
+    { const pend = pendingPanel(); if (pend) status = (status || '') + pend; }
     return `<div class="dash">${status ? `<div style="grid-area:status">${status}</div>` : ''}${header}${overview}${summary}${drivers}${inputs}${football}${sensitivity}${scen}${fcf}${comp}</div>`;
   };
 
@@ -953,8 +1281,12 @@
     if (!l.length) return '<p class="footnote">Checks appear once the active scenario calculates.</p>';
     return `<div class="checks">${l.map(([t, d, cls, lab]) => `<div class="row"><div>${t}<small>${d}</small></div><span class="pill ${cls}">${lab}</span></div>`).join('')}</div>`;
   }
-  P.company = () => `<div><h1>Company & market data</h1><p class="lead">Who you are valuing, as of when, and the share data that turns equity value into a value per share. Market quotes are current prices; share counts come from the latest SEC filing.</p></div>${groupPanel('company')}${marketPanel()}${dilutionPanel()}`;
-  P.assumptions = () => `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}`;
+  P.company = () => `<div><h1>Company & market data</h1><p class="lead">Who you are valuing, as of when, and the share data that turns equity value into a value per share. Market quotes are current prices; share counts come from the latest SEC filing.</p></div>${groupPanel('company')}${marketPanel()}${dilutionPanel()}${shareSummary()}`;
+  P.assumptions = () => {
+    const learn = !(cur.ui && cur.ui.learn === false);
+    const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and notes</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Click ? on any row for the full guide: what it is, how to estimate it, history, examples, scenarios, common mistakes, effect on value and sources.</span></div>`;
+    return `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${basePanel()}${bar}${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}${checksPanelHtml()}${learn ? toolsHtml() : ''}${scenarioAssistHtml()}`;
+  };
   P.terminal = () => `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10, usually 60–80% of the total.</p></div>${groupPanel('terminal')}`;
   P.bridge = () => `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${groupPanel('bridge')}${groupPanel('scenarios')}`;
   P.wacc = () => {
@@ -981,46 +1313,58 @@
       <section class="panel"><div class="panel-head"><h2>WACC builder: a cross-check of the Base case</h2></div>${builder}</section>`;
   };
   P.historicals = () => {
-    const H = cur.hist, Y = H.years;
+    const H = cur.hist, Y = H.years, ORD = [4, 3, 2, 1, 0]; // newest first on screen; stored oldest first
+    const TC = DCFAnalysis.ttmColumn(cur);
     const cell = (key, i) => {
       const id = `h-${key}-${i}`, v = H[key][i], err = parseErrors[id];
       const pv = DCFData.provenance(cur, 'hist.' + key, H[key]); const impv = cur.imported && cur.imported['hist.' + key];
       const cellImp = impv && isNum(v) && impv.v[i] === v;
       return `<td class="hist"><input type="text" inputmode="decimal" data-t="hist" data-k="${key}" data-i="${i}" id="${id}" class="${err ? 'err' : ''} ${cellImp ? 'imp' : (pv === 'overridden' && impv ? 'ovr' : '')}" title="${cellImp ? esc(srcTitle('hist.' + key)) : ''}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, 'num'))}" placeholder="Enter" aria-label="${esc(HBY[key].label)} ${Y[i] || ''}">${err ? `<div class="errmsg">${esc(err)}</div>` : ''}</td>`;
     };
-    const row = (key) => `<tr><td><div class="name" style="display:flex;gap:6px;align-items:center"><button class="help" data-help="hist.${key}" aria-label="How to fill in ${esc(HBY[key].label)}">?</button>${esc(HBY[key].label)}</div></td>${[0, 1, 2, 3, 4].map(i => cell(key, i)).join('')}</tr>`;
-    const comp = (label, fn, cls = 'sub', f = fmt.mm) => `<tr class="${cls}"><td>${label}</td>${[0, 1, 2, 3, 4].map(i => { const v = fn(i); return `<td class="hist">${f(v)}</td>`; }).join('')}</tr>`;
-    const n = (k, i) => isNum(H[k][i]) ? H[k][i] : null;
+    const tcell = (key) => { const v = TC ? TC.v[key] : null; return `<td class="hist ttm">${TC ? `<button class="ttmv" data-ttm="${key === 'opex' ? 'ebitda' : key}" title="How this TTM figure is built">${isNum(v) ? fmt.mm(v) : '<span class="na">Not available</span>'}</button>` : '<span class="na">—</span>'}</td>`; };
+    const row = (key) => `<tr><td><div class="name" style="display:flex;gap:6px;align-items:center"><button class="help" data-help="hist.${key}" aria-label="How to fill in ${esc(HBY[key].label)}">?</button>${esc(HBY[key].label)}</div></td>${tcell(key)}${ORD.map(i => cell(key, i)).join('')}</tr>`;
+    // column accessors: 't' = TTM, numbers = stored index
+    const n = (k, i) => i === 't' ? (TC && isNum(TC.v[k]) ? TC.v[k] : null) : (isNum(H[k][i]) ? H[k][i] : null);
     const all = (...xs) => xs.every(isNum);
-    const ebitda = i => all(n('gp', i), n('opex', i)) ? H.gp[i] - H.opex[i] : null;
-    const ebit = i => all(ebitda(i), n('da', i)) ? ebitda(i) - H.da[i] : null;
+    const ebitda = i => all(n('gp', i), n('opex', i)) ? n('gp', i) - n('opex', i) : null;
+    const ebit = i => all(ebitda(i), n('da', i)) ? ebitda(i) - n('da', i) : null;
     const t = cur.inputs.tax.Base;
-    const ebt = i => all(ebit(i), n('interest', i)) ? ebit(i) - H.interest[i] : null;
+    const ebt = i => all(ebit(i), n('interest', i)) ? ebit(i) - n('interest', i) : null;
     const taxes = i => all(ebt(i), t) ? ebt(i) * t : null;
     const ni = i => all(ebt(i), taxes(i)) ? ebt(i) - taxes(i) : null;
-    const ocf = i => all(ni(i), n('da', i), n('sbc', i), n('dnwc', i)) ? ni(i) + H.da[i] + H.sbc[i] + H.dnwc[i] : null;
-    const fcf = i => all(ocf(i), n('capex', i)) ? ocf(i) + H.capex[i] : null;
+    const ocf = i => all(ni(i), n('da', i), n('sbc', i), n('dnwc', i)) ? ni(i) + n('da', i) + n('sbc', i) + n('dnwc', i) : null;
+    const fcf = i => all(ocf(i), n('capex', i)) ? ocf(i) + n('capex', i) : null;
     const div = (a, b) => isNum(a) && isNum(b) && b !== 0 ? a / b : null;
-    const yrs = Y.map((y, i) => `<th class="hist"><input type="text" inputmode="numeric" data-t="year" data-i="${i}" id="y-${i}" value="${esc(y == null ? '' : y)}" placeholder="FY" style="width:64px" aria-label="Fiscal year ${i + 1}"></th>`).join('');
+    const prevOf = i => i === 't' ? null : i - 1;
+    const yoy = i => i === 't' ? (TC && TC.prior && isNum(TC.prior.value) ? div(n('rev', 't'), TC.prior.value) - 1 : null) : i ? (div(n('rev', i), n('rev', i - 1)) == null ? null : div(n('rev', i), n('rev', i - 1)) - 1) : null;
+    const COLS = ['t', ...ORD];
+    const comp = (label, fn, cls = 'sub', f = fmt.mm) => `<tr class="${cls}"><td>${label}</td>${COLS.map(i => `<td class="hist ${i === 't' ? 'ttm' : ''}">${f(fn(i))}</td>`).join('')}</tr>`;
+    const yrs = ORD.map(i => `<th class="hist"><input type="text" inputmode="numeric" data-t="year" data-i="${i}" id="y-${i}" value="${esc(Y[i] == null ? '' : Y[i])}" placeholder="FY" style="width:64px" aria-label="Fiscal year, column ${5 - i}"></th>`).join('');
+    const ttmHead = `<th class="hist ttm"><div class="ttmh">TTM${TC ? `<small>${TC.isFY ? '= latest FY' : 'to ' + esc(TC.end)}</small>` : '<small>not loaded</small>'}</div></th>`;
     const avg = (fn) => { const v = [0, 1, 2, 3, 4].map(fn).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
     const cagr = all(n('rev', 0), n('rev', 4)) && H.rev[0] > 0 ? Math.pow(H.rev[4] / H.rev[0], 1 / 4) - 1 : null;
     const hs = Object.entries(cur.sources).filter(([k, x]) => k.startsWith('hist.') && x.auto);
     const impNote = hs.length ? `<div class="notice info"><b>Imported from ${esc(hs[0][1].provider)}</b> (${esc(hs[0][1].period)}), retrieved ${new Date(hs[0][1].retrieved).toLocaleString()}. Cyan cells are imported; amber cells are ones you changed. ${HIST_FIELDS.filter(h => !cur.sources['hist.' + h.key]).length ? 'Still to enter by hand: ' + HIST_FIELDS.filter(h => !cur.sources['hist.' + h.key]).map(h => esc(h.label)).join(', ') + '.' : ''} Click ? on a row to see its exact source.</div>` : `<div class="notice">Search a company in the top bar to import five years of statements automatically, or type them in from the 10-K.</div>`;
-    return `<div><h1>Historical financials</h1><p class="lead">Reported figures in $ millions, oldest year first, from the 10-K income and cash flow statements. These are your evidence for the forecast. ${cur.mode === 'corrected' ? 'The latest year\'s revenue becomes the base-year revenue.' : ''}</p></div>${impNote}
-    <section class="panel"><div class="panel-head"><h2>Income statement and free cash flow</h2><span class="footnote">Type the fiscal year in each column header. Cash outflows (CapEx, a rise in NWC) are negative, as on the cash flow statement.</span></div>
-    <div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions, reported</th>${yrs}</tr></thead><tbody>
-      ${row('rev')}${comp('YoY growth', i => i ? div(n('rev', i), n('rev', i - 1)) - 1 : null, 'sub', v => fmt.pct(isNum(v) ? v : null))}
+    const latest = isNum(Y[4]) ? Y[4] : null;
+    return `<div><h1>Historical financials</h1><p class="lead">Reported figures in $ millions, newest first: trailing twelve months, then the last five fiscal years. These are your evidence for the forecast. ${cur.mode === 'corrected' ? 'The forecast grows from the base you choose on Forecast assumptions (latest fiscal year or TTM).' : ''}</p></div>${impNote}
+    <section class="panel"><div class="panel-head"><h2>Income statement and free cash flow</h2><span class="footnote">Type the fiscal year in each column header to relabel it. Cash outflows (CapEx, a rise in NWC) are negative, as on the cash flow statement. The shaded TTM column is calculated; click a figure to see how.</span></div>
+    <div class="btns hbar">${latest ? `<button class="btn" data-hist-roll title="Moves every figure one column older, drops FY${Y[0] || ''}, and adds an empty FY${latest + 1} column">Add FY${latest + 1} (shift the years)</button>` : ''}<button class="btn" data-scroll-to="ttm-build">${cur.ttm ? 'Check or replace TTM by hand' : 'Build TTM by hand'}</button></div>
+    <div class="tbl-wrap"><table class="fin hfin"><thead><tr><th>$ millions, reported</th>${ttmHead}${yrs}</tr></thead><tbody>
+      ${row('rev')}${comp('YoY growth', yoy, 'sub', v => fmt.pct(isNum(v) ? v : null))}
       ${row('gp')}${comp('Gross margin', i => div(n('gp', i), n('rev', i)), 'sub', fmt.pct)}
       ${row('opex')}${comp('EBITDA = gross profit − operating expenses', ebitda, 'total')}${comp('EBITDA margin', i => div(ebitda(i), n('rev', i)), 'sub', fmt.pct)}
       ${row('da')}${comp('EBIT', ebit, 'total')}${comp('EBIT margin', i => div(ebit(i), n('rev', i)), 'sub', fmt.pct)}
       ${row('interest')}${comp('Pre-tax income', ebt)}${comp(`Taxes, estimated at the Base tax rate (${isNum(t) ? (t * 100).toFixed(1) + '%' : 'not set'}), not reported`, taxes, 'sub')}${comp('Net income (estimated)', ni, 'total')}
       ${row('sbc')}${row('dnwc')}${comp('Operating cash flow (estimated)', ocf, 'total')}${row('capex')}${comp('Free cash flow (estimated)', fcf, 'key')}${comp('FCF margin', i => div(fcf(i), n('rev', i)), 'sub', fmt.pct)}
-    </tbody></table></div></section>
+    </tbody></table></div>
+    ${TC ? `<p class="footnote">TTM ${TC.isFY ? 'equals the latest fiscal year: no 10-Q has been filed since it ended.' : `to ${esc(TC.end)} = fiscal year + year to date − the same period a year earlier, for each line. ${TC.manual ? 'Built from figures you typed.' : 'Calculated from the SEC filings.'}`} Taxes, net income and cash flow in this table use the same estimate as the fiscal years; the reported TTM figures are in the comparison below.</p>` : ''}</section>
+    ${ttmCompareHtml()}
+    ${ttmBuilderHtml()}
     <section class="panel"><h2>Ratios to anchor your assumptions</h2><div class="stats">
       <div class="stat"><span class="k">Revenue CAGR, 4 years</span><span class="v">${plain(fmt.pct(cagr))}</span><span class="s">Compare with growth phases 1–2</span></div>
-      <div class="stat"><span class="k">Avg EBITDA margin</span><span class="v">${plain(fmt.pct(avg(i => div(ebitda(i), n('rev', i)))))}</span><span class="s">Latest ${plain(fmt.pct(div(ebitda(4), n('rev', 4))))}</span></div>
+      <div class="stat"><span class="k">Avg EBITDA margin</span><span class="v">${plain(fmt.pct(avg(i => div(ebitda(i), n('rev', i)))))}</span><span class="s">Latest ${plain(fmt.pct(div(ebitda(4), n('rev', 4))))}${TC ? ` · TTM ${plain(fmt.pct(div(ebitda('t'), n('rev', 't'))))}` : ''}</span></div>
       <div class="stat"><span class="k">Avg D&A % revenue</span><span class="v">${plain(fmt.pct(avg(i => div(n('da', i), n('rev', i)))))}</span><span class="s">Compare with D&A input</span></div>
-      <div class="stat"><span class="k">Avg CapEx % revenue</span><span class="v">${plain(fmt.pct(avg(i => div(isNum(n('capex', i)) ? -H.capex[i] : null, n('rev', i)))))}</span><span class="s">Compare with CapEx phases</span></div>
+      <div class="stat"><span class="k">Avg CapEx % revenue</span><span class="v">${plain(fmt.pct(avg(i => div(isNum(n('capex', i)) ? -H.capex[i] : null, n('rev', i)))))}</span><span class="s">Compare with CapEx phases${TC && isNum(TC.v.capex) ? ` · TTM ${plain(fmt.pct(div(-TC.v.capex, TC.v.rev)))}` : ''}</span></div>
       <div class="stat"><span class="k">Avg SBC % revenue</span><span class="v">${plain(fmt.pct(avg(i => div(n('sbc', i), n('rev', i)))))}</span><span class="s">Already inside EBITDA margins</span></div>
     </div></section>`;
   };
@@ -1194,6 +1538,7 @@
       <tr class="key"><td>Current inputs</td><td>${cur.mode === 'corrected' ? 'Corrected' : 'Original'}</td>${SC.map(s => `<td>${all.scen[s].ok ? fmt.usd(all.scen[s].perShare) : '—'}</td>`).join('')}<td>${fmt.usd(w)}</td><td></td></tr></tbody></table></div>` : '<p class="footnote">No saved versions yet. Save one before you change assumptions, then compare.</p>';
     return `<div><h1>Valuation summary${cur.inputs.company.name ? ': ' + esc(cur.inputs.company.name) : ''}</h1><p class="lead">${cur.inputs.company.ticker ? esc(cur.inputs.company.ticker) + ' · ' : ''}${cur.inputs.company.valDate ? 'valued as of ' + esc(cur.inputs.company.valDate) + ' · ' : ''}${cur.mode === 'corrected' ? 'corrected method' : 'original workbook method'} · $ millions except per share.</p></div>
       <div class="stats">${wcard}${cards}</div>
+      ${shareSummary()}
       <section class="panel football"><h2>Where the value falls</h2>${football(all, inp)}<p class="footnote">Bars show ranges, black ticks the Base case and Street mean, the dashed red line today's price, and the blue dot your probability-weighted value.</p></section>
       <section class="panel"><h2>Scenario comparison</h2>${comp}</section>
       <div class="grid2"><section class="panel"><h2>Sanity checks (${cur.active} case)</h2>${checksHtml()}</section>
@@ -1250,7 +1595,7 @@
   P.record = () => {
     const srcs = Object.entries(cur.sources);
     const lab = k => FBY[k] ? FBY[k].label : (k.startsWith('hist.') && HBY[k.slice(5)] ? HBY[k.slice(5)].label + ' (historicals)' : k);
-    return `<div><h1>Sources & change log</h1><p class="lead">Where each figure came from, and every change made to the inputs. Add a source from any field's ? panel.</p></div>
+    return `<div><h1>Sources & change log</h1><p class="lead">Where each figure came from, and every change made to the inputs. Add a source from any field's ? panel.</p></div>${pendingPanel()}
     <section class="panel"><h2>Sources recorded (${srcs.length})</h2>${srcs.length ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>Input</th><th style="text-align:left">Source</th><th style="text-align:left">Filing / report</th><th style="text-align:left">Period</th><th style="text-align:left">Link</th><th style="text-align:left">Notes</th></tr></thead><tbody>
       ${srcs.map(([k, s]) => `<tr><td><button class="btn" data-help="${k}">${esc(lab(k))}</button></td><td style="text-align:left;font-family:var(--font-ui)">${esc(s.name)}</td><td style="text-align:left;font-family:var(--font-ui)">${esc(s.type)}</td><td style="text-align:left;font-family:var(--font-ui)">${esc(s.period)}</td><td style="text-align:left;font-family:var(--font-ui)">${s.url && /^https?:\/\//i.test(s.url) ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">open</a>` : esc(s.url || '')}</td><td style="text-align:left;white-space:normal;font-family:var(--font-ui)">${esc(s.notes)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="footnote">No sources recorded yet.</p>'}</section>
     <section class="panel"><h2>Change log (latest ${Math.min(cur.log.length, 200)})</h2>${cur.log.length ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>When</th><th style="text-align:left">Input</th><th>Scenario</th><th>From</th><th>To</th></tr></thead><tbody>
@@ -1261,8 +1606,13 @@
   function renderDrawer() {
     const root = $('#drawer-root');
     if (!drawerKey) { root.innerHTML = ''; return; }
+    if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
     const isHist = drawerKey.startsWith('hist.');
-    const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : (FBY[drawerKey] || DIL_HELP[drawerKey]);
+    const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : (FBY[drawerKey] || DIL_HELP[drawerKey] || (drawerKey === 'dil.proxy' ? { key: 'dil.proxy', label: 'Reported net dilutive effect', group: 'market', unit: 'shares', kind: 'reported', required: false, what: 'The net number of shares that stock awards added to the diluted share count in the latest EPS calculation. It is already net of the treasury stock method.', enter: 'Millions of shares from the EPS note of the newest 10-Q, with the period it covers.' } : null));
+    if (!f) { drawerKey = null; root.innerHTML = ''; return; }
+    const hh = DCFHelp.H[drawerKey] || {}, isFc = f.kind === 'forecast' && DCFHelp.G[drawerKey];
+    const curVal = isHist ? cur.hist[drawerKey.slice(5)][4] : drawerKey === 'dil.proxy' ? (cur.dilution.proxy || {}).v : drawerKey.startsWith('company.') ? cur.inputs.company[drawerKey.split('.')[1]] : f.tri ? null : cur.inputs[drawerKey];
+    const cik = cur.meta && cur.meta.cik;
     const gs = GUIDE_SECTIONS[GUIDE_IDX[f.group]];
     const src = cur.sources[drawerKey] || {};
     const vids = cur.videos || {};
@@ -1274,14 +1624,18 @@
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      <dl>
+      ${isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
+        ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
-        ${f.source ? `<div><dt>Where to find it</dt><dd>${esc(f.source)}</dd></div>` : ''}
-        ${f.backup ? `<div><dt>Cross-check with</dt><dd>${esc(f.backup)}</dd></div>` : ''}
         ${f.tip ? `<div><dt>Tip</dt><dd>${esc(f.tip)}</dd></div>` : ''}
-        ${f.cell || isHist ? `<div><dt>Workbook cell</dt><dd><code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></dd></div>` : ''}
       </dl>
+      <div><h3>Where to find it</h3>${whereHtml(hh.where, cik)}${f.source ? `<p class="footnote">${esc(f.source)}</p>` : ''}${f.backup ? `<p class="footnote">Cross-check with: ${esc(f.backup)}</p>` : ''}</div>
+      ${exampleHtml(drawerKey) ? `<div><h3>Example</h3>${exampleHtml(drawerKey)}</div>` : ''}
+      ${hh.calc ? `<div><h3>How it is calculated</h3><p>${esc(hh.calc)}</p></div>` : ''}
+      ${hh.mistakes && hh.mistakes.length ? `<div><h3>Common mistakes</h3><ul>${hh.mistakes.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      <div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}${hh.verify ? `<p class="footnote"><b>Check:</b> ${esc(hh.verify)}</p>` : ''}</div>`}
+      ${f.cell || isHist ? `<p class="footnote">Workbook cell: <code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></p>` : ''}
       ${f.guide ? guideHtml(f.guide) : ''}${String(drawerKey).startsWith('dil') || drawerKey === 'basic' ? '<a class="btn" href="#guide" data-close>Open the share dilution guide</a>' : ''}
       <a class="video" href="${esc(custom || VIDEO(f.video || f.label + ' DCF'))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>Watch how to fill this in</b><br><span class="footnote">${custom ? 'Video chosen for this model' : 'YouTube videos on “' + esc(f.video || f.label) + '”'}</span></span></a>
       ${links ? `<div><h3>Useful links</h3><ul style="margin:6px 0 0;padding-left:18px">${links}</ul></div>` : ''}
@@ -1340,6 +1694,14 @@
       let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
       const last = parts[parts.length - 1]; from = o[last]; o[last] = v;
     }
+    else if (t === 'ttmm') {
+      const parts = el.dataset.k.split('.'); field = 'TTM by hand: ' + el.dataset.k;
+      cur.ttmManual = cur.ttmManual || { rows: {} }; let o = cur.ttmManual;
+      for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
+      const last = parts[parts.length - 1]; from = o[last]; o[last] = v;
+      cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
+    }
+    else if (t === 'tool') { const parts = el.dataset.k.split('.'); let o = toolState(); for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
     else if (t === 'gc') { gc[el.dataset.k] = v; if (isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; } setTimeout(render, 0); return; }
     else if (t === 'sens') { const a = el.dataset.k, i = +el.dataset.i; if (v === null) { render(); return; } cur.sens[a][i] = v; persist(); render(); return; }
@@ -1351,6 +1713,11 @@
   document.addEventListener('change', e => {
     const el = e.target;
     if (el.dataset && el.dataset.t === 'dilchk') { const parts = el.dataset.k.split('.'); let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; const last = parts[parts.length - 1]; DCFModel.logChange(cur, 'dilution.' + el.dataset.k, null, !!o[last], el.checked); o[last] = el.checked; persist(); render(); return; }
+    if (el.dataset && el.dataset.t === 'note') { const k = el.dataset.k, sc = el.dataset.s, f = el.dataset.f; cur.notes = cur.notes || {}; const N = cur.notes[k] = cur.notes[k] || {}; const nn = N[sc] = N[sc] || {}; nn[f] = el.value; nn.saved = new Date().toISOString(); persist(); render(); return; }
+    if (el.dataset && el.dataset.pendId) { pendSel = pendSel || {}; pendSel[el.dataset.pendId] = el.checked; if (!Object.keys(pendSel).some(k => pendSel[k] && cur.pending.items.find(p => p.id === k && p.kind === 'override'))) pendConfirm = false; render(); return; }
+    if (el.id === 'pend-confirm') { pendConfirm = el.checked; render(); return; }
+    if (el.id === 'tm-use') { cur.ttmManual = cur.ttmManual || {}; DCFModel.logChange(cur, 'TTM source', null, cur.ttmManual.use ? 'built by hand' : 'from filings', el.checked ? 'built by hand' : 'from filings'); cur.ttmManual.use = el.checked; persist(); render(); toast(el.checked ? 'Using the TTM you built by hand' : 'Using the TTM calculated from the filings'); return; }
+    if (el.id === 'base-timing') { DCFModel.logChange(cur, 'forecast timing', null, cur.timing, el.value); cur.timing = el.value; persist(); render(); toast(el.value === 'dated' ? 'Forecast years now line up with the valuation date' : 'Using the workbook timing'); return; }
     if (el.dataset && el.dataset.t) return setInput(el);
     if (el.id === 'model-select') { cur = models[el.value]; try { localStorage.setItem('dcfcalc.current', cur.id); } catch (x) {} parseErrors = {}; render(); return; }
     if (el.id === 'mode-select') { DCFModel.logChange(cur, 'method', null, cur.mode, el.value); cur.mode = el.value; persist(); render(); toast(el.value === 'corrected' ? 'Using the corrected method' : 'Using the exact original workbook method'); return; }
@@ -1363,6 +1730,7 @@
     if (el.id === 'sec-q') { renderModal(); return; }
     if (el.id === 'import-xlsx') return importXlsx(el);
   });
+  document.addEventListener('toggle', e => { const d = e.target; if (d && d.dataset && d.dataset.aid) aidOpen[d.dataset.aid] = d.open; }, true);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && modal) { modal = null; renderModal(); return; }
     if (e.key === 'Escape' && searchState.open) { searchState.open = false; renderSearchResults(); return; }
@@ -1385,7 +1753,28 @@
     if (b.id === 'run-dcf') { runDcf(); return; }
     if (b.dataset.tab) { dashTab = b.dataset.tab; render(); return; }
     if (b.dataset.useRef) { useRef(b.dataset.useRef); return; }
-    if (b.dataset.dilMethod) { const m = b.dataset.dilMethod; if (cur.dilution.method === m) return; const from = cur.dilution.method; if (from === 'totals' || !from) cur.dilution.savedTotals = { options: cur.inputs.options, treasury: cur.inputs.treasury }; if (m === 'totals' && cur.dilution.savedTotals) { cur.inputs.options = cur.dilution.savedTotals.options; cur.inputs.treasury = cur.dilution.savedTotals.treasury; } cur.dilution.method = m; DCFModel.logChange(cur, 'dilution method', null, from, m); persist(); render(); toast(m === 'totals' ? 'Using the workbook totals' : m === 'simple' ? 'Simple dilution: enter an estimate or value on actual shares' : 'Advanced dilution: enter each security'); return; }
+    if (b.dataset.dilMethod) { const m = b.dataset.dilMethod; if (cur.dilution.method === m) return; const from = cur.dilution.method; if (from === 'totals' || !from) cur.dilution.savedTotals = { options: cur.inputs.options, treasury: cur.inputs.treasury }; if (m === 'totals' && cur.dilution.savedTotals) { cur.inputs.options = cur.dilution.savedTotals.options; cur.inputs.treasury = cur.dilution.savedTotals.treasury; } cur.dilution.method = m; if (m === 'proxy' && !cur.dilution.proxy) cur.dilution.proxy = { v: null, period: null }; DCFModel.logChange(cur, 'dilution method', null, from, m); persist(); render(); toast(m === 'totals' ? 'Using the workbook totals' : m === 'simple' ? 'Simple dilution: enter an estimate or value on actual shares' : m === 'proxy' ? 'Reported net dilution: use the latest EPS note figure' : 'Detailed estimate: enter each security'); return; }
+    if (b.dataset.pendApply !== undefined) { const ids = Object.keys(pendSel || {}).filter(k => pendSel[k]); const done = DCFData.applyPending(cur, ids, pendConfirm); pendSel = null; pendConfirm = false; persist(); render(); toast(done.length ? `Applied ${done.length} change${done.length > 1 ? 's' : ''}. The old values are in the change log.` : 'Nothing was applied. Tick the rows to apply.'); return; }
+    if (b.dataset.pendDismiss !== undefined) { const ids = cur.pending ? cur.pending.items.map(p => p.id) : []; DCFModel.logChange(cur, 'import review', null, null, `kept current values for ${ids.length} field${ids.length === 1 ? '' : 's'}`); DCFData.dismissPending(cur, ids); pendSel = null; pendConfirm = false; persist(); render(); toast('Kept your current values'); return; }
+    if (b.dataset.flagsDismiss !== undefined) { cur.importFlags = []; persist(); render(); return; }
+    if (b.dataset.ttm) { drawerKey = 'ttm.' + b.dataset.ttm; renderDrawer(); return; }
+    if (b.dataset.baseSet) { const m = b.dataset.baseSet; cur.base = cur.base || { mode: 'fy' }; const before = DCFModel.baseInfo(cur), from = cur.base.mode; cur.base.mode = m; const after = DCFModel.baseInfo(cur); DCFModel.logChange(cur, 'forecast base', null, `${from} · ${before.label} · ${isNum(before.rev) ? Math.round(before.rev) : '—'}`, `${m} · ${after.label} · ${isNum(after.rev) ? Math.round(after.rev) : '—'}`); persist(); render(); toast(`Forecast base is now ${after.label}. Base revenue ${nf(before.rev)} → ${nf(after.rev)} $mm. The change is in the log.`); return; }
+    if (b.dataset.dilFill) { const SD = cur.shareData || {}, r = SD[b.dataset.dilFill]; if (!r) return; const D = cur.dilution; D.proxy = D.proxy || {}; const from = D.proxy.v; D.proxy.v = r.value; D.proxy.period = r.periodText || null; DCFModel.logChange(cur, 'dilution.proxy.v', null, from, `${r.value} (${r.periodText || ''}, chosen by you)`);
+      cur.sources['dil.proxy'] = { name: `${r.form || 'Filing'} EPS calculation`, type: r.form === '10-K' ? '10-K annual report' : '10-Q quarterly report', cat: 'proxy', period: r.periodText || '', accn: r.accn || null, form: r.form || null, filed: r.filed || null, url: r.url || '', end: r.end || null, start: r.start || null, raw: isNum(r.raw) ? r.raw : null, rawUnit: r.rawUnit || null, unit: 'millions of shares', concept: r.concept || null, method: r.cat === 'calc' ? 'Diluted weighted-average shares − basic weighted-average shares for the same period (calculated)' : 'Reported net dilutive effect of stock awards', notes: 'Historical proxy for dilution: already net of the treasury stock method, at that period\'s average share price. Not a current diluted share count.', retrieved: SD.at || null, provider: 'SEC EDGAR XBRL', verified: r.cat !== 'calc', company: cur.inputs.company.name, ticker: cur.inputs.company.ticker };
+      persist(); render(); toast(`Using ${r.value} million (${r.periodText || ''}) as the reported net dilution. It is a historical proxy.`); return; }
+    if (b.dataset.dilFillAdv !== undefined) { const SD = cur.shareData || {}, D = cur.dilution, filled = []; const bad = k => (cur.importFlags || []).some(f => f.key === 'sh.' + k && f.level === 'bad');
+      if (SD.rsu && isNum(SD.rsu.value) && !isNum(D.rsu.n)) { D.rsu.n = SD.rsu.value; filled.push('unvested RSUs (' + SD.rsu.periodText + ')'); }
+      if (SD.unrecog && isNum(SD.unrecog.value) && !isNum(D.rsu.unrecog)) { D.rsu.unrecog = SD.unrecog.value; filled.push('unrecognised compensation (' + SD.unrecog.periodText + ')'); }
+      if (SD.options && isNum(SD.options.value) && !isNum(D.options[0].n)) { D.options[0].n = SD.options.value; D.options[0].label = D.options[0].label || 'Options outstanding'; filled.push('options (' + SD.options.periodText + ')'); if (SD.optionsK && isNum(SD.optionsK.value) && !isNum(D.options[0].k)) { if (bad('optionsK')) filled.push('exercise price left empty: the tagged value looks mis-scaled'); else D.options[0].k = SD.optionsK.value; } }
+      if (filled.length) DCFModel.logChange(cur, 'dilution (filled from filing)', null, null, filled.join('; '));
+      persist(); render(); toast(filled.length ? 'Filled ' + filled.join(', ') + '. Check each against the latest filing.' : 'Nothing filled: the boxes already have values, or the filing data does not include them.'); return; }
+    if (b.dataset.histRoll !== undefined) { const H = cur.hist, latest = H.years[4]; if (!isNum(latest)) return; cur.histArchive = cur.histArchive || []; cur.histArchive.unshift({ at: new Date().toISOString(), year: H.years[0], values: Object.fromEntries(HIST_FIELDS.map(h => [h.key, H[h.key][0]])) });
+      const fromYears = H.years.join(', '); H.years = [...H.years.slice(1), latest + 1]; HIST_FIELDS.forEach(h => { H[h.key] = [...H[h.key].slice(1), null]; const im = cur.imported && cur.imported['hist.' + h.key]; if (im && Array.isArray(im.v)) im.v = [...im.v.slice(1), null]; });
+      DCFModel.logChange(cur, 'hist.years', null, fromYears, H.years.join(', ') + ' (shifted; FY' + cur.histArchive[0].year + ' figures kept in the file)'); persist(); render(); toast(`Added an empty FY${latest + 1} column. Fill it from the new 10-K; the forecast waits for it if the base is the latest fiscal year.`); return; }
+    if (b.dataset.toolUse) { const k = b.dataset.toolUse, v = Math.round(+b.dataset.v * 1e6) / 1e6, sc = cur.active; const from = cur.inputs[k][sc]; cur.inputs[k][sc] = v; DCFModel.logChange(cur, k, sc, from, v); if (cur.defaults) delete cur.defaults[k]; persist(); render(); toast(`${FBY[k].label} (${sc}) set to ${(v * 100).toFixed(2)}%. The previous value (${isNum(from) ? (from * 100).toFixed(2) + '%' : 'empty'}) is in the change log.`); return; }
+    if (b.dataset.suggest) { const k = b.dataset.suggest, v = Math.round(+b.dataset.v * 1e6) / 1e6; const empty = SC.filter(sc => !isNum(cur.inputs[k][sc])); empty.forEach(sc => { DCFModel.logChange(cur, k, sc, null, v); cur.inputs[k][sc] = v; }); if (empty.length && !cur.sources[k]) cur.sources[k] = { name: 'Historical anchor: ' + b.dataset.l, type: 'Own judgment', cat: 'analyst', notes: 'Filled from the historical anchor by your choice. Review it.' }; persist(); render(); toast(empty.length ? `Filled ${empty.join(', ')} with ${plain(fmtVal(k, v))}. Cells you had filled were not changed.` : 'All three scenarios already have values, so nothing was changed.'); return; }
+    if (b.dataset.learnToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.learn = cur.ui.learn === false; persist(); render(); return; }
+    if (b.dataset.aidAll) { const open = b.dataset.aidAll === 'open'; document.querySelectorAll('details[data-aid]').forEach(d => { aidOpen[d.dataset.aid] = open; }); render(); return; }
     if (b.dataset.useDilwa !== undefined) { const r = (cur.ref || {}).dilutedWA; if (!r) return; const from = cur.dilution.est; cur.dilution.est = r.v; cur.dilution.ignore = false; DCFModel.logChange(cur, 'dilution.est', null, from, r.v + ' (diluted weighted-average shares, ' + (r.period || '') + ', chosen by you)'); cur.sources['dil.est'] = { name: r.source || 'Filing', type: '10-Q quarterly report', period: r.period || '', notes: 'Diluted weighted-average shares from the EPS calculation, used as an estimate of current diluted shares by your choice. This is a period average, not a period-end count.' }; persist(); render(); toast('Used the filing figure as your estimate. It is a period average, not a current count.'); return; }
     if (b.dataset.gcLoad !== undefined) { gc = gcFromModel(); parseErrors = Object.fromEntries(Object.entries(parseErrors).filter(([k]) => !k.startsWith('gc-'))); render(); toast('Loaded your model\'s figures into the guide calculator. Your DCF inputs are unchanged.'); return; }
     if (b.dataset.gcReset !== undefined) { gc = gcDefaults(); parseErrors = Object.fromEntries(Object.entries(parseErrors).filter(([k]) => !k.startsWith('gc-'))); render(); return; }
@@ -1398,7 +1787,7 @@
     if (b.id === 'cfg-save') {
       const c = dataCfg(); const r = document.querySelector('input[name="prov"]:checked'); if (r) c.provider = r.value;
       document.querySelectorAll('[data-key]').forEach(i => { const v = i.value.trim(); if (v) c.keys[i.dataset.key] = v; else delete c.keys[i.dataset.key]; });
-      c.remember = $('#cfg-remember').checked; c.replace = $('#cfg-replace').checked; saveDataCfg();
+      c.remember = $('#cfg-remember').checked; saveDataCfg();
       modal = null; renderModal(); render(); toast(c.keys[c.provider] ? `Connected to ${DCFData.PROVIDERS[c.provider].name}. Search a company in the top bar.` : 'Settings saved. Add an API key to search and import.');
       const i = $('#co-search'); if (i && c.keys[c.provider]) i.focus();
       return;

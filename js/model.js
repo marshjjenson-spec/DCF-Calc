@@ -164,6 +164,9 @@ const DCFModel = (() => {
       if (I.basic < 1) add('warn', 'basic', 'Shares outstanding below 1 million. Is it in billions instead of millions?');
       if (!isDate(A.basic)) add('warn', 'basic', 'Add the cover-page date of the share count (As of).');
       else if (days(A.basic, ref) > 120) add('warn', 'basic', `The share count is from ${A.basic}, more than 4 months before ${ref}. Check for a newer 10-Q.`);
+      // a weighted-average EPS share count typed as actual shares
+      const Sec = typeof DCFSec !== 'undefined' ? DCFSec : null;
+      if (Sec && model.shareData) Sec.checkActualShares(I.basic, model.shareData, 'Actual shares').filter(f => f.key).forEach(f => add(f.level, 'basic', f.text));
     }
     const r = model.ref && model.ref.marketCap, d = dilution(model);
     if (r && isNum(r.v) && isNum(I.price) && isNum(I.basic)) { const mc = I.price * I.basic, gap = mc / r.v - 1; if (Math.abs(gap) > 0.1) add('warn', 'basic', `Price × actual shares (${Math.round(mc).toLocaleString('en-US')} $mm) differs from the provider's market cap by ${(gap * 100).toFixed(0)}%. Check the share count and units.`); }
@@ -171,8 +174,10 @@ const DCFModel = (() => {
     return w;
   }
   // The forecast starting point: which 12 months year 1 follows, and how far the valuation date is past their end
+  // the TTM in use: one the analyst built by hand (when chosen), otherwise the one calculated from the filings
+  function ttmOf(model) { const M = model.ttmManual; return (M && M.use && M.result) || model.ttm || null; }
   function baseInfo(model) {
-    const B = model.base || { mode: 'fy' }, T = model.ttm, H = model.hist;
+    const B = model.base || { mode: 'fy' }, T = ttmOf(model), H = model.hist;
     const vd = model.inputs.company.valDate;
     const out = { mode: B.mode || 'fy', rev: null, end: null, label: '', warnings: [] };
     if (out.mode === 'ttm') {
@@ -304,7 +309,7 @@ const DCFModel = (() => {
   }
   // ---- persistence (browser storage, per-company models) ----
   const KEY = 'dcfcalc.models.v1';
-  function loadAll() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
+  function loadAll() { let all = {}; try { all = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } Object.keys(all).forEach(k => { all[k] = upgrade(all[k]); }); return all; }
   function saveAll(all) { try { localStorage.setItem(KEY, JSON.stringify(all)); return true; } catch (e) { return false; } }
   function save(model) { const all = loadAll(); model.updated = new Date().toISOString(); all[model.id] = model; return saveAll(all); }
   function remove(id) { const all = loadAll(); delete all[id]; saveAll(all); }
@@ -323,6 +328,6 @@ const DCFModel = (() => {
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { baseInfo, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

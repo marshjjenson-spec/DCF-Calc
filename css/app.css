@@ -516,3 +516,77 @@ details.gex ol, details.gex ul { padding-left: 18px; margin: 4px 0; font-size: 1
 }
 .dtab td.note { white-space: normal; min-width: 220px; font-family: var(--font-ui); }
 .dtab td.note .footnote { font-family: var(--font-num); }
+
+/* ---- source categories ---- */
+.cat { font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap; font-weight: 500; }
+.c-sec { color: var(--good); } .c-mkt { color: var(--blue); } .c-prov { color: var(--muted); } .c-calc { color: var(--ink); background: var(--surface-2); border-color: var(--line-strong); }
+.c-an { color: var(--accent); } .c-proxy { color: var(--warn); } .c-ovr { color: var(--warn); background: var(--warn-bg); } .c-miss { color: var(--bad); border-style: dashed; } .c-man { color: var(--muted); }
+/* ---- import review ---- */
+.ptab td { white-space: normal; vertical-align: top; text-align: left; font-family: var(--font-ui); }
+.ptab tr.pk-override td { background: var(--warn-bg); } .ptab tr.pk-blocked td { background: var(--bad-bg); }
+.pkind { font-weight: 600; font-size: 12px; }
+.warnbox { background: var(--warn-bg); padding: 8px 10px; border-radius: 5px; }
+ul.flags { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+ul.flags li { border-left: 3px solid var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 4px; font-size: 13px; }
+ul.flags li.bad { border-color: var(--bad); background: var(--bad-bg); } ul.flags li.info { border-color: var(--accent); background: var(--accent-soft); }
+.notice.bad { border-color: var(--bad); background: var(--bad-bg); }
+/* ---- TTM ---- */
+table.fin .ttm { background: var(--accent-soft); border-left: 2px solid var(--accent); }
+table.fin th.ttm { color: var(--accent); }
+.ttmh { display: flex; flex-direction: column; align-items: flex-end; font-weight: 700; } .ttmh small { font-weight: 400; font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.ttmv { border: 0; background: transparent; font: inherit; color: var(--ink); cursor: pointer; text-decoration: underline dotted var(--accent); text-underline-offset: 3px; padding: 0; }
+.ttmv:hover { color: var(--accent); }
+.formula { font: 500 13px var(--font-num); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; }
+table.parts td { white-space: normal; } table.parts td.num { text-align: right; }
+.tmgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.tmgrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.tmgrid input, .tmgrid select, .tool input.txt, .tool select { border: 1px solid var(--line-strong); border-radius: 5px; padding: 6px 8px; background: var(--input-bg); color: var(--ink); }
+details.panel > summary { cursor: pointer; }
+.hbar { justify-content: flex-start; }
+/* ---- forecast base ---- */
+.bcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.bcard { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bcard.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.bh { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.bk { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; } .bk span { color: var(--muted); } .bk b { font-family: var(--font-num); font-weight: 500; text-align: right; }
+.brow { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; } .brow select { border: 1px solid var(--line-strong); border-radius: 5px; padding: 5px 8px; background: var(--surface); color: var(--ink); margin-left: 6px; }
+.periods { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; font-size: 12px; margin-top: 6px; }
+/* ---- share summary ---- */
+.ssum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.ssum > div { background: var(--surface-2); border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.ssum span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.ssum b { font: 600 18px var(--font-num); } .ssum small { font-size: 11px; color: var(--muted); display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.ssum .tot { background: var(--accent-soft); }
+/* ---- help drawer ---- */
+.where { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.where > div { display: grid; grid-template-columns: 130px 1fr; gap: 8px; font-size: 13px; } .where span { color: var(--muted); font-size: 12px; } .where p { margin: 0; }
+.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line-strong); margin: 0 4px 4px 0; text-decoration: none; color: var(--link); font-family: var(--font-num); }
+.ex { background: var(--surface-2); border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.ex b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); } .ex-co { border-left: 3px solid var(--good); }
+.srcv { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; } .sv-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+dl.svl { display: grid; grid-template-columns: 1fr; gap: 0; margin: 0; } dl.svl > div { display: grid; grid-template-columns: 140px 1fr; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+dl.svl dt { color: var(--muted); } dl.svl dd { margin: 0; word-break: break-word; }
+details.dsec2 { border-bottom: 1px solid var(--line); padding: 6px 0; } details.dsec2 > summary { cursor: pointer; font-weight: 600; } details.dsec2 > div { padding: 6px 0 4px; font-size: 13px; }
+.aser { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; } .aser span { display: flex; flex-direction: column; background: var(--surface-2); border-radius: 5px; padding: 4px 8px; font: 500 12.5px var(--font-num); } .aser small { font: 400 10.5px var(--font-ui); color: var(--muted); } .aser .ttm { background: var(--accent-soft); }
+table.anch td { white-space: normal; font-size: 12.5px; } table.anch td.num { text-align: right; }
+/* ---- inline guides and notes ---- */
+.fgrid > div.aidrow { grid-column: 1 / -1; padding: 0 8px 8px; background: var(--surface); }
+details.aid > summary { cursor: pointer; font-size: 12.5px; color: var(--link); padding: 4px 0; }
+details.aid[open] { background: var(--surface-2); border-radius: 6px; padding: 4px 10px 10px; }
+details.asub { border-top: 1px solid var(--line); padding: 4px 0; } details.asub > summary { cursor: pointer; font-weight: 600; font-size: 13px; } details.asub > div { padding: 6px 0; font-size: 13px; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.notes fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.notes legend { font-weight: 600; font-size: 12px; padding: 0 4px; }
+.notes label { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); }
+.notes textarea, .notes input, .notes select { border: 1px solid var(--line-strong); border-radius: 5px; padding: 5px 7px; background: var(--input-bg); color: var(--ink); font: 13px var(--font-ui); width: 100%; box-sizing: border-box; }
+.saved { font-size: 11px; color: var(--good); font-weight: 500; }
+.evl { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.learnbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sec-h { margin: 8px 0 0; }
+.tool > summary { cursor: pointer; } .tool[open] { gap: 10px; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; } .tgrid label, .tool label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); max-width: 420px; }
+table.seg td { white-space: normal; } table.seg input.txt { width: 100%; box-sizing: border-box; }
+@media (max-width: 720px) {
+  .where > div, dl.svl > div { grid-template-columns: 1fr; gap: 2px; }
+  .bk { flex-direction: column; gap: 0; } .bk b { text-align: left; }
+}
