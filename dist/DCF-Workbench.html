@@ -3761,7 +3761,6 @@ const DCFHelp = (() => {
     damRoc: ['Damodaran: return on capital by industry (unadjusted, lease-adjusted, normalized ROIC)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/roc.html', 'direct'],
     damEbitda: ['Damodaran: EV/EBITDA and other value multiples by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/vebitda.html', 'direct'],
     damFundG: ['Damodaran: fundamental growth in EBIT (reinvestment rate × return on capital)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/fundgrEB.html', 'direct'],
-    capiq: ['S&P Capital IQ / FactSet (peer EV/EBITDA, consensus EBITDA)', 'https://www.spglobal.com/market-intelligence/en/solutions/sp-capital-iq-pro', 'direct', true],
     bloomberg: ['Bloomberg Terminal (BETA function, bond yields)', 'https://www.bloomberg.com/professional/', 'direct', true],
   };
   const W = {
@@ -3901,13 +3900,13 @@ const DCFHelp = (() => {
       why: 'In Exit Multiple mode it sets the whole terminal value: TV = EBITDA₁₀ × multiple.',
       where: [['Industry multiples (free)', S.damEbitda, ['Find your industry and read the EV/EBITDA column. Data as of January 2026: Total Market 19.73× (positive-EBITDA firms), 16.95× without financials.', 'These are today\'s multiples, which include today\'s growth expectations; a company in year 10 is more mature.']],
         ['Peers (free)', S.yahoo, ['Statistics page of each peer: "Enterprise Value/EBITDA" (trailing). Record the date and whether it is trailing or forward.']],
-        ['Paid data', S.capiq, ['Trading comps and precedent transactions with consistent EBITDA definitions.']]],
+        ['Paid data', S.bloomberg, ['Trading comps and precedent transactions with consistent EBITDA definitions (Bloomberg, S&P Capital IQ or FactSet).']]],
       calc: { formula: 'EV/EBITDA = (equity value + debt + other claims − cash and nonoperating assets) ÷ EBITDA', vars: [['EV', 'Enterprise value, consistent with the claims subtracted in your equity bridge'], ['EBITDA', 'Trailing twelve months (or next year for a forward multiple)']], steps: ['Collect peers with the same definition and date.', 'Take the median and the range; do not average extremes.', 'Adjust down if peers grow faster than your year-10 company will.'] },
       example: 'Hypothetical peers: 9×, 11×, 12×, 14×: median 11.5×. Year-10 EBITDA 1,400: TV = 16,100.',
       forecast: ['Think about the multiple a mature version of the company would trade at, not today\'s.', 'Cross-check: the multiple implied by your Gordon value; and the growth rate implied by your multiple.'],
       scen: 'Can differ by scenario if the scenarios describe different end states. Keep each consistent with that scenario\'s growth and ROIC.',
       mistakes: ['Inventing a multiple without peers or a source', 'Forward multiple × trailing EBITDA', 'Peer EV that excludes leases while your bridge subtracts them'],
-      sources: [S.damEbitda, S.yahoo, S.capiq],
+      sources: [S.damEbitda, S.yahoo, S.bloomberg],
     },
     tcapex: {
       what: 'Original-workbook mode only: capital spending in the terminal year as a share of revenue. The corrected model uses reinvestment = g ÷ ROIC instead.',
