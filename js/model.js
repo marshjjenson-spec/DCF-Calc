@@ -58,12 +58,22 @@ const DCFModel = (() => {
     if (f.max !== null && v > f.max) return `Must be at most ${fmt(f.max)}.`;
     return null;
   }
+  // no debt in the WACC weights (corrected mode): debt is 0 and leases are 0 or excluded
+  function noDebt(model) { const I = model.inputs, ex = model.waccCfg && model.waccCfg.leases === 'exclude'; return model.mode !== 'workbook' && I.debt === 0 && (ex || I.leases === 0); }
+  // How a WACC input is treated: required, optional adjustment (0 is valid), not applicable, or calculated
+  const OPTIONAL_ADJ = ['scp', 'csrp'];
+  function inputStatus(f, model) {
+    if (!relevant(f, model)) return f.key === 'kd' ? 'na' : 'na';
+    if (OPTIONAL_ADJ.includes(f.key)) return 'optional';
+    return f.required ? 'required' : 'optional';
+  }
   // Fields that matter in a given mode
   function relevant(f, model, s) {
     if (f.key === 'we') return model.mode === 'workbook';
     if (f.key === 'tcapex') return model.mode === 'workbook';
     if (f.key === 'troic') return true;
     if (f.key === 'rev0') return model.mode === 'workbook';
+    if (f.key === 'kd') return !noDebt(model);
     if (f.key === 'exitMult') return !s || model.inputs.tvMethod[s] === 'Exit Multiple';
     return true;
   }
@@ -213,6 +223,7 @@ const DCFModel = (() => {
     const b = baseInfo(model);
     if (model.mode === 'corrected') out.rev0 = isNum(b.rev) && b.rev > 0 ? b.rev : null;
     out.stub = model.timing === 'dated' && isNum(b.stub) ? b.stub : 0;
+    out.leasesInWacc = !(model.waccCfg && model.waccCfg.leases === 'exclude');
     const d = dilution(model);
     if (d.method && d.method !== 'totals') { out.options = d.ok ? d.gross : null; out.treasury = d.ok ? d.buyback : null; }
     return { inp: out, invalid, dilution: d };
@@ -328,6 +339,6 @@ const DCFModel = (() => {
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { noDebt, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;

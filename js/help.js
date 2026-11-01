@@ -126,6 +126,104 @@ const DCFHelp = (() => {
     const v = h && h.example ? h.example() : null;
     return { company: c, verified: v };
   }
-  return { H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
+  // ---- WACC research guides ----
+  // src: [label, url, type, paid] — type: 'direct' (publishes the number), 'raw' (data you calculate from), 'method' (explains the method)
+  const S = {
+    treasury: ['U.S. Treasury: interest rate statistics (daily Treasury par yield curve)', 'https://home.treasury.gov/policy-issues/financing-the-government/interest-rate-statistics', 'direct'],
+    dgs10: ['FRED: 10-Year Treasury constant maturity (DGS10)', 'https://fred.stlouisfed.org/series/DGS10', 'direct'],
+    t10yie: ['FRED: 10-Year breakeven inflation (T10YIE)', 'https://fred.stlouisfed.org/series/T10YIE', 'direct'],
+    damHome: ['Damodaran Online (home page; implied ERP is updated at the start of each month)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/home.htm', 'direct'],
+    damData: ['Damodaran: current data sets (ERP, betas, ratings, country risk)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html', 'direct'],
+    damCtry: ['Damodaran: country risk premiums and ERP by country (updated each January and July)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html', 'direct'],
+    kroll: ['Kroll Cost of Capital resource center (recommended U.S. ERP and normalized risk-free rate)', 'https://www.kroll.com/en/insights/cost-of-capital', 'direct'],
+    krollTools: ['Kroll Cost of Capital Navigator (size premia, industry data; reached from the Kroll cost of capital page)', 'https://www.kroll.com/en/insights/cost-of-capital', 'direct', true],
+    yahoo: ['Yahoo Finance quote and statistics ("Beta (5Y Monthly)")', 'https://finance.yahoo.com/', 'direct'],
+    damBeta: ['Damodaran: U.S. industry betas (levered and unlevered)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/Betas.html', 'direct'],
+    damBetaG: ['Damodaran: global industry betas', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/BetasGlobal.html', 'direct'],
+    damRatings: ['Damodaran: synthetic ratings, interest coverage and default spreads', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.html', 'direct'],
+    finra: ['FINRA fixed income data (corporate bond prices and yields; search by issuer or CUSIP; may be delayed)', 'https://www.finra.org/finra-data/fixed-income', 'raw'],
+    edgar: ['SEC EDGAR full-text search (10-K and 10-Q notes)', 'https://www.sec.gov/edgar/search/', 'raw'],
+    bloomberg: ['Bloomberg Terminal (BETA function, bond yields)', 'https://www.bloomberg.com/professional/', 'direct', true],
+  };
+  const W = {
+    rf: {
+      quick: 'The return you can earn on a very low-credit-risk investment in the same currency as the cash flows. For a long-term DCF of US-dollar cash flows, the usual starting point is the yield on a long-term US Treasury.',
+      need: 'Required. Every DCF needs it: it is the base of the cost of equity and, in a synthetic cost of debt, of the borrowing rate. 0% is never right for a USD valuation.',
+      where: [['FRED (free)', S.dgs10, ['Open the DGS10 page.', 'Read the latest observation at the top: a percentage, e.g. 4.12, and its date.', 'Enter it in the risk-free rate (4.12 for 4.12%).', 'Record the observation date. FRED usually shows the previous business day: Treasury publishes after the close, and there is no observation on weekends and holidays.']],
+        ['U.S. Treasury (free)', S.treasury, ['Open "Daily Treasury Par Yield Curve Rates".', 'Find the row for your valuation date and the "10 Yr" column.', 'Copy that yield and record the date.']]],
+      calc: { formula: 'Risk-free rate = yield on a government bond in the cash-flow currency, maturity matched to the cash flows', vars: [['Yield', 'Published daily by Treasury; FRED republishes it as DGS10']], steps: ['No calculation if you copy the published yield.', 'Optional real rate: nominal yield − breakeven inflation (FRED T10YIE). Use it only if your cash flows are in real terms.'] },
+      example: 'Real figure: the U.S. Treasury daily par yield curve shows a 10-year yield of 4.94% on October 30, 2026, the last business day before November 1, 2026. Enter 4.94 and record "U.S. Treasury par yield curve, 10 Yr, 2026-10-30". Hypothetical real rate with 2.30% breakeven inflation: 4.94% − 2.30% = 2.64% (only for real cash flows).',
+      choose: ['The 10-year yield is a common choice because a 10-year forecast plus a terminal value is a long-duration claim. A 20- or 30-year yield matches the duration of the terminal value more closely; whichever you choose, use it consistently.', 'Use the currency of the cash flows, not the country of operations. A US-listed company reporting in dollars uses the US Treasury even if it sells worldwide.', 'Nominal cash flows (this model: revenue grows in dollars, including inflation) need a nominal rate. Mixing a nominal rate with real cash flows understates value.', 'Use the yield on the valuation date, and the same date as the share price.'],
+      scen: 'Normally the same in all three scenarios: it is a market observation on one date, not a forecast. Change it by scenario only for a stated reason, such as valuing a different date.',
+      mistakes: ['Using a 3-month T-bill rate for a long-term DCF', 'A yield from weeks before the share-price date', 'Typing 0.041 when the box expects 4.1', 'Using a foreign government yield for dollar cash flows', 'Treating terminal growth above the risk-free rate as normal'],
+      sources: [S.dgs10, S.treasury, S.t10yie, S.kroll],
+    },
+    erp: {
+      quick: 'The extra annual return investors require for holding stocks instead of a riskless bond. It is multiplied by beta in the cost of equity.',
+      need: 'Required. 0% would mean stocks need no more return than Treasuries, which no source supports.',
+      where: [['Damodaran (free)', S.damHome, ['Open the home page. The current implied ERP for the S&P 500 is shown near the top, updated at the start of each month.', 'Note which version you use: Damodaran publishes an implied ERP based on trailing cash yield and one adjusted for sustainable payout; say which.', 'Record the percentage and the date (e.g. "implied ERP, 1 Oct 2026").', 'Check it was calculated with a risk-free rate close to yours; if your rate is from a much later date, consider the next month\'s update.']],
+        ['Damodaran country table (free)', S.damCtry, ['Find the United States row and read the "Equity Risk Premium" column; note the "Last updated" date at the top.', 'That figure already includes the US country default spread, so do not add another country premium on top.']],
+        ['Kroll (free summary; full data paid)', S.kroll, ['Kroll publishes a recommended U.S. ERP together with the risk-free rate it should be paired with (sometimes a "normalized" rate). Use the pair together.']]],
+      calc: { formula: 'ERP = expected market return − risk-free rate', vars: [['Expected market return', 'Not observable. Implied ERP solves for the return that equates the index price to expected cash returned to investors'], ['Risk-free rate', 'The same Treasury yield used in the cost of equity']], steps: ['Historical ERP: average past stock return − average past bond return over a long period. Backward-looking and sensitive to the period chosen.', 'Implied ERP: from today\'s index level, expected dividends and buybacks and growth, solve for the discount rate, then subtract the risk-free rate. Forward-looking and changes month to month.'] },
+      example: 'Hypothetical: if investors expect 9% from the market and the risk-free rate is 4%, ERP = 9% − 4% = 5%. Real implied ERPs come from a valuation model of the index, not from a known future return. Real figure: Damodaran\'s country risk table, last updated January 5, 2026, shows an equity risk premium of 4.46% for the United States (rated Aa1, including a 0.23% country default spread).',
+      choose: ['Implied ERP reflects current prices; historical ERP reflects the past. Pick one and say which.', 'The implied ERP moves over time; it has been well outside any "typical" band in some years. Do not treat a fixed range as a rule.', 'Pair Kroll\'s ERP with Kroll\'s recommended risk-free rate, and Damodaran\'s with the current Treasury yield.', 'A US ERP fits a company whose risk is US-market risk. For operations in riskier countries, a country risk premium is a separate, explicit adjustment, not a silent switch to a different ERP.'],
+      scen: 'Normally the same in all scenarios. Use the operating forecast for Bear and Bull; changing the ERP by scenario mixes a market view into a company view.',
+      mistakes: ['Mixing a historical ERP with today\'s risk-free rate without noting it', 'Using a country-adjusted ERP and also adding a country risk premium (double-counting)', 'Copying an ERP several months old', 'Entering 0.05 when the box expects 5'],
+      sources: [S.damHome, S.damCtry, S.damData, S.kroll],
+    },
+    beta: {
+      quick: 'How strongly the stock\'s returns have moved with the market\'s. 1.0 means market-like sensitivity; 1.3 means the stock has tended to move about 1.3% for each 1% market move, under the method used. It is a statistical estimate from the past, not a prediction.',
+      need: 'Required. A beta of 0 would mean no market risk, which is not credible for an operating company.',
+      where: [['Method A: published beta (Yahoo Finance, free)', S.yahoo, ['Search the ticker and open the quote page (or "Statistics").', 'Find "Beta (5Y Monthly)": a regression of 60 monthly returns against the S&P 500.', 'Copy it and record "Yahoo Finance, 5-year monthly, date".', 'Published betas differ by method: Bloomberg\'s default is 2-year weekly and "adjusted" (0.67 × raw + 0.33); Yahoo\'s is 5-year monthly raw. They are different estimates, not interchangeable.']],
+        ['Method C: industry beta (Damodaran, free)', S.damBeta, ['Find the company\'s industry row.', 'Copy the "unlevered beta" (some tables also give one corrected for cash).', 'Re-lever it to the company\'s debt/equity with the calculator below.']]],
+      calc: { formula: 'Regression beta = Covariance(stock returns, market returns) ÷ Variance(market returns). Bottom-up: levered beta = unlevered beta × [1 + (1 − tax rate) × D/E]', vars: [['Stock and market returns', 'Same-period returns from adjusted (total-return) prices, aligned by date'], ['Unlevered beta', 'Business risk without financing leverage; industry average from Damodaran or your peer group'], ['Tax rate', 'Marginal tax rate'], ['D/E', 'Market value of debt ÷ market value of equity']], steps: ['Regression: collect 60 monthly adjusted closes for the stock and the index, turn them into returns, then covariance ÷ variance.', 'Bottom-up: take the industry unlevered beta, multiply by 1 + (1 − t) × D/E.'] },
+      example: 'Hypothetical bottom-up: unlevered beta 1.10, tax 25%, D/E 20%: 1.10 × [1 + (1 − 0.25) × 0.20] = 1.10 × 1.15 = 1.265.',
+      choose: ['Regression betas have wide error bands and change with the period and frequency. Industry (bottom-up) betas average many companies and are steadier.', 'Use a regression beta when the stock has a long, liquid trading history and the business has not changed much. Use bottom-up when the history is short, the company changed, or the regression looks unstable.', 'Do not pick the highest or lowest beta to steer the answer; say why the method fits.'],
+      scen: 'Normally the same across scenarios. A different beta is justified only if the scenario changes the business mix or financing (for example a Bear case with much more debt).',
+      mistakes: ['Mixing an adjusted beta from one provider with a raw beta from another without saying so', 'Using price returns instead of total returns for high-dividend stocks', 'Re-levering with book-value D/E', 'Using a regression over a period with a major acquisition or spin-off'],
+      sources: [S.yahoo, S.damBeta, S.damBetaG, S.bloomberg],
+    },
+    scp: {
+      quick: 'An optional extra return some practitioners add for smaller companies, based on evidence that small stocks earned more than CAPM predicted. Not every method uses one.',
+      need: 'Optional adjustment. 0% is a complete, valid answer, and the usual one for large and mega-cap companies under a conventional CAPM. There is no universal size threshold: size alone does not prove a premium is needed.',
+      where: [['Kroll (summary free; size-premium data paid)', S.krollTools, ['Kroll publishes size premia by size group (deciles of the market) in the Cost of Capital Navigator. Its groups are built from the CRSP market and its own ranking, not from the descriptive labels below.', 'Find the group that matches the company\'s market cap and read the premium, and record the edition and date.']], ['Kroll resource center', S.kroll, ['Explains the method and when Kroll recommends a size premium.']]],
+      calc: { formula: 'Market cap = share price × actual common shares outstanding', vars: [['Share price', 'Market data on the valuation date'], ['Actual shares', 'Cover page of the latest 10-Q or 10-K']], steps: ['Calculate market cap.', 'Decide whether a size premium is part of your method. If yes, read it from the dataset that defines the size groups you use.'] },
+      example: 'Hypothetical: a $1.5 billion company, using a size-premium dataset whose matching group shows 1.2%: enter 1.2 and cite the dataset and edition. A mega-cap like Amazon (about $2.6 trillion at a $240 price × 10,813 mm shares, a hypothetical price) normally uses 0%.',
+      choose: ['Descriptive market-cap labels (common usage, not size-premium groups): micro below about $300 mm, small $300 mm–$2 bn, mid $2–10 bn, large $10–200 bn, mega above $200 bn.', 'Kroll\'s size groups and premia come from its own data and change with each edition.', 'Academic evidence on the size effect is mixed; some analysts never add one.'],
+      scen: 'Normally the same across scenarios.',
+      mistakes: ['Adding a premium only because the market cap is under a round number', 'Using a size premium and a company-specific premium for the same risk', 'Using an old edition\'s premium'],
+      sources: [S.krollTools, S.kroll],
+    },
+    csrp: {
+      quick: 'An optional extra return for risks not captured elsewhere in the valuation. Its use is debated, because investors can diversify away risks that affect only one company.',
+      need: 'Optional adjustment. 0% is a complete, valid answer and the common choice in public-company DCFs. If you add one, document why the risk is not already in the cash flows.',
+      where: [['Company filings (free)', S.edgar, ['Read Item 1A "Risk Factors" in the latest 10-K and any updates in the 10-Q.', 'Read the "Commitments and Contingencies" note for litigation.', 'Read "Concentration" disclosures (major customers) in the notes.']]],
+      calc: { formula: 'No standard formula produces a company-specific premium.', vars: [], steps: ['List each risk with evidence.', 'Decide whether it is already in the forecast (lower cash flows, a probability-weighted scenario).', 'Decide whether it is systematic (moves with the market) or diversifiable.', 'Only a documented, unmodelled, non-diversifiable risk supports a premium. Record the reasoning in the worksheet below.'] },
+      example: 'Hypothetical: a company earns 45% of revenue from one customer whose contract expires next year, and the forecast assumes renewal. If you prefer to keep the cash flows as-is, you might add a premium and record why; or, better, model a non-renewal case in the Bear scenario and keep 0%.',
+      choose: ['Model a risk in the cash flows where you can (it is visible and testable).', 'Use a premium only for risks you cannot model and investors cannot diversify.', 'Private-company valuations use premiums more often than public ones.'],
+      scen: 'Normally the same across scenarios. If the Bear scenario already models the risk in cash flows, do not also raise its discount rate for the same risk.',
+      mistakes: ['Adding a premium for a lawsuit already modelled in the cash flows', 'Using a premium to reach a target value', 'Treating a range as an objective standard'],
+      sources: [S.edgar],
+    },
+    kd: {
+      quick: 'The rate the company would pay to borrow today. It is not necessarily its old coupons or its accounting interest expense divided by debt.',
+      need: 'Required when the company has debt in the capital structure. If debt and leases in the weights are zero, the debt weight is 0% and no borrowing rate is needed.',
+      where: [['Method A: the company\'s bonds', S.edgar, ['Open the latest 10-K or 10-Q and find the Debt (or Long-Term Debt) note.', 'List each issue: principal, coupon, maturity; note CUSIPs where disclosed.', 'Look up recent yields for those bonds (FRED/Treasury for the matching Treasury; FINRA for corporate bonds).', 'Use yield to maturity, not the coupon. Weight across issues (calculator below).']], ['FINRA bond data (free; may be delayed)', S.finra, ['Search the issuer name or CUSIP, open a bond, read the last trade yield and date. Thinly traded bonds may have stale or no trades.']], ['Method B: synthetic spread (Damodaran, free)', S.damRatings, ['Calculate interest coverage = EBIT ÷ interest expense.', 'Read the rating and default spread that the table maps to that coverage (large or small firm table).', 'Pre-tax cost of debt = risk-free rate + spread. If the company has an actual credit rating, use the spread for that rating.']]],
+      calc: { formula: 'Weighted cost of debt = Σ (amount × yield) ÷ Σ amount. Synthetic: risk-free rate + credit spread. Cross-check: interest expense ÷ average interest-bearing debt', vars: [['Amount', 'Market value of each issue if prices are available; face value is a simplification'], ['Yield', 'Yield to maturity from recent trades'], ['Credit spread', 'From the actual rating, or a synthetic rating from interest coverage'], ['Interest expense, debt', 'Income statement and balance sheet']], steps: ['See the calculators below.'] },
+      example: 'Hypothetical: Bond A $1 bn at 4.5%, Bond B $2 bn at 5.5%: (1 × 4.5% + 2 × 5.5%) ÷ 3 = 5.17%. Synthetic: risk-free 4.0% + spread 1.1% = 5.1%.',
+      choose: ['Traded yields are best when the bonds trade regularly. Use a synthetic spread when they do not.', 'Interest expense ÷ debt is a historical cross-check: it reflects old fixed coupons, not today\'s rate.', 'Floating-rate loans reprice; fixed-rate bonds do not. Long and short maturities have different yields.', 'Lease liabilities are not bonds: do not take a borrowing rate from lease discount rates without saying so.'],
+      scen: 'Normally the same across scenarios unless a scenario changes the company\'s credit quality or financing.',
+      mistakes: ['Using the coupon instead of the yield', 'Using interest expense ÷ debt as the current rate', 'Ignoring that the after-tax rate is used in WACC', 'Forcing a borrowing rate onto a company with no debt'],
+      sources: [S.edgar, S.finra, S.damRatings, S.dgs10, S.bloomberg],
+    },
+    we: {
+      quick: 'The share of the company\'s financing that is equity. Original-workbook mode only: the corrected model calculates it from market values.',
+      need: 'Only in original-workbook mode.',
+      where: [['Calculated', S.edgar, ['Market value of equity = price × shares; debt from the balance sheet and debt note.']]],
+      calc: { formula: 'Equity weight = E ÷ (E + D)', vars: [['E', 'Market value of equity'], ['D', 'Market value of debt (and leases, if included)']], steps: [] },
+      example: 'Hypothetical: E = 800, D = 200: 800 ÷ 1,000 = 80%.', choose: ['Use market values, or a target structure for a company that is changing its financing.'], scen: 'Normally the same across scenarios.', mistakes: ['Book values'], sources: [S.edgar],
+    },
+  };
+  return { W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
 })();
 if (typeof module !== 'undefined') module.exports = DCFHelp;

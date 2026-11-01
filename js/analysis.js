@@ -196,6 +196,85 @@ const DCFAnalysis = (() => {
     return SC.map(s => { const r = all.scen[s]; if (!r || !r.ok) return { s, ok: false }; const Y = r.years; return { s, ok: true, rev1: Y[0].rev, rev5: Y[4].rev, rev10: Y[9].rev, ebit1: Y[0].ebit, ebit10: Y[9].ebit, fcf1: Y[0].fcff, fcf10: Y[9].fcff, ev: r.ev, perShare: r.perShare, upside: r.upside, tvShare: r.tvShare }; });
   }
 
-  return { ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
+  // ---- WACC calculators (read-only; results are copied into inputs only by an explicit click) ----
+  // Prices: [{date:'YYYY-MM-DD', close:number}] adjusted closes. Returns are aligned on dates both series have.
+  function parsePrices(text) {
+    const out = [], bad = [];
+    String(text || '').split(/\r?\n/).forEach((line, i) => {
+      const t = line.trim(); if (!t) return;
+      const c = t.split(/[,;\t]/).map(x => x.trim().replace(/^"|"$/g, ''));
+      if (c.length < 2) { bad.push(i + 1); return; }
+      const d = c[0], v = Number(c[c.length - 1].replace(/[$,]/g, ''));
+      const ds = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : (() => { const x = new Date(d); return isNaN(x) ? null : x.toISOString().slice(0, 10); })();
+      if (!ds || !isNum(v) || v <= 0) { if (i > 0 || !/date/i.test(t)) bad.push(i + 1); return; }
+      out.push({ date: ds, close: v });
+    });
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return { prices: out, badLines: bad };
+  }
+  function regressionBeta(stock, market, opts = {}) {
+    const S = new Map(stock.map(p => [p.date, p.close])), M = new Map(market.map(p => [p.date, p.close]));
+    const dates = stock.map(p => p.date).filter(d => M.has(d));
+    const warn = [];
+    const dropped = stock.length + market.length - 2 * dates.length;
+    if (dropped > 0) warn.push(`${dropped} observation${dropped > 1 ? 's' : ''} had no matching date in the other series and ${dropped > 1 ? 'were' : 'was'} left out.`);
+    const rs = [], rm = [];
+    for (let i = 1; i < dates.length; i++) {
+      const a = S.get(dates[i]) / S.get(dates[i - 1]) - 1, b = M.get(dates[i]) / M.get(dates[i - 1]) - 1;
+      rs.push(a); rm.push(b);
+      if (Math.abs(a) > 0.4) warn.push(`Stock return of ${(a * 100).toFixed(0)}% ending ${dates[i]}: check for a split or other corporate action in an unadjusted price series.`);
+    }
+    const n = rs.length;
+    if (n < 3) return { ok: false, n, warn: warn.concat('Need at least four matching dates.') };
+    const ms = mean(rs), mm = mean(rm);
+    let cov = 0, vm = 0, vs = 0;
+    for (let i = 0; i < n; i++) { cov += (rs[i] - ms) * (rm[i] - mm); vm += (rm[i] - mm) ** 2; vs += (rs[i] - ms) ** 2; }
+    cov /= (n - 1); vm /= (n - 1); vs /= (n - 1);
+    if (!(vm > 0)) return { ok: false, n, warn: warn.concat('The market series does not vary.') };
+    const beta = cov / vm, r2 = (cov * cov) / (vm * vs);
+    const alpha = ms - beta * mm;
+    let sse = 0; for (let i = 0; i < n; i++) sse += (rs[i] - alpha - beta * rm[i]) ** 2;
+    const se = n > 2 ? Math.sqrt(sse / (n - 2) / (vm * (n - 1))) : null;
+    if (n < 24) warn.push(`Only ${n} returns: the estimate is imprecise. 60 monthly or 104 weekly returns are common choices.`);
+    // stability: compare the two halves
+    let halves = null;
+    if (n >= 20) { const h = Math.floor(n / 2); const b1 = regressionBeta(dates.slice(0, h + 1).map(d => ({ date: d, close: S.get(d) })), dates.slice(0, h + 1).map(d => ({ date: d, close: M.get(d) }))), b2 = regressionBeta(dates.slice(h).map(d => ({ date: d, close: S.get(d) })), dates.slice(h).map(d => ({ date: d, close: M.get(d) }))); if (b1.ok && b2.ok) { halves = [b1.beta, b2.beta]; if (Math.abs(b1.beta - b2.beta) > 0.4) warn.push(`Beta was ${b1.beta.toFixed(2)} in the first half of the period and ${b2.beta.toFixed(2)} in the second: unstable.`); } }
+    return { ok: true, beta, adjusted: 0.67 * beta + 0.33, r2, se, n, from: dates[0], to: dates[dates.length - 1], cov, varM: vm, halves, warn };
+  }
+  const relever = (bu, t, de) => [bu, t, de].every(isNum) ? bu * (1 + (1 - t) * de) : null;
+  const unlever = (bl, t, de) => [bl, t, de].every(isNum) ? bl / (1 + (1 - t) * de) : null;
+  function weightedKd(tranches) {
+    const ok = (tranches || []).filter(x => isNum(x.amt) && x.amt > 0 && isNum(x.y));
+    const tot = ok.reduce((a, x) => a + x.amt, 0);
+    return ok.length ? { kd: ok.reduce((a, x) => a + x.amt * x.y, 0) / tot, total: tot, n: ok.length } : null;
+  }
+  const coverage = (ebit, interest) => isNum(ebit) && isNum(interest) && interest > 0 ? ebit / interest : null;
+  const histRate = (interest, d0, d1) => isNum(interest) && isNum(d0) && isNum(d1) && d0 + d1 > 0 ? interest / ((d0 + d1) / 2) : null;
+  // descriptive market-cap labels in common use (not size-premium groups)
+  function sizeLabel(mcap) {
+    if (!isNum(mcap)) return null;
+    return mcap < 300 ? 'Micro-cap' : mcap < 2000 ? 'Small-cap' : mcap < 10000 ? 'Mid-cap' : mcap < 200000 ? 'Large-cap' : 'Mega-cap';
+  }
+  // live WACC parts for one scenario, from the model's own inputs
+  function waccParts(model, s) {
+    const { inp } = mdl().engineInputs(model);
+    const v = k => inp[k] && typeof inp[k] === 'object' ? inp[k][s] : inp[k];
+    const okKe = ['rf', 'beta', 'erp', 'scp', 'csrp'].every(k => isNum(v(k)));
+    const ke = okKe ? v('rf') + v('beta') * v('erp') + v('scp') + v('csrp') : null;
+    const shares = [inp.basic, inp.options, inp.treasury].every(isNum) ? inp.basic + inp.options - inp.treasury : null;
+    const E = isNum(shares) && isNum(inp.price) ? shares * inp.price : null;
+    const L = inp.leasesInWacc === false ? 0 : inp.leases;
+    const D = inp.debt;
+    const wb = model.mode === 'workbook';
+    const we = wb ? v('we') : (isNum(E) && isNum(D) && isNum(L) ? E / (E + D + L) : null);
+    const wd = isNum(we) ? 1 - we : null;
+    const kd = v('kd'), tax = v('tax');
+    const kdAT = isNum(kd) && isNum(tax) ? kd * (1 - tax) : null;
+    const debtPart = isNum(wd) ? (wd > 0 ? (isNum(kdAT) ? wd * kdAT : null) : 0) : null;
+    const wacc = isNum(ke) && isNum(we) && isNum(debtPart) ? we * ke + debtPart : null;
+    return { s, rf: v('rf'), beta: v('beta'), erp: v('erp'), scp: v('scp'), csrp: v('csrp'), ke, kd, tax, kdAT, E, D, L, leasesIn: inp.leasesInWacc !== false, shares, price: inp.price, we, wd, wacc, wbMode: wb, sum: isNum(we) ? we + wd : null };
+  }
+
+  return { parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFAnalysis;

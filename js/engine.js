@@ -11,6 +11,8 @@ const DCF = (() => {
   function required(inp, s, mode) {
     const tri = ['g1','g2','g3','em1','em5','em10','da','tax','nol','capex1','capex2','capex3','nwc','acq','s2c','rf','erp','beta','scp','csrp','kd','tg','tem','tvMethod'];
     if (mode === 'workbook') tri.push('we','tcapex'); else tri.push('troic');
+    // no debt (and no leases counted) in the weights: the debt weight is 0, so no borrowing rate is needed
+    if (mode !== 'workbook' && isNum(inp.debt) && inp.debt === 0 && (inp.leasesInWacc === false || (isNum(inp.leases) && inp.leases === 0))) tri.splice(tri.indexOf('kd'), 1);
     if (inp.tvMethod && inp.tvMethod[s] === 'Exit Multiple') tri.push('exitMult');
     return { tri, single: SINGLE.slice() };
   }
@@ -23,13 +25,16 @@ const DCF = (() => {
   function wacc(inp, s, mode) {
     const v = k => inp[k][s];
     const ke = v('rf') + v('beta') * v('erp') + v('scp') + v('csrp');
-    const kdAT = v('kd') * (1 - v('tax'));
+    const kdAT = isNum(v('kd')) ? v('kd') * (1 - v('tax')) : null;
     const shares = inp.basic + inp.options - inp.treasury;
     const mcap = shares * inp.price;
+    // operating leases count as debt in the weights unless the analyst excludes them (inp.leasesInWacc === false)
+    const L = inp.leasesInWacc === false ? 0 : inp.leases;
     let we;
     if (mode === 'workbook') we = v('we');
-    else we = mcap / (mcap + inp.debt + inp.leases);
-    return { ke, kdAT, we, wd: 1 - we, wacc: ke * we + kdAT * (1 - we), mcap, shares };
+    else we = mcap / (mcap + inp.debt + L);
+    const wd = 1 - we;
+    return { ke, kdAT, we, wd, wacc: ke * we + (wd > 0 ? kdAT * wd : 0), mcap, shares, debtW: mode === 'workbook' ? null : inp.debt, leasesW: mode === 'workbook' ? null : L };
   }
   // run one scenario. ov = optional overrides {wacc, tg, exitMult, tvMethod}
   function run(inp, s, mode = 'corrected', ov = {}) {

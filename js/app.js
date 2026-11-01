@@ -332,7 +332,8 @@
   // ---------- field rendering ----------
   function tagsFor(f, extra = '') {
     const t = [];
-    if (f.required && DCFModel.relevant(f, cur)) t.push('<span class="tag req">Required</span>');
+    if (f.group === 'wacc') { const st = DCFModel.inputStatus(f, cur); if (st === 'required') t.push('<span class="tag req">Required</span>'); else if (f.key !== 'we' || cur.mode === 'workbook') t.push(waccStatusTag(f)); }
+    else if (f.required && DCFModel.relevant(f, cur)) t.push('<span class="tag req">Required</span>');
     t.push(`<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span>`);
     t.push(`<span class="tag">${UNIT_TXT[f.unit]}</span>`);
     const pv = f.tri ? null : provOf(f.key, f.key.startsWith('company.') ? cur.inputs.company[f.key.split('.')[1]] : cur.inputs[f.key]);
@@ -386,7 +387,7 @@
       let note = '';
       if (f.key === 'exitMult') note = 'Needed only for scenarios that use Exit Multiple.';
       if (!rel && f.key !== 'exitMult') note = 'Not used by the current method.';
-      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : '');
+      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : '');
       else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}`;
     });
     // calculated rows for some groups
@@ -744,12 +745,12 @@
   // ---------- research notes ----------
   const NOTE_FIELDS = [['assumption', 'My assumption', 'text'], ['why', 'Why I chose it', 'area'], ['calc', 'Supporting calculations', 'area'], ['evidence', 'Evidence (one link per line)', 'area'], ['risks', 'Risks to this assumption', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
   let noteSaved = {};
-  function notesHtml(key) {
+  function notesHtml(key, NF = NOTE_FIELDS) {
     const N = (cur.notes && cur.notes[key]) || {};
     return `<div class="notes">${SC.map(s => { const n = N[s] || {}; const id = f => `nt-${key}-${s}-${f}`;
       const ctl = ([f, l, t]) => t === 'area' ? `<label>${l}<textarea rows="2" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}">${esc(n[f] || '')}</textarea></label>` : t === 'conf' ? `<label>${l}<select data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}"><option value="">Not set</option>${['Low', 'Medium', 'High'].map(o => `<option ${n[f] === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>` : `<label>${l}<input type="${t === 'date' ? 'date' : 'text'}" class="txt" data-t="note" data-k="${key}" data-s="${s}" data-f="${f}" id="${id(f)}" value="${esc(n[f] || '')}"></label>`;
-      const ev = String(n.evidence || '').split(/\n+/).map(x => x.trim()).filter(x => /^https?:\/\//i.test(x));
-      return `<fieldset><legend>${s}${n.saved ? ` <span class="saved" title="Saved ${esc(new Date(n.saved).toLocaleString())}">✓ saved</span>` : ''}</legend>${NOTE_FIELDS.map(ctl).join('')}${ev.length ? `<div class="evl">${ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').slice(0, 48))}</a>`).join('')}</div>` : ''}</fieldset>`; }).join('')}</div>`;
+      const ev = String((n.evidence || '') + '\n' + (n.url || '')).split(/\n+/).map(x => x.trim()).filter(x => /^https?:\/\//i.test(x));
+      return `<fieldset><legend>${s}${n.saved ? ` <span class="saved" title="Saved ${esc(new Date(n.saved).toLocaleString())}">✓ saved</span>` : ''}</legend>${NF.map(ctl).join('')}${ev.length ? `<div class="evl">${ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').slice(0, 48))}</a>`).join('')}</div>` : ''}</fieldset>`; }).join('')}</div>`;
   }
   const hasNotes = key => cur.notes && cur.notes[key] && SC.some(s => cur.notes[key][s] && Object.entries(cur.notes[key][s]).some(([k, v]) => k !== 'saved' && v));
   // inline guide under each forecast input
@@ -835,6 +836,201 @@
       <tr><td>Your probability</td>${SC.map(s => `<td class="num">${isNum(cur.inputs.prob[s]) ? fmt.pct(cur.inputs.prob[s]) : '<span class="na">not set</span>'}</td>`).join('')}</tr></tbody></table></div></section>`;
   }
 
+  // ---------- WACC research guides, calculators and worksheets ----------
+  const WACC_KEYS = ['rf', 'erp', 'beta', 'scp', 'csrp', 'kd', 'we'];
+  const WNOTE_FIELDS = [['selected', 'Selected input', 'text'], ['url', 'Source URL', 'text'], ['pubDate', 'Source publication date', 'date'], ['figures', 'Underlying figures', 'area'], ['calc', 'Calculation', 'area'], ['why', 'My reasoning', 'area'], ['limits', 'Limitations', 'area'], ['alts', 'Alternative estimates considered', 'area'], ['confidence', 'Confidence', 'conf']];
+  const SRC_TYPE = { direct: 'Publishes the number', raw: 'Data to calculate from', method: 'Explains the method' };
+  const srcLink = x => `<a href="${esc(x[1])}" target="_blank" rel="noopener">${esc(x[0])}</a> <span class="stype">${SRC_TYPE[x[2]]}${x[3] ? ' · subscription' : ' · free'}</span>`;
+  // company-specific links that follow a fixed, public pattern
+  function companyLinks(key) {
+    const t = (cur.inputs.company.ticker || (cur.meta && cur.meta.symbol) || '').split(/[\s/:]/)[0].toUpperCase(), cik = cur.meta && cur.meta.cik;
+    const out = [];
+    if (key === 'beta' && /^[A-Z.\-]{1,6}$/.test(t)) out.push([`Yahoo Finance statistics for ${t} (look for "Beta (5Y Monthly)")`, `https://finance.yahoo.com/quote/${encodeURIComponent(t)}/key-statistics/`, 'direct']);
+    if ((key === 'kd' || key === 'csrp') && cik) out.push([`${cur.inputs.company.name || 'This company'}: filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw']);
+    if (key === 'kd' && cik) out.push(['Search its filings for "senior notes"', DCFHelp.edgarSearch('senior notes', cik), 'raw']);
+    if (key === 'csrp' && cik) out.push(['Search its filings for "Risk Factors"', DCFHelp.edgarSearch('Risk Factors', cik), 'raw']);
+    return out;
+  }
+  function waccStatusTag(f) {
+    const st = DCFModel.inputStatus(f, cur);
+    if (st === 'na') return `<span class="tag" title="${f.key === 'kd' ? 'No debt is counted in the weights, so no borrowing rate is needed' : 'Not used by the current method'}">Not applicable</span>`;
+    if (st === 'optional') return '<span class="tag opt" title="0% is a valid, complete answer">Optional adjustment · 0% is valid</span>';
+    return '';
+  }
+  function waccSections(key, compact) {
+    const w = DCFHelp.W[key]; if (!w) return '';
+    const sec = (id, t, body, open) => `<details class="dsec2" data-aid="w-${key}-${id}${compact ? '-i' : ''}" ${open || aidOpen[`w-${key}-${id}${compact ? '-i' : ''}`] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+    const where = w.where.map(([h, src, steps]) => `<div class="wstep"><b>${esc(h)}</b> ${srcLink(src)}<ol>${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`).join('');
+    const co = companyLinks(key);
+    const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}${w.calc.steps.length ? `<ol>${w.calc.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}`;
+    return `<p class="wquick">${esc(w.quick)}</p>
+      ${sec('need', 'Do I need this?', `<p>${esc(w.need)}</p>`)}
+      ${sec('where', 'Where to find it', where + (co.length ? `<div class="wstep"><b>For ${esc(cur.inputs.company.name || 'this company')}</b><ul>${co.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul></div>` : ''))}
+      ${sec('calc', 'Calculate it', calcB)}
+      ${sec('ex', 'Worked example', `<p>${esc(w.example)}</p>`)}
+      ${sec('choose', 'How to choose', `<ul>${w.choose.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`)}
+      ${sec('scen', 'Bear, Base and Bull', `<p>${esc(w.scen)}</p><p class="footnote">Your values: ${SC.map(x => `${x} ${fmtVal(key, cur.inputs[key][x])}`).join(' · ')}</p>`)}
+      ${sec('mist', 'Common mistakes', `<ul>${w.mistakes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`)}
+      ${sec('src', 'Sources', `<ul>${w.sources.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
+      ${sec('notes', 'My research notes' + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, WNOTE_FIELDS))}`;
+  }
+  function waccAidRow(f) {
+    if (cur.ui && cur.ui.learn === false) return '';
+    if (!DCFHelp.W[f.key]) return '';
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${waccSections(f.key, true)}
+      ${f.key === 'scp' || f.key === 'csrp' ? `<div class="btns"><button class="btn tiny" data-zero-fill="${f.key}">Set empty scenarios to 0% (no premium)</button></div>` : ''}</details></div>`;
+  }
+  // tool state
+  function wt() { cur.waccTools = cur.waccTools || {}; const T = cur.waccTools; T.rf = T.rf || {}; T.erp = T.erp || {}; T.beta = T.beta || {}; T.beta.pub = T.beta.pub || {}; T.beta.alt = T.beta.alt || {}; T.beta.ind = T.beta.ind || {}; T.beta.reg = T.beta.reg || { bench: 'S&P 500 total return', freq: 'Monthly', look: '5 years', kind: 'raw' }; T.risks = T.risks || [{}, {}, {}]; T.kd = T.kd || {}; T.kd.tr = T.kd.tr || [{}, {}, {}, {}, {}, {}]; return T; }
+  const wtIn = (path, unit, label, ph = 'Enter') => {
+    const id = 'wt-' + path.replace(/\./g, '-'), v = path.split('.').reduce((o, k) => o == null ? o : o[k], wt());
+    if (unit === 'area') return `<textarea data-t="wt" data-k="${path}" data-unit="text" id="${id}" rows="4" placeholder="${esc(ph)}" aria-label="${esc(label)}">${esc(v || '')}</textarea>`;
+    if (unit === 'text' || unit === 'date') return `<input type="${unit === 'date' ? 'date' : 'text'}" class="txt" data-t="wt" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}">`;
+    if (Array.isArray(unit)) return `<select data-t="wt" data-k="${path}" data-unit="choice" id="${id}" aria-label="${esc(label)}"><option value="">Choose…</option>${unit.map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    return `<div class="inwrap"><input type="text" inputmode="decimal" data-t="wt" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${esc(ph)}" aria-label="${esc(label)}"><span class="unit">${unit === 'pct' ? '%' : unit === 'usd_mm' ? '$mm' : unit === 'x' ? '×' : ''}</span></div>${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`;
+  };
+  // "use" buttons: fill one scenario or all; replacing a value you entered needs a second click
+  let wUse = null;
+  const useBtns = (key, v, label, note) => isNum(v) ? `<span class="usegrp">${SC.map(x => `<button class="btn tiny" data-wuse="${key}" data-v="${v}" data-scope="${x}" data-note="${esc(note || '')}">${x}</button>`).join('')}<button class="btn tiny" data-wuse="${key}" data-v="${v}" data-scope="all" data-note="${esc(note || '')}">All three</button> <span class="footnote">use ${esc(label)}</span></span>` : '';
+  function wUseConfirm() {
+    if (!wUse) return '';
+    return `<div class="notice confirmbar" role="alert"><b>Replace your values?</b> ${esc(wUse.text)} <button class="btn primary tiny" data-wuse-yes>Replace</button><button class="btn tiny" data-wuse-no>Cancel</button></div>`;
+  }
+  function waccLivePanel() {
+    const P = SC.map(s => DCFAnalysis.waccParts(cur, s));
+    const p = (v, d = 2) => isNum(v) ? (v * 100).toFixed(d) + '%' : '<span class="na">—</span>';
+    const x = v => isNum(v) ? v.toFixed(2) : '<span class="na">—</span>';
+    const L = cur.waccCfg && cur.waccCfg.leases === 'exclude' ? 'exclude' : 'include';
+    const diff = P.every(q => isNum(q.wacc)) && new Set(P.map(q => q.wacc.toFixed(6))).size > 1;
+    const col = q => `<div class="wlive"><h3>${q.s}</h3>
+      <div class="formula">Cost of equity = ${p(q.rf)} + ${x(q.beta)} × ${p(q.erp)} + ${p(q.scp)} + ${p(q.csrp)} = <b>${p(q.ke)}</b></div>
+      <div class="formula">After-tax cost of debt = ${p(q.kd)} × (1 − ${p(q.tax, 1)}) = <b>${q.wd === 0 ? 'not needed (no debt)' : p(q.kdAT)}</b></div>
+      <div class="formula">WACC = ${p(q.we, 1)} × ${p(q.ke)} + ${p(q.wd, 1)} × ${q.wd === 0 ? '0' : p(q.kdAT)} = <b>${p(q.wacc)}</b></div></div>`;
+    const q = P[0];
+    return `<section class="panel" id="wacc-live"><div class="panel-head"><h2>Your WACC, built from your inputs</h2><span class="footnote">Live: these formulas use the values in the table above.</span></div>
+      <div class="wlives">${P.map(col).join('')}</div>
+      <h3 class="sub-h">Capital structure weights (market values)</h3>
+      ${cur.mode === 'workbook' ? '<p class="footnote">Original-workbook mode: the equity weight is typed in the table above.</p>' : `<div class="tbl-wrap"><table class="fin"><tbody>
+        <tr><td>Market value of equity (E) = diluted shares ${isNum(q.shares) ? nf(q.shares, 1) : '—'} mm × price ${isNum(q.price) ? '$' + q.price.toFixed(2) : '—'}</td><td class="num">${fmt.mm(q.E)}</td></tr>
+        <tr><td>Debt (D): total debt from the bridge, at book value as a stand-in for market value</td><td class="num">${fmt.mm(q.D)}</td></tr>
+        <tr><td>Operating lease liabilities <select id="wacc-leases" aria-label="Lease treatment"><option value="include" ${L === 'include' ? 'selected' : ''}>counted as debt in the weights</option><option value="exclude" ${L === 'exclude' ? 'selected' : ''}>not counted in the weights</option></select></td><td class="num">${L === 'include' ? fmt.mm(cur.inputs.leases) : '<span class="na">excluded</span>'}</td></tr>
+        <tr class="total"><td>Equity weight E ÷ (E + D${L === 'include' ? ' + leases' : ''})</td><td class="num">${p(q.we, 1)}</td></tr>
+        <tr class="total"><td>Debt weight</td><td class="num">${p(q.wd, 1)}</td></tr>
+        <tr class="sub"><td>Check: weights add to 100%</td><td class="num">${isNum(q.sum) ? `<span class="pill ${Math.abs(q.sum - 1) < 1e-9 ? 'good' : 'bad'}">${(q.sum * 100).toFixed(1)}%</span>` : '—'}</td></tr></tbody></table></div>
+        <p class="footnote">Keep the lease choice consistent: operating leases are subtracted in the equity bridge, and under US GAAP lease cost sits inside operating expenses (and EBITDA). Counting leases as debt in the weights while leaving lease cost in the cash flows is the model's existing treatment; choose "not counted" if you treat them only in the bridge. Either way, say which in your notes.</p>
+        <p class="footnote">Market value of equity uses diluted shares, as the engine does. Tax in the after-tax cost of debt is each scenario's forecast tax rate; interest saves tax at the marginal rate only if the company has enough taxable income and the deduction is not limited.</p>`}
+      <h3 class="sub-h">Scenarios</h3><p class="footnote">${diff ? `Your WACCs differ by scenario (${P.map(q => q.s + ' ' + p(q.wacc)).join(', ')}). That is fine if financing, market risk or capital structure differ between the scenarios; if the difference is only there to widen the range, the same risk is being counted in both the cash flows and the discount rate.` : 'The same discount rate in all three scenarios is normal: the scenarios differ in their cash flows. Use different rates only when financing, market risk or capital structure differ.'}</p>
+      <p class="footnote">WACC discounts free cash flow to the firm (before interest), as this model does. Cash flow to equity would need the cost of equity instead.</p></section>`;
+  }
+  function waccToolsHtml() {
+    const T = wt(), s = cur.active, I = cur.inputs;
+    const P = DCFAnalysis.waccParts(cur, s);
+    const de = isNum(P.E) && P.E > 0 && isNum(P.D) ? (P.D + (P.leasesIn && isNum(P.L) ? P.L : 0)) / P.E : null;
+    const det = (id, title, sub, body) => `<details class="panel tool" data-aid="wt-${id}" ${aidOpen['wt-' + id] ? 'open' : ''}><summary><b>${title}</b> <span class="footnote">${sub}</span></summary>${body}</details>`;
+    // risk-free
+    const rf = T.rf;
+    const rfB = `<p>${srcLink(DCFHelp.S.dgs10)}<br>${srcLink(DCFHelp.S.treasury)}</p>
+      <div class="btns"><button class="btn" data-rf-fetch>Find latest Treasury rate</button><span class="footnote" id="rf-status">${esc(rfStatus || '')}</span></div>
+      <div class="tgrid"><label>10-year yield ${wtIn('rf.v', 'pct', '10-year yield')}</label><label>Observation date ${wtIn('rf.date', 'date', 'Observation date')}</label><label>Source ${wtIn('rf.src', 'text', 'Source', 'e.g. FRED DGS10')}</label></div>
+      ${isNum(rf.v) ? `<p>${esc(rf.src || 'Source not noted')}, ${esc(rf.date || 'date not noted')}: <b>${(rf.v * 100).toFixed(2)}%</b>. ${useBtns('rf', rf.v, (rf.v * 100).toFixed(2) + '%', `${rf.src || 'Treasury yield'}, ${rf.date || ''}`)}</p>` : ''}
+      <p class="footnote">The latest observation is usually the previous business day. Nothing is filled in until you click a scenario button, and a value you typed is only replaced after you confirm.</p>`;
+    // ERP
+    const erpB = `<p>${srcLink(DCFHelp.S.damHome)}<br>${srcLink(DCFHelp.S.kroll)}</p>
+      <div class="tgrid"><label>Published ERP ${wtIn('erp.v', 'pct', 'Published ERP')}</label><label>Date ${wtIn('erp.date', 'date', 'ERP date')}</label><label>Source ${wtIn('erp.src', ['Damodaran implied ERP (trailing cash yield)', 'Damodaran implied ERP (normalized / sustainable payout)', 'Kroll recommended U.S. ERP', 'Historical ERP (long-run average)', 'Country-adjusted ERP', 'Other'], 'ERP source')}</label><label>Method notes ${wtIn('erp.method', 'text', 'Method', 'e.g. paired with a 4.2% risk-free rate')}</label></div>
+      <p>Alternative estimate (optional): ${wtIn('erp.alt', 'pct', 'Alternative ERP')} ${wtIn('erp.altSrc', 'text', 'Alternative source', 'source')}</p>
+      ${isNum(T.erp.v) ? `<p><b>${(T.erp.v * 100).toFixed(2)}%</b> · ${esc(T.erp.src || 'source not chosen')}${T.erp.date ? ', ' + esc(T.erp.date) : ''}. ${useBtns('erp', T.erp.v, (T.erp.v * 100).toFixed(2) + '%', `${T.erp.src || 'ERP'} ${T.erp.date || ''} ${T.erp.method || ''}`)}</p>` : ''}
+      ${/Country/.test(T.erp.src || '') && SC.some(x => isNum(cur.wb.crp) && cur.wb.crp > 0) ? '<div class="notice bad">A country-adjusted ERP plus a separate country risk premium counts country risk twice.</div>' : ''}
+      <p class="footnote">Switching between implied, historical and country-adjusted premiums changes the answer; the calculator never switches for you.</p>`;
+    // beta
+    const B = T.beta, reg = (() => { const a = DCFAnalysis.parsePrices(B.reg.stock), b = DCFAnalysis.parsePrices(B.reg.mkt); return a.prices.length && b.prices.length ? Object.assign(DCFAnalysis.regressionBeta(a.prices, b.prices), { badS: a.badLines, badM: b.badLines }) : null; })();
+    const regV = reg && reg.ok ? (B.reg.kind === 'adjusted' ? reg.adjusted : reg.beta) : null;
+    const tM = isNum(B.ind.t) ? B.ind.t : null;
+    const bu = DCFAnalysis.relever(B.ind.bu, tM, isNum(B.ind.de) ? B.ind.de : de);
+    const cmp = [['pub', 'Published regression beta', B.pub.v, `${B.pub.prov || 'provider not noted'}${B.pub.method ? ', ' + B.pub.method : ''}`], ['alt', 'Alternative published beta', B.alt.v, `${B.alt.prov || ''}${B.alt.method ? ', ' + B.alt.method : ''}`], ['reg', 'Your regression beta' + (B.reg.kind === 'adjusted' ? ' (adjusted: 0.67 × raw + 0.33)' : ' (raw)'), regV, reg && reg.ok ? `${reg.n} ${String(B.reg.freq || '').toLowerCase()} returns, ${reg.from} to ${reg.to}, vs ${B.reg.bench}` : ''], ['ind', 'Industry unlevered beta', B.ind.bu, B.ind.name || 'industry not noted'], ['bu', 'Bottom-up levered beta', bu, isNum(bu) ? `${B.ind.bu} × [1 + (1 − ${(tM * 100).toFixed(0)}%) × ${((isNum(B.ind.de) ? B.ind.de : de) * 100).toFixed(1)}%]` : 'needs unlevered beta, tax rate and D/E']];
+    const betaB = `<p>${srcLink(DCFHelp.S.yahoo)}${companyLinks('beta').map(x => '<br>' + srcLink(x)).join('')}<br>${srcLink(DCFHelp.S.damBeta)}<br>${srcLink(DCFHelp.S.damBetaG)}</p>
+      <h3 class="sub-h">Method A: published beta</h3>
+      <div class="tgrid"><label>Published beta ${wtIn('beta.pub.v', 'x', 'Published beta')}</label><label>Provider ${wtIn('beta.pub.prov', 'text', 'Provider', 'e.g. Yahoo Finance')}</label><label>Method ${wtIn('beta.pub.method', 'text', 'Method', 'e.g. 5-year monthly vs S&P 500, raw')}</label></div>
+      <div class="tgrid"><label>Alternative beta ${wtIn('beta.alt.v', 'x', 'Alternative beta')}</label><label>Provider ${wtIn('beta.alt.prov', 'text', 'Alt provider')}</label><label>Method ${wtIn('beta.alt.method', 'text', 'Alt method', 'e.g. 2-year weekly, adjusted')}</label></div>
+      <h3 class="sub-h">Method B: regression from prices</h3>
+      <p class="footnote">Download adjusted (total-return) closes for the stock and the benchmark for the same dates, for example "Historical Data" on Yahoo Finance with the frequency you choose, and paste two columns: date, adjusted close.</p>
+      <div class="tgrid"><label>Benchmark ${wtIn('beta.reg.bench', ['S&P 500 total return', 'S&P 500 price index', 'MSCI World', 'Other'], 'Benchmark')}</label><label>Frequency ${wtIn('beta.reg.freq', ['Monthly', 'Weekly', 'Daily'], 'Frequency')}</label><label>Lookback ${wtIn('beta.reg.look', ['2 years', '3 years', '5 years', 'Other'], 'Lookback')}</label><label>Result ${wtIn('beta.reg.kind', ['raw', 'adjusted'], 'Raw or adjusted')}</label></div>
+      <div class="tgrid2"><label>Stock: date, adjusted close ${wtIn('beta.reg.stock', 'area', 'Stock prices', '2021-11-01, 175.35')}</label><label>Benchmark: date, adjusted close ${wtIn('beta.reg.mkt', 'area', 'Benchmark prices', '2021-11-01, 4567.0')}</label></div>
+      ${reg ? (reg.ok ? `<p>Beta = covariance ÷ variance = ${reg.cov.toExponential(3)} ÷ ${reg.varM.toExponential(3)} = <b>${reg.beta.toFixed(3)}</b> raw${B.reg.kind === 'adjusted' ? `, ${reg.adjusted.toFixed(3)} adjusted` : ''}. R² ${(reg.r2 * 100).toFixed(0)}%, standard error ${isNum(reg.se) ? reg.se.toFixed(2) : '—'} (a rough 95% range is ±${isNum(reg.se) ? (2 * reg.se).toFixed(2) : '—'}).</p>` : '') + (reg.warn.length || reg.badS.length || reg.badM.length ? `<ul class="flags">${reg.warn.map(w => `<li class="warn">${esc(w)}</li>`).join('')}${reg.badS.length ? `<li class="warn">Stock lines not read: ${reg.badS.slice(0, 8).join(', ')}</li>` : ''}${reg.badM.length ? `<li class="warn">Benchmark lines not read: ${reg.badM.slice(0, 8).join(', ')}</li>` : ''}</ul>` : '') : ''}
+      <h3 class="sub-h">Method C: bottom-up</h3>
+      <div class="tgrid"><label>Industry ${wtIn('beta.ind.name', 'text', 'Industry', 'Damodaran industry name')}</label><label>Unlevered beta ${wtIn('beta.ind.bu', 'x', 'Unlevered beta')}</label><label>Marginal tax rate ${wtIn('beta.ind.t', 'pct', 'Marginal tax rate', '21 federal + state')}</label><label>Debt / equity ${wtIn('beta.ind.de', 'pct', 'Debt to equity', isNum(de) ? (de * 100).toFixed(1) + ' (your market D/E)' : '')}</label></div>
+      <p class="footnote">Levered beta = unlevered × [1 + (1 − t) × D/E]. Blank D/E uses your model's market D/E${isNum(de) ? ` (${(de * 100).toFixed(1)}%)` : ''}. The formula assumes debt carries little market risk; adjust for very risky debt or large cash holdings.</p>
+      <h3 class="sub-h">Compare and choose</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Estimate</th><th>Beta</th><th>Basis</th><th>Use</th></tr></thead><tbody>${cmp.map(([k, l, v, b]) => `<tr><td>${esc(l)}</td><td class="num">${isNum(v) ? v.toFixed(3) : '<span class="na">—</span>'}</td><td class="note">${esc(b)}</td><td>${k !== 'ind' ? useBtns('beta', isNum(v) ? Math.round(v * 1000) / 1000 : null, l.toLowerCase(), `${l}: ${b}`) : '<span class="footnote">unlevered: re-lever it first</span>'}</td></tr>`).join('')}</tbody></table></div>
+      <p class="footnote">Choose by method, not by size: a regression fits a long, stable trading history; a bottom-up beta suits a company whose history is short or whose business or leverage has changed. Record why in the beta research notes.</p>`;
+    // size
+    const mcap = isNum(I.price) && isNum(I.basic) ? I.price * I.basic : null;
+    const sizeB = `<p>Market cap = price × actual shares = ${isNum(I.price) ? '$' + I.price.toFixed(2) : '—'} × ${isNum(I.basic) ? nf(I.basic, 1) : '—'} mm = <b>${isNum(mcap) ? fmt.mm(mcap) + ' $mm' : 'Not available'}</b>${isNum(mcap) ? ` · descriptive label: <b>${DCFAnalysis.sizeLabel(mcap)}</b>` : ''}.</p>
+      <p class="footnote">Common descriptive labels (not size-premium groups): micro below about $300 mm, small $300 mm–$2 bn, mid $2–10 bn, large $10–200 bn, mega above $200 bn. Kroll's size premia use their own groups from CRSP data, which change with each edition. ${srcLink(DCFHelp.S.krollTools)}</p>
+      <p>Your size premium: ${SC.map(x => `${x} ${fmtVal('scp', I.scp[x])}`).join(' · ')}. It defaults to nothing: 0% is your modelling choice, and a positive value should cite its dataset.</p>`;
+    // company-specific risk worksheet
+    const R = T.risks;
+    const csB = `<p class="footnote">There is no formula that produces a precise premium. Use this worksheet to decide whether one is justified. 0% is a valid, complete answer. ${companyLinks('csrp').map(srcLink).join(' · ')}</p>
+      <div class="tbl-wrap"><table class="fin risk"><thead><tr><th>Risk</th><th>Evidence</th><th>SEC disclosure</th><th>Probability / impact</th><th>Already in cash flows?</th><th>Systematic or diversifiable?</th><th>Rationale</th></tr></thead><tbody>
+      ${R.map((r, i) => `<tr><td>${wtIn(`risks.${i}.desc`, 'text', 'Risk', 'e.g. 40% of revenue from one customer')}</td><td>${wtIn(`risks.${i}.ev`, 'text', 'Evidence')}</td><td>${wtIn(`risks.${i}.sec`, 'text', 'SEC disclosure', '10-K Item 1A …')}</td><td>${wtIn(`risks.${i}.prob`, 'text', 'Probability and impact')}</td><td>${wtIn(`risks.${i}.modeled`, ['Yes', 'Partly', 'No'], 'Modelled')}</td><td>${wtIn(`risks.${i}.sys`, ['Mostly systematic', 'Mostly diversifiable', 'Unclear'], 'Systematic')}</td><td>${wtIn(`risks.${i}.why`, 'text', 'Rationale')}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="btns"><button class="btn tiny" data-risk-add>Add a row</button></div>
+      ${R.some(r => r.modeled === 'Yes') && SC.some(x => I.csrp[x] > 0) ? '<div class="notice">At least one risk is marked as already in the cash flows while a premium is set. Check you are not counting it twice.</div>' : ''}
+      <p class="footnote">Risks are never turned into a number for you. Enter any premium in the table above.</p>`;
+    // cost of debt
+    const K = T.kd, wk = DCFAnalysis.weightedKd(K.tr);
+    const fy = cur.fin && cur.fin.years && cur.fin.years[0];
+    const ebit = fy && fy.values ? fy.values.ebit : null, intr = fy && fy.values ? fy.values.interest : (isNum(cur.hist.interest[4]) ? cur.hist.interest[4] : null);
+    const cov = DCFAnalysis.coverage(isNum(K.ebit) ? K.ebit : ebit, isNum(K.int) ? K.int : intr);
+    const syn = isNum(I.rf[s]) && isNum(K.spread) ? I.rf[s] + K.spread : null;
+    const hr = DCFAnalysis.histRate(isNum(K.int) ? K.int : intr, K.d0, K.d1);
+    const kdB = `<p>${companyLinks('kd').map(srcLink).join('<br>')}${companyLinks('kd').length ? '<br>' : ''}${srcLink(DCFHelp.S.finra)}<br>${srcLink(DCFHelp.S.damRatings)}</p>
+      ${DCFModel.noDebt(cur) ? '<div class="notice">No debt is counted in the weights, so the debt weight is 0% and no borrowing rate is needed.</div>' : ''}
+      <h3 class="sub-h">Method A: weighted yield across debt issues</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Issue</th><th>Amount ($mm)</th><th>Yield to maturity</th><th>Maturity</th><th>Type</th></tr></thead><tbody>${K.tr.map((r, i) => `<tr><td>${wtIn(`kd.tr.${i}.name`, 'text', 'Issue', 'e.g. 4.55% notes due 2027')}</td><td>${wtIn(`kd.tr.${i}.amt`, 'usd_mm', 'Amount')}</td><td>${wtIn(`kd.tr.${i}.y`, 'pct', 'Yield')}</td><td>${wtIn(`kd.tr.${i}.mat`, 'text', 'Maturity', 'year')}</td><td>${wtIn(`kd.tr.${i}.type`, ['Fixed, senior unsecured', 'Fixed, secured', 'Floating rate', 'Commercial paper', 'Other'], 'Type')}</td></tr>`).join('')}</tbody></table></div>
+      ${wk ? `<p>Weighted = Σ(amount × yield) ÷ Σ amount = <b>${(wk.kd * 100).toFixed(2)}%</b> over ${fmt.mm(wk.total)} $mm. ${useBtns('kd', Math.round(wk.kd * 1e6) / 1e6, (wk.kd * 100).toFixed(2) + '%', 'Weighted yield to maturity across ' + wk.n + ' issues')}</p><p class="footnote">Weights here are the amounts you typed. Use market values (price × face) if you have them; face values are a simplification.</p>` : ''}
+      <h3 class="sub-h">Method B: risk-free rate + credit spread</h3>
+      <div class="tgrid"><label>EBIT ($mm) ${wtIn('kd.ebit', 'usd_mm', 'EBIT', isNum(ebit) ? nf(ebit) + ' (latest FY)' : '')}</label><label>Interest expense ($mm) ${wtIn('kd.int', 'usd_mm', 'Interest', isNum(intr) ? nf(intr) + ' (latest FY)' : '')}</label><label>Rating used ${wtIn('kd.rating', 'text', 'Rating', 'actual or synthetic, e.g. AA')}</label><label>Credit spread (from the table you cite) ${wtIn('kd.spread', 'pct', 'Spread')}</label></div>
+      <p>Interest coverage = EBIT ÷ interest = <b>${isNum(cov) ? cov.toFixed(1) + '×' : 'Not available'}</b>. Look up the rating and spread for this coverage in Damodaran's table (large or small company), or use the company's actual rating. Coverage is one input to credit quality, not a full rating.</p>
+      ${isNum(syn) ? `<p>${(I.rf[s] * 100).toFixed(2)}% (${esc(s)} risk-free) + ${(K.spread * 100).toFixed(2)}% = <b>${(syn * 100).toFixed(2)}%</b>. ${useBtns('kd', Math.round(syn * 1e6) / 1e6, (syn * 100).toFixed(2) + '%', `Synthetic: risk-free + ${K.rating || ''} spread`)}</p>` : ''}
+      <h3 class="sub-h">Method C: historical cross-check</h3>
+      <div class="tgrid"><label>Debt at start of year ($mm) ${wtIn('kd.d0', 'usd_mm', 'Debt start')}</label><label>Debt at end of year ($mm) ${wtIn('kd.d1', 'usd_mm', 'Debt end')}</label></div>
+      <p>Interest ÷ average debt = <b>${isNum(hr) ? (hr * 100).toFixed(2) + '%' : 'Not available'}</b>. A historical approximation that reflects old fixed coupons: use it to check, not as today's borrowing rate.</p>
+      <p class="footnote">Coupon ≠ yield to maturity; accounting interest ≠ market yield; floating-rate debt reprices; lease liabilities are not traded bonds.</p>`;
+    return `<h2 class="sec-h">Research calculators</h2>${wUseConfirm()}
+      ${det('rf', 'Risk-free rate', 'find the latest Treasury yield', rfB)}${det('erp', 'Equity risk premium', 'record the published premium and its method', erpB)}
+      ${det('beta', 'Beta', 'published, regression, bottom-up, and a comparison', betaB)}${det('size', 'Company size', 'market cap and what it does (and does not) mean', sizeB)}
+      ${det('csrp', 'Company-specific risk worksheet', 'decide whether a premium is justified', csB)}${det('kd', 'Pre-tax cost of debt', 'bond yields, credit spread, historical check', kdB)}`;
+  }
+  let rfStatus = '';
+
+  function applyWUse(u) {
+    const targets = u.scope === 'all' ? SC : [u.scope];
+    targets.forEach(x => { const from = cur.inputs[u.key][x]; if (from !== u.v) { DCFModel.logChange(cur, u.key, x, from, u.v); cur.inputs[u.key][x] = u.v; } });
+    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'WACC research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the WACC research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
+    if (cur.defaults) delete cur.defaults[u.key];
+    wUse = null; persist(); render(); toast(`${FBY[u.key].label} set to ${plain(fmtVal(u.key, u.v))} for ${u.scope === 'all' ? 'all three scenarios' : u.scope}. The change is in the log.`);
+  }
+  const TREAS_URL = yr => `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${yr}/all?type=daily_treasury_yield_curve&field_tdr_date_value=${yr}&page&_format=csv`;
+  async function fetchTreasury() {
+    const vd = cur.inputs.company.valDate, lim = /^\d{4}-\d{2}-\d{2}$/.test(vd || '') ? vd : null;
+    const y = lim ? +lim.slice(0, 4) : new Date().getUTCFullYear();
+    rfStatus = 'Reading the U.S. Treasury daily par yield curve…'; render();
+    try {
+      let row = null;
+      for (const yr of [y, y - 1]) {
+        const r = await fetch(TREAS_URL(yr)); if (!r.ok) continue;
+        const lines = (await r.text()).trim().split(/\r?\n/);
+        const hdr = lines[0].split(',').map(x => x.replace(/"/g, '').trim()), i10 = hdr.indexOf('10 Yr'); if (i10 < 0) continue;
+        for (const ln of lines.slice(1)) { const c = ln.split(','); const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(c[0]); if (!m || !c[i10]) continue; const iso = `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`; if (lim && iso > lim) continue; const v = Number(c[i10]); if (isNum(v)) { row = { iso, v, yr }; break; } }
+        if (row) break;
+      }
+      if (!row) throw new Error('none');
+      const T = wt(); T.rf = { v: Math.round(row.v * 100) / 10000, date: row.iso, src: 'U.S. Treasury daily par yield curve, 10 Yr', url: TREAS_URL(row.yr), fetched: new Date().toISOString() };
+      rfStatus = `${row.v.toFixed(2)}% on ${row.iso}${lim ? ' (latest on or before your valuation date)' : ''}, from the U.S. Treasury. Not applied yet: choose a scenario below.`;
+      persist();
+    } catch (e) { rfStatus = 'This browser could not read the Treasury data. Open the Treasury or FRED link, then type the yield and date below.'; }
+    render();
+  }
   // ---------- pages ----------
   const P = {};
   // ---------- dashboard ----------
@@ -1309,7 +1505,9 @@
       ${r('After-tax cost of debt', fmt.pct(wb.W.kdAT, 2))}${r('Equity / debt weights', fmt.pct(wb.W.we) + ' / ' + fmt.pct(wb.W.wd))}
       ${r('WACC, built up', fmt.pct(wb.built, 2), 'key')}${r('WACC used by the model', fmt.pct(wb.W.wacc, 2))}${r('Difference (should be 0.00%)', `<span class="pill ${Math.abs(wb.diff) < 1e-9 ? 'good' : 'bad'}">${(wb.diff * 100).toFixed(2)}%</span>`)}
       </tbody></table></div>`;
-    return `<div><h1>Cost of capital (WACC)</h1><p class="lead">The discount rate for the cash flows: cost of equity from CAPM, after-tax cost of debt, weighted by market values.</p></div>${groupPanel('wacc')}
+    const learn = !(cur.ui && cur.ui.learn === false);
+    const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides, calculators and notes</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Each input has a research guide: what it is, whether you need it, where to find it (free sources first), how to calculate it, a worked example, how to choose, scenarios, common mistakes and your notes.</span></div>`;
+    return `<div><h1>Cost of capital (WACC)</h1><p class="lead">The discount rate for the cash flows: cost of equity from CAPM, after-tax cost of debt, weighted by market values.</p></div>${bar}${groupPanel('wacc')}${waccLivePanel()}${learn ? waccToolsHtml() : ''}
       <section class="panel"><div class="panel-head"><h2>WACC builder: a cross-check of the Base case</h2></div>${builder}</section>`;
   };
   P.historicals = () => {
@@ -1623,8 +1821,8 @@
     root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title">
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
-      <div class="tags">${f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      ${isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
+      <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
+      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
@@ -1701,6 +1899,7 @@
       const last = parts[parts.length - 1]; from = o[last]; o[last] = v;
       cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
     }
+    else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tool') { const parts = el.dataset.k.split('.'); let o = toolState(); for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
     else if (t === 'gc') { gc[el.dataset.k] = v; if (isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; } setTimeout(render, 0); return; }
@@ -1717,6 +1916,7 @@
     if (el.dataset && el.dataset.pendId) { pendSel = pendSel || {}; pendSel[el.dataset.pendId] = el.checked; if (!Object.keys(pendSel).some(k => pendSel[k] && cur.pending.items.find(p => p.id === k && p.kind === 'override'))) pendConfirm = false; render(); return; }
     if (el.id === 'pend-confirm') { pendConfirm = el.checked; render(); return; }
     if (el.id === 'tm-use') { cur.ttmManual = cur.ttmManual || {}; DCFModel.logChange(cur, 'TTM source', null, cur.ttmManual.use ? 'built by hand' : 'from filings', el.checked ? 'built by hand' : 'from filings'); cur.ttmManual.use = el.checked; persist(); render(); toast(el.checked ? 'Using the TTM you built by hand' : 'Using the TTM calculated from the filings'); return; }
+    if (el.id === 'wacc-leases') { cur.waccCfg = cur.waccCfg || {}; DCFModel.logChange(cur, 'leases in WACC weights', null, cur.waccCfg.leases || 'include', el.value); cur.waccCfg.leases = el.value; persist(); render(); toast(el.value === 'exclude' ? 'Operating leases are no longer counted as debt in the WACC weights' : 'Operating leases are counted as debt in the WACC weights'); return; }
     if (el.id === 'base-timing') { DCFModel.logChange(cur, 'forecast timing', null, cur.timing, el.value); cur.timing = el.value; persist(); render(); toast(el.value === 'dated' ? 'Forecast years now line up with the valuation date' : 'Using the workbook timing'); return; }
     if (el.dataset && el.dataset.t) return setInput(el);
     if (el.id === 'model-select') { cur = models[el.value]; try { localStorage.setItem('dcfcalc.current', cur.id); } catch (x) {} parseErrors = {}; render(); return; }
@@ -1754,6 +1954,12 @@
     if (b.dataset.tab) { dashTab = b.dataset.tab; render(); return; }
     if (b.dataset.useRef) { useRef(b.dataset.useRef); return; }
     if (b.dataset.dilMethod) { const m = b.dataset.dilMethod; if (cur.dilution.method === m) return; const from = cur.dilution.method; if (from === 'totals' || !from) cur.dilution.savedTotals = { options: cur.inputs.options, treasury: cur.inputs.treasury }; if (m === 'totals' && cur.dilution.savedTotals) { cur.inputs.options = cur.dilution.savedTotals.options; cur.inputs.treasury = cur.dilution.savedTotals.treasury; } cur.dilution.method = m; if (m === 'proxy' && !cur.dilution.proxy) cur.dilution.proxy = { v: null, period: null }; DCFModel.logChange(cur, 'dilution method', null, from, m); persist(); render(); toast(m === 'totals' ? 'Using the workbook totals' : m === 'simple' ? 'Simple dilution: enter an estimate or value on actual shares' : m === 'proxy' ? 'Reported net dilution: use the latest EPS note figure' : 'Detailed estimate: enter each security'); return; }
+    if (b.dataset.wuse) { const u = { key: b.dataset.wuse, v: +b.dataset.v, scope: b.dataset.scope, note: b.dataset.note }; const targets = u.scope === 'all' ? SC : [u.scope]; const over = targets.filter(x => isNum(cur.inputs[u.key][x]) && Math.abs(cur.inputs[u.key][x] - u.v) > 1e-12); if (over.length) { wUse = Object.assign(u, { text: `${FBY[u.key].label}: ${over.map(x => x + ' ' + plain(fmtVal(u.key, cur.inputs[u.key][x]))).join(', ')} would become ${plain(fmtVal(u.key, u.v))}.` }); render(); const c = document.querySelector('.confirmbar'); if (c) c.scrollIntoView({ block: 'center' }); } else applyWUse(u); return; }
+    if (b.dataset.wuseYes !== undefined) { if (wUse) applyWUse(wUse); return; }
+    if (b.dataset.wuseNo !== undefined) { wUse = null; render(); return; }
+    if (b.dataset.rfFetch !== undefined) { fetchTreasury(); return; }
+    if (b.dataset.riskAdd !== undefined) { wt().risks.push({}); persist(); render(); return; }
+    if (b.dataset.zeroFill) { const k = b.dataset.zeroFill; const empty = SC.filter(x => !isNum(cur.inputs[k][x])); empty.forEach(x => { DCFModel.logChange(cur, k, x, null, 0); cur.inputs[k][x] = 0; }); if (empty.length) cur.sources[k] = Object.assign({}, cur.sources[k] || {}, { name: 'No premium: analyst choice', type: 'Own judgment', cat: 'analyst', notes: '0% chosen as a modelling assumption (no ' + (k === 'scp' ? 'size' : 'company-specific') + ' premium).' }); persist(); render(); toast(empty.length ? `Set ${empty.join(', ')} to 0%. Scenarios you had filled were not changed.` : 'All three scenarios already have a value; nothing changed.'); return; }
     if (b.dataset.pendApply !== undefined) { const ids = Object.keys(pendSel || {}).filter(k => pendSel[k]); const done = DCFData.applyPending(cur, ids, pendConfirm); pendSel = null; pendConfirm = false; persist(); render(); toast(done.length ? `Applied ${done.length} change${done.length > 1 ? 's' : ''}. The old values are in the change log.` : 'Nothing was applied. Tick the rows to apply.'); return; }
     if (b.dataset.pendDismiss !== undefined) { const ids = cur.pending ? cur.pending.items.map(p => p.id) : []; DCFModel.logChange(cur, 'import review', null, null, `kept current values for ${ids.length} field${ids.length === 1 ? '' : 's'}`); DCFData.dismissPending(cur, ids); pendSel = null; pendConfirm = false; persist(); render(); toast('Kept your current values'); return; }
     if (b.dataset.flagsDismiss !== undefined) { cur.importFlags = []; persist(); render(); return; }
