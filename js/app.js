@@ -165,6 +165,7 @@
   }
   function renderModal() {
     const root = document.getElementById('modal-root');
+    root.dataset.owner = 'dcf';
     if (!modal) { root.innerHTML = ''; return; }
     const c = dataCfg();
     const P = DCFData.PROVIDERS;
@@ -212,8 +213,9 @@
   }
 
   // ---------- routing ----------
+  const compsOn = () => /^#comps(\/|$)/.test(location.hash);
   function page() { const h = location.hash.slice(1); return PAGES.find(p => p.id === h) ? h : 'dashboard'; }
-  window.addEventListener('hashchange', () => { render(); $('#main').scrollTop = 0; });
+  window.addEventListener('hashchange', () => { if (compsOn()) return; render(); $('#main').scrollTop = 0; });
   function goField(pageId, elId) { pendingFocus = elId; if (page() === pageId) render(); else location.hash = pageId; }
   function fieldPage(key) {
     if (key.startsWith('hist')) return 'historicals';
@@ -269,7 +271,8 @@
     const selName = cur.inputs.company.name ? `${cur.inputs.company.name}${cur.meta && cur.meta.symbol ? ' (' + cur.meta.symbol + ')' : ''}` : '';
     const top = document.getElementById('topbar');
     // keep the search box (and its typing) intact across re-renders
-    if (!top.querySelector('.hdr-main')) {
+    if (!top.querySelector('.hdr-main') || top.dataset.owner !== 'dcf') {
+      top.dataset.owner = 'dcf';
       top.innerHTML = `<div class="hdr-main">
         <button class="hbtn menu-btn" id="menu-btn" aria-label="Open sections">${icon('list')}</button>
         <div class="brand">${icon('logo', 'logo')}<div><b>DCF Pro</b><small>Financial Valuation Platform</small></div></div>
@@ -290,6 +293,7 @@
     top.querySelector('#search-sel').innerHTML = selName ? `<span class="chip">${esc(selName)}</span>` : '<span class="chip muted">No company selected</span>';
     renderSearchResults();
     $('#hdr-sub').innerHTML = `
+      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a></div>
       <div class="model-pick"><label for="model-select" class="footnote">Model</label>
         <select id="model-select" class="plain">${opts}</select></div>
       <div class="model-pick"><label for="mode-select" class="footnote">Method</label>
@@ -2093,7 +2097,7 @@
     <section class="panel"><h2>The eight fixes</h2><div class="tbl-wrap"><table class="fin"><thead><tr><th>Issue</th><th style="text-align:left">What was wrong</th><th style="text-align:left">Corrected method</th><th style="text-align:left">Basis</th></tr></thead><tbody>
       ${fixes.map(f => `<tr><td><b>${f[0]}</b></td><td style="text-align:left;white-space:normal;font-family:var(--font-ui);min-width:220px">${f[1]}</td><td style="text-align:left;white-space:normal;font-family:var(--font-ui);min-width:220px">${f[2]}</td><td style="text-align:left;white-space:normal;font-family:var(--font-ui);min-width:200px">${f[3]}</td></tr>`).join('')}</tbody></table></div>
       <p class="footnote">Sources: <a href="https://pages.stern.nyu.edu/~adamodar/pdfiles/country/TerminalValue.pdf" target="_blank" rel="noopener">Damodaran, Terminal Value</a> · <a href="https://www.bvresources.com/articles/bvwire/avoid-this-inconsistency-with-the-terminal-value" target="_blank" rel="noopener">BVR, Avoid this inconsistency with the terminal value</a></p></section>
-    <section class="panel"><h2>Reconciliation with Excel (Amazon example)</h2><p class="footnote">Automated tests in the repository's <code>tests</code> folder compare the engine with the workbook, recalculated in a spreadsheet engine: 331 checks across the original file, four edited copies and the corrected template, at a tolerance of one part in a billion. All pass.</p>
+    <section class="panel"><h2>Reconciliation with Excel (Amazon example)</h2><p class="footnote">Automated tests in the repository's <code>tests</code> folder compare the engine with the workbook, recalculated in a spreadsheet engine: 331 checks across the original file, four edited copies and the corrected template, at a tolerance of one part in a billion. All pass. The corrected columns use the lease-adjusted treatment (leases as debt), which is how the corrected template was built; under the default operating-lease treatment the corrected Base value is $181.01.</p>
       <div class="tbl-wrap"><table class="fin"><thead><tr><th>Output</th><th>Excel (original)</th><th>Website (original method)</th><th>Difference</th><th>Corrected Excel template</th><th>Website (corrected)</th><th>Difference</th></tr></thead><tbody>
       ${RECON.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${r[6]}</td></tr>`).join('')}</tbody></table></div></section>`;
   };
@@ -2131,6 +2135,7 @@
   // ---------- help drawer ----------
   function renderDrawer() {
     const root = $('#drawer-root');
+    root.dataset.owner = 'dcf';
     if (!drawerKey) { root.innerHTML = ''; return; }
     if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
     const isHist = drawerKey.startsWith('hist.');
@@ -2183,6 +2188,8 @@
 
   // ---------- render ----------
   function render() {
+    if (compsOn()) { if (typeof CompsApp !== 'undefined') CompsApp.render(); return; }
+    ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && r.dataset.owner === 'comps') { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
     calcCache = null;
     const active = document.activeElement && document.activeElement.id;
     renderTop(); renderRail();
@@ -2240,6 +2247,7 @@
     setTimeout(render, 0);
   }
   document.addEventListener('change', e => {
+    if (compsOn()) return;
     const el = e.target;
     if (el.dataset && el.dataset.t === 'dilchk') { const parts = el.dataset.k.split('.'); let o = cur.dilution; for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; const last = parts[parts.length - 1]; DCFModel.logChange(cur, 'dilution.' + el.dataset.k, null, !!o[last], el.checked); o[last] = el.checked; persist(); render(); return; }
     if (el.dataset && el.dataset.t === 'note') { const k = el.dataset.k, sc = el.dataset.s, f = el.dataset.f; cur.notes = cur.notes || {}; const N = cur.notes[k] = cur.notes[k] || {}; const nn = N[sc] = N[sc] || {}; nn[f] = el.value; nn.saved = new Date().toISOString(); persist(); render(); return; }
@@ -2260,8 +2268,9 @@
     if (el.id === 'sec-q') { renderModal(); return; }
     if (el.id === 'import-xlsx') return importXlsx(el);
   });
-  document.addEventListener('toggle', e => { const d = e.target; if (d && d.dataset && d.dataset.aid) aidOpen[d.dataset.aid] = d.open; }, true);
+  document.addEventListener('toggle', e => { if (compsOn()) return; const d = e.target; if (d && d.dataset && d.dataset.aid) aidOpen[d.dataset.aid] = d.open; }, true);
   document.addEventListener('keydown', e => {
+    if (compsOn()) return;
     if (e.key === 'Escape' && modal) { modal = null; renderModal(); return; }
     if (e.key === 'Escape' && searchState.open) { searchState.open = false; renderSearchResults(); return; }
     if (e.target.id === 'co-search') {
@@ -2271,6 +2280,7 @@
     if (e.target.closest && e.target.closest('#search-results') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); const items = [...document.querySelectorAll('#search-results [data-import]')]; const i = items.indexOf(e.target); const n = items[i + (e.key === 'ArrowDown' ? 1 : -1)]; if (n) n.focus(); else if (e.key === 'ArrowUp') $('#co-search').focus(); return; }
     if (e.key === 'Escape' && drawerKey) { drawerKey = null; renderDrawer(); } if (e.key === 'Enter' && e.target.dataset && e.target.dataset.t && e.target.tagName === 'INPUT') e.target.blur(); });
   document.addEventListener('click', e => {
+    if (compsOn()) return;
     const b = e.target.closest('button, [data-close], [data-close-modal], a');
     if (searchState.open && !e.target.closest('.search')) { searchState.open = false; renderSearchResults(); }
     if (!b) return;
@@ -2366,6 +2376,7 @@
   });
   let searchTimer = null;
   document.addEventListener('input', e => {
+    if (compsOn()) return;
     if (e.target.id !== 'co-search') return;
     const q = e.target.value.trim();
     clearTimeout(searchTimer);
@@ -2373,7 +2384,7 @@
     if (!q) { searchState.results = []; searchState.error = null; renderSearchResults(); return; }
     searchTimer = setTimeout(() => runSearch(q), 350);
   });
-  document.addEventListener('focusin', e => { if (e.target.id === 'co-search') { searchState.open = true; renderSearchResults(); } });
+  document.addEventListener('focusin', e => { if (compsOn()) return; if (e.target.id === 'co-search') { searchState.open = true; renderSearchResults(); } });
   function saveModel() {
     cur.savedAt = new Date().toISOString();
     calcCache = null;
@@ -2461,7 +2472,7 @@
     if (sample) {
       const s = DCFModel.fromSample(sample);
       const ow = DCF.runAll(DCFModel.engineInputs(Object.assign(s, { mode: 'workbook' })).inp, 'workbook');
-      const s2 = DCFModel.fromSample(sample); const co = DCF.runAll(DCFModel.engineInputs(s2).inp, 'corrected');
+      const s2 = DCFModel.fromSample(sample); s2.leaseMode = 'debt'; const co = DCF.runAll(DCFModel.engineInputs(s2).inp, 'corrected');
       const X = { Base: 183.77816669798423, Bear: 47.40697715833958, Bull: 374.88474315588223, weighted: 204.28057290452983, ev: 2066527.2598430207, tv: 3813533.1556296204 };
       const XC = { Base: 179.197930539096, Bear: 47.5633682647069, Bull: 364.550000240151, weighted: 199.209035509482, ev: 2016359.93319471 };
       const d = (a, b) => isNum(a) && isNum(b) ? Math.abs(a - b).toExponential(1) : 'n/a';
