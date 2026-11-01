@@ -1919,6 +1919,16 @@ const DIL_HELP = {
   Object.assign(by.kd, { what: 'The rate the company would pay to borrow today, before tax.', enter: 'A percentage. Use current yields on its bonds, or the risk-free rate plus a credit spread. Not needed if the company has no debt in the weights.', source: 'Debt note in the 10-K/10-Q plus bond yields (FINRA), or a synthetic spread from interest coverage (Damodaran).', tip: 'Use yield to maturity, not coupons; interest expense ÷ debt is only a historical cross-check.' });
 })();
 
+// Terminal value inputs: no hard rules presented as identities (full guides live in help.js)
+(() => {
+  const by = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+  Object.assign(by.tg, { what: 'How fast free cash flow grows every year after year 10, forever.', enter: 'A percentage, nominal, in the currency of the cash flows. It must be below WACC. Above the risk-free rate is flagged for a written reason, not blocked.', source: 'Long-run real GDP growth and inflation (Federal Reserve SEP, IMF WEO)', backup: 'Risk-free rate as a ceiling (Damodaran rule of thumb)', tip: 'Nominal long-run growth = (1 + real GDP) × (1 + inflation) − 1. Record the source and date.' });
+  Object.assign(by.tem, { what: 'The EBITDA margin in year 11, held for every year after. EBITDA here = operating income + D&A, with stock compensation as a cost.', enter: 'A percentage. Normally close to your year-10 margin.', source: 'Company history (EBITDA ÷ revenue) and mature peers', backup: 'Damodaran EBITDA/Sales by industry', tip: 'A jump between year 10 and year 11 is applied forever: explain it or avoid it.' });
+  Object.assign(by.troic, { what: 'Return on new capital invested after year 10. Sets terminal reinvestment: reinvestment rate = g ÷ ROIC.', enter: 'A percentage. Above WACC means growth creates value, equal means growth is neutral, below means growth destroys value. None of these is forced.', source: 'Company historical ROIC and Damodaran ROIC by industry (normalized column)', backup: 'Peer ROIC', tip: 'Terminal FCFF = NOPAT × (1 − g ÷ ROIC).' });
+  Object.assign(by.tvMethod, { source: 'Damodaran: prefer Gordon in a DCF; use the multiple as a cross-check', tip: 'Compare both methods on the Terminal value page.' });
+  Object.assign(by.exitMult, { enter: 'A number such as 12 for 12×, from peers or an industry table you cite. Applied to year-10 EBITDA. Only needed when the method is Exit Multiple.', source: 'Peer EV/EBITDA (trailing), with date and source', backup: 'Damodaran EV/EBITDA by industry', tip: 'Today\'s multiples include today\'s growth: a mature year-10 company usually deserves less.' });
+})();
+
 if (typeof module !== 'undefined') module.exports = { FIELDS, GROUPS, HIST_FIELDS, GUIDE_SECTIONS, DIL_HELP };
 
 // ===== DCF ENGINE (pure functions; no UI) =====
@@ -3497,7 +3507,102 @@ const DCFAnalysis = (() => {
     return { s, rf: v('rf'), beta: v('beta'), erp: v('erp'), scp: v('scp'), csrp: v('csrp'), ke, kd, tax, kdAT, E, D, L, leasesIn: inp.leasesInWacc !== false, shares, price: inp.price, we, wd, wacc, wbMode: wb, sum: isNum(we) ? we + wd : null };
   }
 
-  return { parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
+  // ===== terminal value helpers (read-only; the engine still computes value) =====
+  const nominalGrowth = (real, infl) => isNum(real) && isNum(infl) ? (1 + real) * (1 + infl) - 1 : null;
+  function stats(vals) {
+    const pts = vals.map((v, i) => ({ v, i })).filter(p => isNum(p.v));
+    if (!pts.length) return null;
+    const xs = pts.map(p => p.v).sort((a, b) => a - b), n = xs.length;
+    const median = n % 2 ? xs[(n - 1) / 2] : (xs[n / 2 - 1] + xs[n / 2]) / 2;
+    let slope = null;
+    if (n >= 3) { const mx = mean(pts.map(p => p.i)), my = mean(pts.map(p => p.v)); const sxx = pts.reduce((a, p) => a + (p.i - mx) ** 2, 0); slope = sxx ? pts.reduce((a, p) => a + (p.i - mx) * (p.v - my), 0) / sxx : null; }
+    return { n, mean: mean(xs), median, min: xs[0], max: xs[n - 1], slope };
+  }
+  // historical ROIC, line by line. Invested capital = equity + debt + lease liabilities − cash and short-term investments
+  function histRoic(rows) {
+    const ic = r => [r.equity, r.debt].every(isNum) ? r.equity + r.debt + (isNum(r.leases) ? r.leases : 0) - (isNum(r.cash) ? r.cash : 0) : null;
+    return rows.map((r, i) => {
+      const nopat = isNum(r.ebit) && isNum(r.tax) ? r.ebit * (1 - r.tax) : null;
+      const end = ic(r), prev = i > 0 ? ic(rows[i - 1]) : null;
+      const avg = isNum(end) && isNum(prev) ? (end + prev) / 2 : null;
+      return Object.assign({}, r, { nopat, ic: end, avgIC: avg, roic: isNum(nopat) && isNum(avg) && avg > 0 ? nopat / avg : null, roicEnd: isNum(nopat) && isNum(end) && end > 0 ? nopat / end : null });
+    });
+  }
+  // segment EBITDA: Σ(segment revenue × segment margin) − unallocated costs
+  function segMargin(segs, unalloc, totalRev) {
+    const ok = segs.filter(x => isNum(x.rev) && isNum(x.m));
+    if (!ok.length) return null;
+    const rev = ok.reduce((a, x) => a + x.rev, 0), e = ok.reduce((a, x) => a + x.rev * x.m, 0) - (isNum(unalloc) ? unalloc : 0);
+    return { rev, ebitda: e, margin: rev ? e / rev : null, gap: isNum(totalRev) && totalRev ? rev / totalRev - 1 : null, n: ok.length };
+  }
+  // both terminal value methods side by side for one scenario
+  function tvCompare(model, s) {
+    const { inp } = mdl().engineInputs(model), E = eng();
+    const base = E.run(inp, s, model.mode);
+    const one = m => { if (m === 'Exit Multiple' && !isNum(inp.exitMult[s])) return { ok: false, why: 'No exit multiple entered for ' + s + '.' }; const r = E.run(inp, s, model.mode, { tvMethod: m }); return r.ok ? { ok: true, tv: r.tv, pvTV: r.pvTV, ev: r.ev, perShare: r.perShare, tvShare: r.tvShare, period: r.tvPeriod, r } : { ok: false, why: (r.errors[0] || ('Missing: ' + r.missing.join(', '))) }; };
+    const G = one('Gordon Growth'), X = one('Exit Multiple');
+    let impl = null;
+    if (G.ok) {
+      const r = G.r, w = r.waccUsed, y10 = r.years[9], y11 = r.years[10];
+      const atT10 = r.tvGordon * (model.mode === 'corrected' && inp.midYear === 'Y' ? Math.pow(1 + w, 0.5) : 1);
+      impl = { atT10, trailing: atT10 / y10.ebitda, forward: atT10 / y11.ebitda, ebitda10: y10.ebitda, ebitda11: y11.ebitda, adj: atT10 !== r.tvGordon };
+    }
+    return { s, base, primary: inp.tvMethod[s], G, X, impl, diff: G.ok && X.ok ? { perShare: X.perShare - G.perShare, pct: X.perShare / G.perShare - 1, ev: X.ev - G.ev } : null };
+  }
+  // growth rate at which Gordon gives the same present value of terminal value as the exit multiple.
+  // FCFF in year 11 depends on g twice (revenue grows by g, reinvestment = g ÷ ROIC), so it is solved numerically.
+  function impliedG(model, s, targetPV) {
+    const { inp } = mdl().engineInputs(model), E = eng();
+    const base = E.run(inp, s, model.mode, { tvMethod: 'Gordon Growth', tg: 0 });
+    const w = base.ok ? base.waccUsed : (E.wacc(inp, s, model.mode) || {}).wacc;
+    if (!isNum(targetPV) || !isNum(w)) return { ok: false, roots: [], why: 'Needs a calculated scenario and an exit-multiple value.' };
+    const f = g => { const r = E.run(inp, s, model.mode, { tvMethod: 'Gordon Growth', tg: g }); return r.ok ? r.pvTV - targetPV : null; };
+    const lo = -0.05, hi = w - 0.0005, step = 0.0005, roots = [];
+    let pg = lo, pf = f(lo);
+    for (let g = lo + step; g <= hi + 1e-12; g += step) {
+      const fv = f(g);
+      if (isNum(pf) && isNum(fv) && (pf === 0 || pf * fv < 0)) { let a = pg, b = g, fa = pf; for (let k = 0; k < 60; k++) { const m = (a + b) / 2, fm = f(m); if (!isNum(fm)) break; if (fa * fm <= 0) b = m; else { a = m; fa = fm; } } roots.push((a + b) / 2); }
+      pg = g; pf = fv;
+    }
+    const troic = inp.troic[s];
+    return { ok: roots.length > 0, roots, wacc: w, troic, why: roots.length ? '' : (model.mode === 'corrected' && isNum(troic) && troic <= w ? `With terminal ROIC (${(troic * 100).toFixed(1)}%) at or below WACC (${(w * 100).toFixed(1)}%), faster growth does not add value, so no growth rate below WACC reproduces this exit value.` : 'No growth rate between −5% and WACC reproduces this exit value.') };
+  }
+  // terminal value consistency checks: warnings only, nothing is changed
+  function tvChecks(model, all, tvTools) {
+    const I = model.inputs, out = [], pct = x => (x * 100).toFixed(1) + '%', T = tvTools || {};
+    const corr = model.mode === 'corrected';
+    SC.forEach(s => {
+      const r = all.scen[s], g = I.tg[s], rf = I.rf[s], tem = I.tem[s], em10 = I.em10[s], ro = I.troic[s], tax = I.tax[s];
+      const w = r && r.ok ? r.waccUsed : (() => { try { return waccParts(model, s).wacc; } catch (e) { return null; } })();
+      if (isNum(g) && isNum(w) && g >= w) out.push({ level: 'bad', key: 'tg', s, text: `${s}: terminal growth (${pct(g)}) is not below WACC (${pct(w)}). The Gordon formula has no finite answer.` });
+      if (isNum(g) && isNum(rf) && g > rf) out.push({ level: 'warn', key: 'tg', s, text: `${s}: terminal growth (${pct(g)}) is above the risk-free rate (${pct(rf)}). Not impossible, but the risk-free rate is a common ceiling for long-run nominal growth: record why the company can grow faster than the economy forever.` });
+      if (isNum(g) && !(model.notes && model.notes.tg && model.notes.tg[s] && (model.notes.tg[s].why || model.notes.tg[s].evidence || model.notes.tg[s].how))) out.push({ level: 'info', key: 'tg', s, text: `${s}: no research note supports the terminal growth rate yet.` });
+      if (isNum(tem) && isNum(em10) && Math.abs(tem - em10) > 0.02) out.push({ level: 'warn', key: 'tem', s, text: `${s}: the margin steps from ${pct(em10)} in year 10 to ${pct(tem)} in year 11. A jump at the start of the terminal period is applied forever; if it is intended (for example, scaling costs end), say so in the notes, or bring the year-10 margin closer.` });
+      if (corr && isNum(ro) && isNum(w) && isNum(g) && g > 0 && ro < w) out.push({ level: 'warn', key: 'troic', s, text: `${s}: terminal ROIC (${pct(ro)}) is below WACC (${pct(w)}), so every dollar reinvested for growth loses value. That can be a deliberate view (a business without lasting advantages); otherwise ROIC near WACC is the neutral assumption.` });
+      if (corr && isNum(ro) && isNum(g) && g > 0 && g / ro > 1) out.push({ level: 'bad', key: 'troic', s, text: `${s}: reinvestment rate g ÷ ROIC = ${pct(g / ro)} is above 100%, so terminal free cash flow is negative. Growth of ${pct(g)} needs a higher ROIC.` });
+      if (corr && isNum(g) && g < 0) out.push({ level: 'info', key: 'tg', s, text: `${s}: negative terminal growth gives a negative reinvestment rate: the company releases capital as it shrinks, which adds to cash flow.` });
+      if (corr && isNum(ro) && ro > 0.5) out.push({ level: 'warn', key: 'troic', s, text: `${s}: a terminal ROIC of ${pct(ro)} is very high to earn on new capital forever. Check it against the historical ROIC on new investment, not just the average.` });
+      if (r && r.ok) {
+        if (r.tvShare > 0.8) out.push({ level: 'warn', key: 'tvMethod', s, text: `${s}: terminal value is ${pct(r.tvShare)} of enterprise value, so the result depends mostly on the terminal assumptions. Run the sensitivity tables before relying on it.` });
+        const y10 = r.years[9], y11 = r.years[10];
+        if (corr && isNum(y10.reinvRateModel) && isNum(y11.reinvestRate) && Math.abs(y10.reinvRateModel - y11.reinvestRate) > 0.15) out.push({ level: 'warn', key: 'troic', s, text: `${s}: the year-10 reinvestment rate is ${pct(y10.reinvRateModel)} (CapEx, D&A, working capital and acquisitions) but the terminal rate is ${pct(y11.reinvestRate)} (g ÷ ROIC), so free cash flow ${y11.fcff > y10.fcff ? 'jumps' : 'drops'} from ${Math.round(y10.fcff).toLocaleString()} to ${Math.round(y11.fcff).toLocaleString()} $mm. Bring year 8–10 CapEx closer to steady state, or revisit ROIC.` });
+        if (corr && isNum(tax) && tax < 0.15) out.push({ level: 'info', key: 'tax', s, text: `${s}: the terminal year uses the ${s} forecast tax rate (${pct(tax)}). A steady-state business usually pays close to the marginal rate (about 21% US federal plus state).` });
+      }
+      if (I.tvMethod[s] === 'Exit Multiple' && !isNum(I.exitMult[s])) out.push({ level: 'bad', key: 'exitMult', s, text: `${s}: the method is Exit Multiple but no multiple is entered.` });
+    });
+    // exit multiple vs the peers the analyst entered
+    const peers = (T.peers || []).filter(p => isNum(p.m));
+    if (peers.length) {
+      const st = stats(peers.map(p => p.m));
+      SC.forEach(s => { const m = I.exitMult[s]; if (isNum(m) && (m > st.max || m < st.min)) out.push({ level: 'warn', key: 'exitMult', s, text: `${s}: the exit multiple (${m.toFixed(1)}×) is outside the range of the peers you entered (${st.min.toFixed(1)}×–${st.max.toFixed(1)}×, median ${st.median.toFixed(1)}×).` }); });
+      const bases = new Set(peers.map(p => p.basis).filter(Boolean));
+      if (bases.has('Forward (next-year EBITDA)')) out.push({ level: 'warn', key: 'exitMult', text: 'Some peer multiples are on forward EBITDA, but the model applies the exit multiple to year-10 EBITDA (trailing at the exit date). A forward multiple applied to trailing EBITDA overstates value when EBITDA is growing.' });
+      if (bases.size > 1) out.push({ level: 'warn', key: 'exitMult', text: 'Your peer multiples mix trailing and forward EBITDA. Put them on one basis before taking the median.' });
+    }
+    if (!corr && SC.some(s => isNum(I.tcapex[s]) && isNum(I.da[s]) && I.tcapex[s] < I.da[s])) out.push({ level: 'warn', key: 'tcapex', text: 'Terminal CapEx below D&A shrinks the asset base forever while revenue keeps growing.' });
+    return out;
+  }
+  return { nominalGrowth, stats, histRoic, segMargin, tvCompare, impliedG, tvChecks, parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFAnalysis;
 
@@ -3646,6 +3751,17 @@ const DCFHelp = (() => {
     damRatings: ['Damodaran: synthetic ratings, interest coverage and default spreads', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.html', 'direct'],
     finra: ['FINRA fixed income data (corporate bond prices and yields; search by issuer or CUSIP; may be delayed)', 'https://www.finra.org/finra-data/fixed-income', 'raw'],
     edgar: ['SEC EDGAR full-text search (10-K and 10-Q notes)', 'https://www.sec.gov/edgar/search/', 'raw'],
+    imfWeo: ['IMF World Economic Outlook (report; long-run real GDP and inflation projections by country)', 'https://www.imf.org/en/Publications/WEO', 'direct'],
+    imfData: ['IMF data portal: World Economic Outlook dataset (download GDP growth and inflation series)', 'https://data.imf.org/datasets/WEO', 'raw'],
+    fedSep: ['Federal Reserve: FOMC Summary of Economic Projections, September 16, 2026 (Table 1, "Longer run" column)', 'https://www.federalreserve.gov/monetarypolicy/fomcprojtabl20260916.htm', 'direct'],
+    fedCal: ['Federal Reserve: FOMC meeting calendar (links each dated projections table)', 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm', 'direct'],
+    gdpc1: ['FRED: real GDP (GDPC1), to measure historical real growth', 'https://fred.stlouisfed.org/series/GDPC1', 'raw'],
+    damPrques: ['Damodaran: valuation project questions ("Terminal price": stable growth, reinvestment, ROIC)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/project/prques.htm', 'method'],
+    damMargin: ['Damodaran: operating and net margins by industry (EBITDA/Sales column)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html', 'direct'],
+    damRoc: ['Damodaran: return on capital by industry (unadjusted, lease-adjusted, normalized ROIC)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/roc.html', 'direct'],
+    damEbitda: ['Damodaran: EV/EBITDA and other value multiples by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/vebitda.html', 'direct'],
+    damFundG: ['Damodaran: fundamental growth in EBIT (reinvestment rate × return on capital)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/fundgrEB.html', 'direct'],
+    capiq: ['S&P Capital IQ / FactSet (peer EV/EBITDA, consensus EBITDA)', 'https://www.spglobal.com/market-intelligence/en/solutions/sp-capital-iq-pro', 'direct', true],
     bloomberg: ['Bloomberg Terminal (BETA function, bond yields)', 'https://www.bloomberg.com/professional/', 'direct', true],
   };
   const W = {
@@ -3727,7 +3843,82 @@ const DCFHelp = (() => {
       example: 'Hypothetical: E = 800, D = 200: 800 ÷ 1,000 = 80%.', choose: ['Use market values, or a target structure for a company that is changing its financing.'], scen: 'Normally the same across scenarios.', mistakes: ['Book values'], sources: [S.edgar],
     },
   };
-  return { W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
+  // ---- terminal value guides: what, why, where, how, example, forecast, scenarios, mistakes ----
+  const T = {
+    tg: {
+      what: 'The rate at which free cash flow grows every year after year 10, forever. It is the g in the Gordon formula TV = FCFF₁₁ ÷ (WACC − g).',
+      why: 'Terminal value is often 60–80% of enterprise value, and g sits in the denominator next to WACC. Half a point of g can move value per share by 10% or more. In this model g also sets terminal reinvestment (g ÷ ROIC), so a higher g is not free.',
+      where: [['Federal Reserve projections (free)', S.fedSep, ['Open Table 1 and read the "Longer run" column.', '"Change in real GDP" median: long-run real growth (2.0% in the September 16, 2026 table).', '"PCE inflation" median: long-run inflation (2.0%).', 'Record the release date. New tables come out four times a year: the FOMC calendar links each one.']],
+        ['IMF World Economic Outlook (free)', S.imfData, ['Open the WEO dataset.', 'Choose the country whose economy the cash flows track (for a global US-dollar company, US or world).', 'Take real GDP growth and consumer-price inflation for the last projection year (five years out).', 'Note the WEO edition (April or October).']],
+        ['Treasury yield as a ceiling (free)', S.dgs10, ['The 10-year Treasury yield on your valuation date is a commonly used ceiling for nominal long-run growth.']],
+        ['Damodaran on stable growth (free)', S.damPrques, ['Read "Terminal price": stable growth should not exceed the growth rate of the economy, and as a rule of thumb not the risk-free rate.']]],
+      calc: { formula: 'Nominal long-run growth = (1 + real GDP growth) × (1 + inflation) − 1', vars: [['Real GDP growth', 'Long-run real growth of the economy the company sells into'], ['Inflation', 'Long-run inflation in the currency of the cash flows']], steps: ['Pick a long-run real growth and inflation forecast and record the source and date.', 'Combine them with the formula (adding them is a close approximation).', 'Decide whether this company should grow at, below or (rarely) above the economy forever, and why.', 'Check g is below WACC and compare it with the risk-free rate.'] },
+      example: 'Real figures, Federal Reserve Summary of Economic Projections, September 16, 2026, "Longer run" medians: real GDP 2.0%, PCE inflation 2.0%. Calculation: (1.020 × 1.020) − 1 = 4.04%. A company expected to grow with the US economy forever would use about 4%; one losing share would use less. The 10-year Treasury was 4.94% on October 30, 2026, so 4.04% is below the risk-free rate.',
+      forecast: ['Start from long-run nominal growth of the economy the cash flows depend on, in the cash-flow currency.', 'Mature companies in mature industries usually grow at or below the economy: perpetual growth above it means the company eventually becomes the economy.', 'Use the risk-free rate as a discipline, not an identity: g above it needs a written reason.', 'g must be the same kind of number as the cash flows: nominal dollars here.'],
+      scen: 'Terminal growth can be the same in all three scenarios: long-run growth of the economy does not depend on how the next ten years go. Different values are justified when a scenario changes the company\'s long-run position (for example, share loss in Bear). Do not widen the range only to widen it.',
+      mistakes: ['Using recent company growth (10%+) as perpetual growth', 'Real growth with nominal cash flows (too low) or nominal growth with real cash flows (too high)', 'g equal to or above WACC (no finite value)', 'Raising g without raising reinvestment: in this model reinvestment = g ÷ ROIC handles this for you', 'Using GDP of a fast-growing country for dollar cash flows of a mature business'],
+      sources: [S.fedSep, S.fedCal, S.imfData, S.imfWeo, S.dgs10, S.damPrques],
+    },
+    tem: {
+      what: 'The EBITDA margin in year 11, the first year of the terminal period. It is held for every year after that.',
+      why: 'Year-11 EBITDA drives year-11 NOPAT and so the whole Gordon terminal value; in Exit Multiple mode the multiple is applied to year-10 EBITDA, so the year-10 margin matters there instead.',
+      where: [['Company history (free)', S.edgar, ['10-K income statement: operating income. Cash flow statement: depreciation and amortization.', 'EBITDA = operating income + D&A. Margin = EBITDA ÷ revenue, for each of the last five years and the TTM.', 'The historical calculator on this page does this from your imported filings and shows each figure.']],
+        ['Industry margins (free)', S.damMargin, ['Find your industry row and read the "EBITDA/Sales" column.', 'Data as of January 2026: Total Market 16.56%, Total Market without financials 17.42%.', 'Use mature peers within the industry rather than the full average when the industry mixes young and mature firms.']],
+        ['Segments (free)', S.edgar, ['10-K segment note: revenue and operating income per segment. Mature segments show where the company margin could settle.']]],
+      calc: { formula: 'EBITDA margin = (operating income + D&A) ÷ revenue', vars: [['Operating income', 'Income statement (EBIT)'], ['D&A', 'Cash flow statement'], ['Revenue', 'Income statement']], steps: ['Compute it for each year and the TTM.', 'Look at the average, median and trend, and remove one-off items you can identify.', 'Compare with mature peers and the industry.', 'Decide where the margin settles once growth slows, and set year 10 so year 11 is not a jump.'] },
+      example: 'Real figures, Amazon FY2025 10-K (accession 0001018724-26-000004, $ millions): operating income 79,975 + D&A 65,756 = EBITDA 145,731; revenue 716,924; margin = 145,731 ÷ 716,924 = 20.3%. Industry reference: Damodaran\'s January 2026 Total Market EBITDA/Sales is 16.56%.',
+      forecast: ['Steady-state margins reflect competition: a margin far above peers forever needs a lasting advantage.', 'Margins in year 10 and year 11 should normally be close; a step-up applied forever is a big claim.', 'Keep the EBITDA definition consistent: this model uses calculated EBITDA with stock-based compensation as a cost.'],
+      scen: 'Bear, Base and Bull often differ here, because they describe how competitive the company is at maturity. Each value should match that scenario\'s story.',
+      mistakes: ['Using "adjusted EBITDA" (adds back stock compensation) in a model that treats it as a cost', 'A margin jump between year 10 and 11', 'Best-in-class margin forever without evidence', 'Using peers\' EBITDA margin when leases are treated differently (IFRS vs US GAAP)'],
+      sources: [S.edgar, S.damMargin],
+    },
+    troic: {
+      what: 'The return the company earns on new capital it invests after year 10. It sets how much of profit must be reinvested to grow at g.',
+      why: 'Reinvestment rate = g ÷ ROIC, and terminal FCFF = NOPAT × (1 − g ÷ ROIC). A higher ROIC means less reinvestment for the same growth and so more cash flow. When ROIC equals WACC, growth adds no value.',
+      where: [['Company history', S.edgar, ['NOPAT = operating income × (1 − tax rate).', 'Invested capital = equity + debt + lease liabilities − cash and short-term investments (balance sheet, financing side).', 'ROIC = NOPAT ÷ average invested capital. The calculator on this page does it line by line.']],
+        ['Industry ROIC (free)', S.damRoc, ['Columns: unadjusted (as reported), lease-adjusted (operating leases as debt and lease expense reclassified), lease & R&D adjusted (R&D capitalised), and normalized ROIC (a 10-year average).', 'For a terminal value, the normalized after-tax column is the most relevant: it averages over a cycle.', 'Data as of January 2026 per the page header (the footer still says January 2025): Total Market without financials, unadjusted after-tax 18.92%, normalized 14.92%.']],
+        ['Damodaran on stable growth', S.damPrques, ['"Return on capital should move towards the cost of capital" and "Stable reinvestment rate = Stable Growth rate / Stable period Return on Capital".']]],
+      calc: { formula: 'ROIC = NOPAT ÷ average invested capital; reinvestment rate = g ÷ ROIC; terminal FCFF = NOPAT₁₁ × (1 − g ÷ ROIC)', vars: [['NOPAT', 'EBIT × (1 − tax rate)'], ['Invested capital', 'Equity + debt + leases − cash (financing side), or net working capital + net fixed assets + intangibles (operating side)'], ['g', 'Terminal growth']], steps: ['Measure historical ROIC with a stated definition.', 'Decide whether today\'s ROIC on new investments can last forever, or fades toward WACC.', 'The model then calculates reinvestment = g ÷ ROIC; you do not enter terminal CapEx separately.'] },
+      example: 'Hypothetical: g 2.5%, ROIC 10%: reinvestment rate = 2.5% ÷ 10% = 25%. If NOPAT₁₁ = 1,000, terminal FCFF = 1,000 × (1 − 25%) = 750.',
+      forecast: ['ROIC is not required to exceed WACC. ROIC above WACC: growth creates value. Equal: growth is neutral. Below: growth destroys value.', 'Use ROIC on new investment, which can be lower than the average return on existing assets.', 'Very high terminal ROIC with low reinvestment overstates value; compare with the industry normalized ROIC.'],
+      scen: 'Can differ by scenario if competitive advantage differs: a Bear case where returns fade to WACC and a Bull case that keeps an advantage are both reasonable stories.',
+      mistakes: ['Hardcoding ROIC above WACC by habit', 'Using pre-tax ROIC with after-tax NOPAT', 'Mixing lease-adjusted ROIC with unadjusted cash flows', 'Ignoring that terminal reinvestment (g ÷ ROIC) should be close to year-10 reinvestment, or FCFF jumps'],
+      sources: [S.damRoc, S.damFundG, S.damPrques, S.edgar],
+    },
+    tvMethod: {
+      what: 'How the value after year 10 is estimated. Gordon Growth: next year\'s free cash flow ÷ (WACC − g). Exit Multiple: year-10 EBITDA × an EV/EBITDA multiple.',
+      why: 'The method decides whether the terminal value rests on cash-flow fundamentals or on how the market prices peers today.',
+      where: [['Damodaran (free)', S.damPrques, ['"If you are doing a discounted cash flow valuation, it is not a good practice to estimate the terminal value using a multiple. That introduces a relative value component."']]],
+      calc: { formula: 'Gordon: TV₁₀ = FCFF₁₁ ÷ (WACC − g). Exit: TV₁₀ = EBITDA₁₀ × multiple. PV = TV ÷ (1 + WACC)^period', vars: [['FCFF₁₁', 'Year-11 free cash flow = NOPAT × (1 − g ÷ ROIC)'], ['EBITDA₁₀', 'Year-10 EBITDA (trailing at the exit date)'], ['period', 'Gordon with mid-year timing: 9.5 (cash flows arrive mid-year); exit multiple: 10 (a sale price at the end of year 10)']], steps: ['Choose a primary method and keep the other as a cross-check.', 'Compare the implied EV/EBITDA of the Gordon value with peers, and the implied growth of the exit value with the economy.'] },
+      example: 'Hypothetical: FCFF₁₁ 750, WACC 9%, g 2.5%: TV = 750 ÷ 6.5% = 11,538. With EBITDA₁₀ of 1,400 that is an implied 8.2× EBITDA.',
+      forecast: ['Use Gordon as the primary method when you can defend g and ROIC.', 'Use the exit multiple as a cross-check, or as primary only if your purpose is a transaction-style value.'],
+      scen: 'Usually the same method in every scenario, so the scenarios differ in business assumptions, not in method.',
+      mistakes: ['Applying a forward multiple to trailing EBITDA', 'A peer multiple that reflects today\'s high growth applied to a mature year-10 company', 'Not checking what growth the exit multiple implies'],
+      sources: [S.damPrques, S.damEbitda],
+    },
+    exitMult: {
+      what: 'The EV ÷ EBITDA multiple at which the business could be valued at the end of year 10. The model applies it to year-10 EBITDA.',
+      why: 'In Exit Multiple mode it sets the whole terminal value: TV = EBITDA₁₀ × multiple.',
+      where: [['Industry multiples (free)', S.damEbitda, ['Find your industry and read the EV/EBITDA column. Data as of January 2026: Total Market 19.73× (positive-EBITDA firms), 16.95× without financials.', 'These are today\'s multiples, which include today\'s growth expectations; a company in year 10 is more mature.']],
+        ['Peers (free)', S.yahoo, ['Statistics page of each peer: "Enterprise Value/EBITDA" (trailing). Record the date and whether it is trailing or forward.']],
+        ['Paid data', S.capiq, ['Trading comps and precedent transactions with consistent EBITDA definitions.']]],
+      calc: { formula: 'EV/EBITDA = (equity value + debt + other claims − cash and nonoperating assets) ÷ EBITDA', vars: [['EV', 'Enterprise value, consistent with the claims subtracted in your equity bridge'], ['EBITDA', 'Trailing twelve months (or next year for a forward multiple)']], steps: ['Collect peers with the same definition and date.', 'Take the median and the range; do not average extremes.', 'Adjust down if peers grow faster than your year-10 company will.'] },
+      example: 'Hypothetical peers: 9×, 11×, 12×, 14×: median 11.5×. Year-10 EBITDA 1,400: TV = 16,100.',
+      forecast: ['Think about the multiple a mature version of the company would trade at, not today\'s.', 'Cross-check: the multiple implied by your Gordon value; and the growth rate implied by your multiple.'],
+      scen: 'Can differ by scenario if the scenarios describe different end states. Keep each consistent with that scenario\'s growth and ROIC.',
+      mistakes: ['Inventing a multiple without peers or a source', 'Forward multiple × trailing EBITDA', 'Peer EV that excludes leases while your bridge subtracts them'],
+      sources: [S.damEbitda, S.yahoo, S.capiq],
+    },
+    tcapex: {
+      what: 'Original-workbook mode only: capital spending in the terminal year as a share of revenue. The corrected model uses reinvestment = g ÷ ROIC instead.',
+      why: 'In the workbook, terminal FCFF = NOPAT + D&A − CapEx − change in NWC − acquisitions, so this sets terminal reinvestment.',
+      where: [['Company history', S.edgar, ['Cash flow statement: purchases of property and equipment ÷ revenue.']]],
+      calc: { formula: 'Terminal CapEx % = CapEx ÷ revenue in steady state', vars: [], steps: ['Steady state: CapEx a little above D&A, enough to support growth g.'] },
+      example: 'Hypothetical: D&A 5% of revenue, growth 2.5%: CapEx around 5.5–6% of revenue.',
+      forecast: ['CapEx below D&A forever shrinks the asset base.'], scen: 'Usually close across scenarios.', mistakes: ['Setting both terminal CapEx and a ROIC-based reinvestment (counting reinvestment twice)'], sources: [S.edgar],
+    },
+  };
+  return { T, W, S, H, G, F, SRC_FORECAST, example, companyExample, searchUrl, edgarSearch, srcLine, n0, n1, pc };
 })();
 if (typeof module !== 'undefined') module.exports = DCFHelp;
 
@@ -4336,7 +4527,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       let note = '';
       if (f.key === 'exitMult') note = 'Needed only for scenarios that use Exit Multiple.';
       if (!rel && f.key !== 'exitMult') note = 'Not used by the current method.';
-      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : '');
+      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : g === 'terminal' ? tvAidRow(f) : '');
       else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}`;
     });
     // calculated rows for some groups
@@ -4955,7 +5146,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
   function applyWUse(u) {
     const targets = u.scope === 'all' ? SC : [u.scope];
     targets.forEach(x => { const from = cur.inputs[u.key][x]; if (from !== u.v) { DCFModel.logChange(cur, u.key, x, from, u.v); cur.inputs[u.key][x] = u.v; } });
-    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'WACC research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the WACC research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
+    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'Research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the ${TV_KEYS.includes(u.key) || u.key === 'em10' ? 'terminal value' : 'WACC'} research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
     if (cur.defaults) delete cur.defaults[u.key];
     wUse = null; persist(); render(); toast(`${FBY[u.key].label} set to ${plain(fmtVal(u.key, u.v))} for ${u.scope === 'all' ? 'all three scenarios' : u.scope}. The change is in the log.`);
   }
@@ -4979,6 +5170,141 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       persist();
     } catch (e) { rfStatus = 'This browser could not read the Treasury data. Open the Treasury or FRED link, then type the yield and date below.'; }
     render();
+  }
+  // ---------- terminal value guides, calculators, comparison and worksheet ----------
+  const TV_KEYS = ['tg', 'tem', 'troic', 'tvMethod', 'exitMult'];
+  const TNOTE_FIELDS = [['selected', 'Selected value', 'text'], ['how', 'How I calculated it', 'area'], ['hist', 'Historical data used', 'area'], ['evidence', 'Evidence and source URLs (one per line)', 'area'], ['dates', 'Reporting dates of the sources', 'text'], ['why', 'My reasoning', 'area'], ['risks', 'Risks to this assumption', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
+  const TV_TOOL = { tg: 'tv-g', tem: 'tv-mg', troic: 'tv-roic', tvMethod: 'tv-cmp', exitMult: 'tv-cmp', tcapex: null };
+  function tvSections(key, compact) {
+    const w = DCFHelp.T[key]; if (!w) return '';
+    const id = x => `t-${key}-${x}${compact ? '-i' : ''}`;
+    const sec = (x, t, body) => `<details class="dsec2" data-aid="${id(x)}" ${aidOpen[id(x)] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+    const li = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    const where = w.where.map(([h, src, steps]) => `<div class="wstep"><b>${esc(h)}</b> ${srcLink(src)}<ol>${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`).join('');
+    const cik = cur.meta && cur.meta.cik;
+    const co = cik && ['tem', 'troic'].includes(key) ? `<div class="wstep"><b>For ${esc(cur.inputs.company.name || 'this company')}</b><ul><li>${srcLink([`${cur.inputs.company.name || 'This company'}: filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw'])}</li>${key === 'tem' ? `<li>${srcLink(['Search its filings for "segment information"', DCFHelp.edgarSearch('segment information', cik), 'raw'])}</li>` : `<li>${srcLink(['Search its filings for "total stockholders\' equity"', DCFHelp.edgarSearch("total stockholders' equity", cik), 'raw'])}</li>`}</ul></div>` : '';
+    const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}${w.calc.steps.length ? `<ol>${w.calc.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${TV_TOOL[key] && cur.mode === 'corrected' ? `<p><button class="btn tiny" data-tv-tool="${TV_TOOL[key]}">Calculate this for me</button> <span class="footnote">opens the calculator on the Terminal value page; it uses only figures you enter or that were imported, and fills nothing until you click a scenario.</span></p>` : ''}`;
+    return `<p class="wquick">${esc(w.what)}</p>
+      ${sec('why', 'Why it matters', `<p>${esc(w.why)}</p>`)}
+      ${sec('where', 'Where to find it', where + co)}
+      ${sec('calc', 'How to calculate it', calcB)}
+      ${sec('ex', 'Worked example', `<p>${esc(w.example)}</p>`)}
+      ${sec('fc', 'How to forecast it', li(w.forecast))}
+      ${sec('scen', 'Bear, Base and Bull', `<p>${esc(w.scen)}</p><p class="footnote">Your values: ${SC.map(x => `${x} ${fmtVal(key, cur.inputs[key][x])}`).join(' · ')}</p>`)}
+      ${sec('mist', 'Common mistakes', li(w.mistakes))}
+      ${sec('src', 'Sources', `<ul>${w.sources.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
+      ${compact && cur.ui && cur.ui.tvWork ? '<p class="footnote">Your research notes for this input are in "My work" below.</p>' : sec('notes', 'My research notes' + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, TNOTE_FIELDS))}`;
+  }
+  function tvAidRow(f) {
+    if (cur.ui && cur.ui.learn === false) return '';
+    if (!DCFHelp.T[f.key]) return '';
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${tvSections(f.key, true)}</details></div>`;
+  }
+  function tvState() {
+    cur.tvTools = cur.tvTools || {}; const T = cur.tvTools;
+    T.g = T.g || {}; T.mg = T.mg || {}; T.mg.peers = T.mg.peers || [{}, {}, {}, {}]; T.seg = T.seg || [{}, {}, {}, {}]; T.roic = T.roic || {}; T.roic.rows = T.roic.rows || [{}, {}, {}, {}]; T.peers = T.peers || [{}, {}, {}, {}, {}];
+    return T;
+  }
+  const tvIn = (path, unit, label, ph = 'Enter') => {
+    const id = 'tv-' + path.replace(/\./g, '-'), v = path.split('.').reduce((o, k) => o == null ? o : o[k], tvState());
+    if (unit === 'text' || unit === 'date') return `<input type="${unit === 'date' ? 'date' : 'text'}" class="txt" data-t="tv" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}">`;
+    if (Array.isArray(unit)) return `<select data-t="tv" data-k="${path}" data-unit="choice" id="${id}" aria-label="${esc(label)}"><option value="">Choose…</option>${unit.map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    return `<div class="inwrap"><input type="text" inputmode="decimal" data-t="tv" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${esc(ph)}" aria-label="${esc(label)}"><span class="unit">${unit === 'pct' ? '%' : unit === 'usd_mm' ? '$mm' : unit === 'x' ? '×' : ''}</span></div>${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`;
+  };
+  const pc2 = (v, d = 2) => isNum(v) ? (v * 100).toFixed(d) + '%' : '<span class="na">—</span>';
+  const xx = v => isNum(v) ? v.toFixed(1) + '×' : '<span class="na">—</span>';
+  const mm0 = v => isNum(v) ? fmt.mm(v) : '<span class="na">—</span>';
+  function tvToolsHtml() {
+    const T = tvState(), I = cur.inputs, { all } = calc(), s = cur.active, corr = cur.mode === 'corrected';
+    const det = (id, title, sub, body) => `<details class="panel tool" id="${id}" data-aid="${id}" ${aidOpen[id] ? 'open' : ''}><summary><b>${title}</b> <span class="footnote">${sub}</span></summary>${body}</details>`;
+    // 1. terminal growth
+    const nom = DCFAnalysis.nominalGrowth(T.g.real, T.g.infl);
+    const gRows = SC.map(x => { const r = all.scen[x], w = r.ok ? r.waccUsed : DCFAnalysis.waccParts(cur, x).wacc, g = I.tg[x], rf = I.rf[x];
+      return `<tr><td>${x}</td><td class="num">${pc2(g)}</td><td class="num">${pc2(rf)}</td><td class="num">${pc2(w)}</td><td>${isNum(g) && isNum(w) ? (g < w ? '<span class="pill good">below WACC</span>' : '<span class="pill bad">not below WACC</span>') : '—'} ${isNum(g) && isNum(rf) ? (g <= rf ? '<span class="pill good">at or below risk-free</span>' : '<span class="pill warn">above risk-free: explain</span>') : ''}</td></tr>`; }).join('');
+    const gB = `<p>${srcLink(DCFHelp.S.fedSep)}<br>${srcLink(DCFHelp.S.imfData)}<br>${srcLink(DCFHelp.S.damPrques)}</p>
+      <div class="tgrid"><label>Long-run real GDP growth ${tvIn('g.real', 'pct', 'Real GDP growth')}</label><label>Long-run inflation ${tvIn('g.infl', 'pct', 'Inflation')}</label><label>Source ${tvIn('g.src', 'text', 'Source', 'e.g. Fed SEP longer run')}</label><label>Source date ${tvIn('g.date', 'date', 'Source date')}</label></div>
+      ${isNum(nom) ? `<p>(1 + ${pc2(T.g.real)}) × (1 + ${pc2(T.g.infl)}) − 1 = <b>${pc2(nom)}</b> ${catBadge('calc')} · ${esc(T.g.src || 'source not noted')}${T.g.date ? ', ' + esc(T.g.date) : ''}. ${useBtns('tg', Math.round(nom * 1e6) / 1e6, pc2(nom), `Nominal growth = (1 + real ${pc2(T.g.real)}) × (1 + inflation ${pc2(T.g.infl)}) − 1; ${T.g.src || ''} ${T.g.date || ''}`)}</p>` : '<p class="footnote">Enter both rates to calculate. Nothing is assumed for you.</p>'}
+      <p class="footnote">Reference, not filled in: the Federal Reserve's September 16, 2026 projections show longer-run medians of 2.0% real GDP growth and 2.0% PCE inflation ${catBadge('market', 'Federal Reserve, Summary of Economic Projections')}, which combine to (1.02 × 1.02) − 1 = 4.04%. Whether this company grows with the economy, slower or faster is your judgment.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>Terminal g</th><th>Risk-free</th><th>WACC</th><th>Checks</th></tr></thead><tbody>${gRows}</tbody></table></div>
+      <p class="footnote">g below WACC is required for the Gordon formula. g at or below the risk-free rate is a discipline (Damodaran's rule of thumb), not an identity: a higher g is flagged for a written reason, never blocked.</p>`;
+    // 2. historical margin
+    const A = calc().anchors.tem, ser = DCFAnalysis.series(cur), st = DCFAnalysis.stats(A.vals);
+    const fyCols = ser.fy.map((y, i) => ({ y, m: A.vals[i] })).filter(c => c.y.label).reverse();
+    const peerM = T.mg.peers.filter(p => isNum(p.m)), pst = DCFAnalysis.stats(peerM.map(p => p.m));
+    const cand = [['latest fiscal year', A.latestFY, A.latestLabel], ['TTM', A.ttm, A.ttmLabel], ['five-year average', st && st.n >= 3 ? st.mean : null, st ? st.n + ' years' : ''], ['five-year median', st && st.n >= 3 ? st.median : null, ''], ['peer median', pst ? pst.median : null, pst ? pst.n + ' peers you entered' : '']];
+    const mgB = `<div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th>${fyCols.map(c => `<th>${esc(c.y.label)}</th>`).join('')}${ser.ttm ? `<th>${esc(ser.ttm.label)}</th>` : ''}</tr></thead><tbody>
+        <tr><td>Revenue ${catBadge('sec')}</td>${fyCols.map(c => `<td class="num">${mm0(c.y.rev)}</td>`).join('')}${ser.ttm ? `<td class="num">${mm0(ser.ttm.rev)}</td>` : ''}</tr>
+        <tr><td>EBITDA = gross profit − operating costs excl. D&A ${catBadge('calc')}</td>${fyCols.map(c => `<td class="num">${mm0(c.y.ebitda)}</td>`).join('')}${ser.ttm ? `<td class="num">${mm0(ser.ttm.ebitda)}</td>` : ''}</tr>
+        <tr class="total"><td>EBITDA margin ${catBadge('calc')}</td>${fyCols.map(c => `<td class="num">${pc2(c.m, 1)}</td>`).join('')}${ser.ttm ? `<td class="num">${pc2(A.ttm, 1)}</td>` : ''}</tr></tbody></table></div>
+      <p>${st ? `Average ${pc2(st.mean, 1)} · median ${pc2(st.median, 1)} · range ${pc2(st.min, 1)}–${pc2(st.max, 1)} · trend ${isNum(st.slope) ? (st.slope >= 0 ? '+' : '') + (st.slope * 100).toFixed(2) + ' points a year' : 'needs three years'} (${st.n} years)` : 'No historical margins: import filings or fill in the historical financials.'}</p>
+      <p class="footnote">${esc(A.note || '')}</p>
+      <h3 class="sub-h">Peers and industry</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Peer or industry</th><th>EBITDA margin</th><th>Source and date</th></tr></thead><tbody>${T.mg.peers.map((p, i) => `<tr><td>${tvIn(`mg.peers.${i}.name`, 'text', 'Peer', i === 0 ? 'e.g. Damodaran: Retail (General)' : 'Peer ' + i)}</td><td>${tvIn(`mg.peers.${i}.m`, 'pct', 'Peer margin')}</td><td>${tvIn(`mg.peers.${i}.src`, 'text', 'Source', '10-K FY2025 / Damodaran Jan 2026')}</td></tr>`).join('')}</tbody></table></div>
+      <p class="footnote">${srcLink(DCFHelp.S.damMargin)}. Reference: January 2026 Total Market EBITDA/Sales 16.56% (17.42% without financials) ${catBadge('provider', 'Damodaran Online')}.</p>
+      <h3 class="sub-h">Choose a starting point</h3><ul>${cand.map(([l, v, n]) => `<li>${esc(l)}: <b>${pc2(v, 1)}</b>${n ? ` <span class="footnote">${esc(n)}</span>` : ''} ${useBtns('tem', isNum(v) ? Math.round(v * 1e5) / 1e5 : null, l + ' margin', `Terminal EBITDA margin from the ${l} (${isNum(v) ? (v * 100).toFixed(1) + '%' : ''})`)}</li>`).join('')}</ul>
+      <h3 class="sub-h">Year 10 to year 11</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>Year 10 margin (your path)</th><th>Terminal (year 11)</th><th>Step</th><th></th></tr></thead><tbody>${SC.map(x => { const a = I.em10[x], b = I.tem[x]; return `<tr><td>${x}</td><td class="num">${pc2(a, 1)}</td><td class="num">${pc2(b, 1)}</td><td class="num">${isNum(a) && isNum(b) ? `<span class="pill ${Math.abs(b - a) > 0.02 ? 'warn' : 'good'}">${((b - a) * 100 >= 0 ? '+' : '') + ((b - a) * 100).toFixed(1)} pts</span>` : '—'}</td><td>${isNum(b) && isNum(a) && Math.abs(b - a) > 1e-9 ? `<button class="btn tiny" data-wuse="em10" data-v="${b}" data-scope="${x}" data-note="Year-10 margin set to the terminal margin so years 6–10 converge gradually">Converge years 6–10 to ${pc2(b, 1)}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="footnote">Years 6–9 step evenly from your year-5 margin to your year-10 margin. Setting year 10 equal to the terminal margin makes the change gradual instead of a jump in year 11. It changes your year-10 margin input, so it asks first.</p>`;
+    // 3. segment estimator
+    const latestRev = (() => { for (let i = 4; i >= 0; i--) if (isNum(ser.fy[i].rev)) return { v: ser.fy[i].rev, l: ser.fy[i].label }; return null; })();
+    const sm = DCFAnalysis.segMargin(T.seg, T.segUnalloc, latestRev && latestRev.v);
+    const segB = `<p class="footnote">From the 10-K segment note: each segment's revenue and your view of its mature EBITDA margin. Unallocated or corporate costs come from the segment reconciliation table.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Segment</th><th>Revenue ($mm)</th><th>Mature EBITDA margin</th></tr></thead><tbody>${T.seg.map((x, i) => `<tr><td>${tvIn(`seg.${i}.name`, 'text', 'Segment', 'Segment ' + (i + 1))}</td><td>${tvIn(`seg.${i}.rev`, 'usd_mm', 'Segment revenue')}</td><td>${tvIn(`seg.${i}.m`, 'pct', 'Segment margin')}</td></tr>`).join('')}</tbody></table></div>
+      <label>Unallocated / corporate costs ($mm) ${tvIn('segUnalloc', 'usd_mm', 'Unallocated costs')}</label>
+      ${sm ? `<p>Σ(revenue × margin) − unallocated = ${mm0(sm.ebitda)} on revenue ${mm0(sm.rev)}: consolidated margin <b>${pc2(sm.margin, 1)}</b> ${catBadge('calc')}. ${isNum(sm.gap) ? (Math.abs(sm.gap) > 0.02 ? `<span class="pill warn">Segments add to ${(sm.gap * 100 >= 0 ? '+' : '') + (sm.gap * 100).toFixed(1)}% vs ${esc(latestRev.l)} revenue ${mm0(latestRev.v)}: check periods and intersegment eliminations</span>` : `<span class="pill good">reconciles to ${esc(latestRev.l)} revenue</span>`) : ''} ${useBtns('tem', Math.round(sm.margin * 1e5) / 1e5, 'segment margin', 'Segment-weighted terminal EBITDA margin')}</p>` : ''}`;
+    // 4. ROIC
+    const RR = DCFAnalysis.histRoic(T.roic.rows);
+    const rr = RR.filter(r => isNum(r.roic)), rst = DCFAnalysis.stats(rr.map(r => r.roic));
+    const fin = (cur.fin && cur.fin.years) || [];
+    const hint = (i, k) => { const y = fin[3 - i]; if (!y || !y.values) return ''; const V = y.values; if (k === 'ebit' && isNum(V.ebit)) return nf(V.ebit) + ' (' + y.label + ')'; if (k === 'tax' && isNum(V.tax) && isNum(V.ebt) && V.ebt) return (V.tax / V.ebt * 100).toFixed(1) + ' (' + y.label + ' effective)'; if (k === 'label') return y.label; return ''; };
+    const roicB = `<p class="footnote">Definition used: NOPAT = operating income × (1 − tax rate). Invested capital = total equity + total debt + lease liabilities − cash and short-term investments, from the balance sheet at each year end (financing side). ROIC = NOPAT ÷ average of opening and closing invested capital. Oldest year first; the first row only supplies opening capital. Grey hints are your imported filing figures: type them in to use them.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Year</th><th>EBIT</th><th>Tax rate</th><th>Equity</th><th>Debt</th><th>Leases</th><th>Cash & ST inv.</th><th>NOPAT</th><th>Invested capital</th><th>ROIC</th></tr></thead><tbody>${RR.map((r, i) => `<tr><td>${tvIn(`roic.rows.${i}.label`, 'text', 'Year', hint(i, 'label') || 'FY')}</td><td>${tvIn(`roic.rows.${i}.ebit`, 'usd_mm', 'EBIT', hint(i, 'ebit'))}</td><td>${tvIn(`roic.rows.${i}.tax`, 'pct', 'Tax rate', hint(i, 'tax'))}</td><td>${tvIn(`roic.rows.${i}.equity`, 'usd_mm', 'Equity')}</td><td>${tvIn(`roic.rows.${i}.debt`, 'usd_mm', 'Debt')}</td><td>${tvIn(`roic.rows.${i}.leases`, 'usd_mm', 'Leases')}</td><td>${tvIn(`roic.rows.${i}.cash`, 'usd_mm', 'Cash')}</td><td class="num">${mm0(r.nopat)}</td><td class="num">${mm0(r.ic)}</td><td class="num">${pc2(r.roic, 1)}</td></tr>`).join('')}</tbody></table></div>
+      ${rr.length ? `<p>${rr.map(r => `${esc(r.label || 'Year')}: ${nf(r.nopat)} ÷ ${nf(r.avgIC)} = ${pc2(r.roic, 1)}`).join(' · ')}${rst ? ` · average <b>${pc2(rst.mean, 1)}</b>` : ''} ${catBadge('calc')}</p><p>${rr.map(r => `${esc(r.label || '')} ${useBtns('troic', Math.round(r.roic * 1e5) / 1e5, (r.label || '') + ' ROIC', `Historical ROIC ${r.label || ''}: NOPAT ÷ average invested capital`)}`).join('<br>')}${rst && rst.n > 1 ? `<br>average ${useBtns('troic', Math.round(rst.mean * 1e5) / 1e5, 'average ROIC', 'Average historical ROIC, ' + rst.n + ' years')}` : ''}</p>` : ''}
+      <p class="footnote">${srcLink(DCFHelp.S.damRoc)}. Columns: unadjusted (as reported), lease-adjusted (operating leases treated as debt), lease and R&D adjusted (R&D capitalised), normalized (10-year average). January 2026 data, Total Market without financials: 18.92% unadjusted after-tax, 14.92% normalized ${catBadge('provider', 'Damodaran Online; the page footer still says January 2025')}. Compare like with like: this calculator is unadjusted.</p>
+      <h3 class="sub-h">Reinvestment and terminal free cash flow</h3>
+      ${corr ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>g</th><th>ROIC</th><th>Reinvestment = g ÷ ROIC</th><th>NOPAT, year 11</th><th>FCFF₁₁ = NOPAT × (1 − rate)</th><th>Year-10 reinvestment rate</th><th>FCFF₁₀</th></tr></thead><tbody>${SC.map(x => { const r = all.scen[x]; if (!r.ok) return `<tr><td>${x}</td><td colspan="7" class="na">Scenario does not calculate yet</td></tr>`; const y10 = r.years[9], y11 = r.years[10]; return `<tr><td>${x}</td><td class="num">${pc2(r.g)}</td><td class="num">${pc2(I.troic[x], 1)}</td><td class="num">${pc2(y11.reinvestRate, 1)}</td><td class="num">${mm0(y11.nopat)}</td><td class="num">${mm0(y11.fcff)}</td><td class="num">${pc2(y10.reinvRateModel, 1)}</td><td class="num">${mm0(y10.fcff)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="footnote">No double counting: in the terminal year the model does not use your CapEx, D&A, working-capital or acquisition inputs. All terminal reinvestment comes from g ÷ ROIC. Years 1–10 use the explicit lines. If the year-10 and terminal reinvestment rates are far apart, free cash flow jumps between year 10 and 11.</p>` : '<p class="footnote">Original-workbook mode: the terminal year uses terminal CapEx and the other explicit lines instead of g ÷ ROIC.</p>'}`;
+    // 5. method comparison
+    const C = SC.map(x => DCFAnalysis.tvCompare(cur, x));
+    const cell = (c, m, f) => { const o = m === 'G' ? c.G : c.X; return o.ok ? f(o) : `<span class="na" title="${esc(o.why)}">—</span>`; };
+    const rowsC = [['Terminal value at end of year 10', o => mm0(o.tv)], ['Discount period (years)', o => o.period.toFixed(1)], ['Present value of terminal value', o => mm0(o.pvTV)], ['Enterprise value', o => mm0(o.ev)], ['Value per share', o => fmt.usd(o.perShare)], ['Terminal value % of EV', o => pc2(o.tvShare, 1)]];
+    const peers = T.peers.filter(p => isNum(p.m)), ps = DCFAnalysis.stats(peers.map(p => p.m));
+    const cmpB = `<div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${C.map(c => `<th colspan="2">${c.s}</th>`).join('')}</tr><tr><th></th>${C.map(c => `<th>Gordon${c.primary === 'Gordon Growth' ? ' ★' : ''}</th><th>Exit${c.primary === 'Exit Multiple' ? ' ★' : ''}</th>`).join('')}</tr></thead><tbody>
+        ${rowsC.map(([l, f]) => `<tr><td>${l}</td>${C.map(c => `<td class="num">${cell(c, 'G', f)}</td><td class="num">${cell(c, 'X', f)}</td>`).join('')}</tr>`).join('')}
+        <tr class="total"><td>Exit − Gordon, per share</td>${C.map(c => `<td class="num" colspan="2">${c.diff ? `${fmt.usd(c.diff.perShare)} (${(c.diff.pct * 100 >= 0 ? '+' : '') + (c.diff.pct * 100).toFixed(1)}%)` : '—'}</td>`).join('')}</tr>
+        <tr><td>Implied EV/EBITDA of the Gordon value, on year-10 EBITDA</td>${C.map(c => `<td class="num" colspan="2">${c.impl ? xx(c.impl.trailing) : '—'}</td>`).join('')}</tr>
+        <tr><td>… on year-11 EBITDA (forward)</td>${C.map(c => `<td class="num" colspan="2">${c.impl ? xx(c.impl.forward) : '—'}</td>`).join('')}</tr>
+        <tr><td>Growth implied by the exit multiple</td>${C.map(c => { if (!c.X.ok) return '<td colspan="2" class="num">—</td>'; const ig = DCFAnalysis.impliedG(cur, c.s, c.X.pvTV); return `<td class="num" colspan="2">${ig.ok ? ig.roots.map(g => pc2(g)).join(' or ') : `<span class="na" title="${esc(ig.why)}">no solution</span>`}</td>`; }).join('')}</tr>
+      </tbody></table></div>
+      <p class="footnote">★ = the method each scenario uses (your choice in the table above); the other column is a cross-check and is not used in the valuation. Implied growth is solved with the full model: year-11 revenue grows by g and reinvestment = g ÷ ROIC, so FCFF₁₁ changes with g. ${C.some(c => c.impl && c.impl.adj) ? 'With mid-year timing the Gordon value is discounted 9.5 years, so for the implied multiple it is first rolled to the end of year 10 (× (1 + WACC)^0.5), the same date as the exit value.' : ''}</p>
+      <h3 class="sub-h">Exit multiple from peers</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Peer</th><th>EV/EBITDA</th><th>Basis</th><th>Date</th><th>Source</th></tr></thead><tbody>${T.peers.map((p, i) => `<tr><td>${tvIn(`peers.${i}.name`, 'text', 'Peer', 'Peer ' + (i + 1))}</td><td>${tvIn(`peers.${i}.m`, 'x', 'EV/EBITDA')}</td><td>${tvIn(`peers.${i}.basis`, ['Trailing (last-twelve-month EBITDA)', 'Forward (next-year EBITDA)'], 'Basis')}</td><td>${tvIn(`peers.${i}.date`, 'date', 'Date')}</td><td>${tvIn(`peers.${i}.src`, 'text', 'Source', 'e.g. Yahoo statistics')}</td></tr>`).join('')}</tbody></table></div>
+      ${ps ? `<p>Median <b>${xx(ps.median)}</b>, range ${xx(ps.min)}–${xx(ps.max)}, ${ps.n} peers ${catBadge('calc')}. ${useBtns('exitMult', Math.round(ps.median * 100) / 100, 'peer median', `Median EV/EBITDA of ${ps.n} peers you entered`)}</p>` : '<p class="footnote">No multiple is suggested until you enter peers: the calculator never invents one.</p>'}
+      <p class="footnote">${srcLink(DCFHelp.S.damEbitda)}. Reference: January 2026 Total Market EV/EBITDA 19.73× for positive-EBITDA firms (16.95× without financials) ${catBadge('provider', 'Damodaran Online')}. Today's multiples carry today's growth; a mature year-10 business usually trades lower. EV in a multiple = equity value + debt and other claims − cash and nonoperating assets, so use the same claims your equity bridge subtracts.</p>
+      <h3 class="sub-h">Timing</h3>
+      <p class="footnote">${corr ? `Gordon: TV = FCFF₁₁ ÷ (WACC − g), a value at the end of year 10. ${I.midYear === 'Y' ? 'With mid-year timing, cash flows arrive mid-year, so it is discounted 9.5 years.' : 'It is discounted 10 years.'} Exit multiple: year-10 EBITDA × multiple, a sale price at the end of year 10, discounted 10 years. Both use each scenario's WACC and tax rate; the model has no separate terminal WACC or tax rate.` : 'Original-workbook mode keeps the workbook formulas: Gordon uses year-11 cash flow × (1 + g) and the exit multiple uses year-11 EBITDA, both discounted 10 years.'}</p>`;
+    return `<h2 class="sec-h">Terminal value calculators</h2>${wUseConfirm()}
+      ${det('tv-g', 'Terminal growth estimator', 'nominal growth from real GDP and inflation', gB)}
+      ${det('tv-mg', 'Terminal margin from history and peers', 'five years, TTM, average, median, trend', mgB)}
+      ${det('tv-seg', 'Segment margin estimator', 'segment revenue × margin − unallocated costs', segB)}
+      ${det('tv-roic', 'Historical ROIC and reinvestment', 'line by line, then g ÷ ROIC', roicB)}
+      ${det('tv-cmp', 'Gordon vs exit multiple', 'both methods, implied multiple, implied growth', cmpB)}`;
+  }
+  function tvChecksHtml() {
+    const { all } = calc(), list = DCFAnalysis.tvChecks(cur, all, tvState());
+    return `<section class="panel" id="tv-checks"><div class="panel-head"><h2>Terminal value checks</h2><span class="footnote">Warnings only. Nothing is changed for you.</span></div>
+      ${list.length ? `<ul class="flags">${list.map(c => `<li class="${c.level === 'info' ? '' : c.level}">${c.key && FBY[c.key] ? `<button class="linkbtn" data-goto="${c.key}" ${c.s ? `data-s="${c.s}"` : ''}>${esc(FBY[c.key].label)}</button>: ` : ''}${esc(c.text)}</li>`).join('')}</ul>` : '<p class="pill good">No terminal value conflicts found.</p>'}</section>`;
+  }
+  function tvScenarioHtml() {
+    const I = cur.inputs, keys = ['tg', 'tem', 'troic', 'tvMethod', 'exitMult'];
+    const same = keys.filter(k => SC.every(x => I[k][x] === I[k].Base));
+    return `<section class="panel"><div class="panel-head"><h2>Terminal assumptions by scenario</h2></div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${SC.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${keys.map(k => `<tr><td>${esc(FBY[k].label)}</td>${SC.map(x => `<td class="num">${fmtVal(k, I[k][x])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="footnote">${same.length ? `Same in all three scenarios: ${same.map(k => esc(FBY[k].label.toLowerCase())).join(', ')}. That is fine: the long run need not differ between scenarios. ` : ''}Differences belong where the scenarios tell different long-run stories (for example, returns fading to WACC in Bear). The calculator never creates Bear and Bull by adding or subtracting a fixed amount.</p></section>`;
+  }
+  function tvWorkHtml() {
+    return `<section class="panel" id="tv-work"><div class="panel-head"><h2>My work: terminal value research</h2><span class="footnote">Per input and scenario. Saved with the model.</span></div>
+      ${TV_KEYS.map(k => `<details class="dsec2" data-aid="tvw-${k}" ${aidOpen['tvw-' + k] ? 'open' : ''}><summary>${esc(FBY[k].label)}${hasNotes(k) ? ' ✓' : ''} <span class="footnote">${SC.map(x => `${x} ${fmtVal(k, cur.inputs[k][x])}`).join(' · ')}</span></summary><div>${notesHtml(k, TNOTE_FIELDS)}</div></details>`).join('')}</section>`;
   }
   // ---------- pages ----------
   const P = {};
@@ -5432,7 +5758,11 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
     const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and notes</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Click ? on any row for the full guide: what it is, how to estimate it, history, examples, scenarios, common mistakes, effect on value and sources.</span></div>`;
     return `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${basePanel()}${bar}${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}${checksPanelHtml()}${learn ? toolsHtml() : ''}${scenarioAssistHtml()}`;
   };
-  P.terminal = () => `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10, usually 60–80% of the total.</p></div>${groupPanel('terminal')}`;
+  P.terminal = () => {
+    const learn = !(cur.ui && cur.ui.learn === false), work = !!(cur.ui && cur.ui.tvWork);
+    const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and calculators</button><button class="btn" data-tvwork-toggle aria-pressed="${work}">${work ? 'Hide my work' : 'Show my work'}</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Each input has a guide: what it is, why it matters, where to find it, how to calculate it, a worked example, how to forecast it, scenarios, common mistakes and your notes. "Show my work" keeps a research worksheet per input and scenario with the model.</span></div>`;
+    return `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10. It is often most of the total, so its inputs deserve the most evidence.</p></div>${bar}${groupPanel('terminal')}${tvChecksHtml()}${learn ? tvToolsHtml() : ''}${tvScenarioHtml()}${work ? tvWorkHtml() : ''}`;
+  };
   P.bridge = () => `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${groupPanel('bridge')}${groupPanel('scenarios')}`;
   P.wacc = () => {
     const { wb, inp } = calc();
@@ -5608,7 +5938,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       ${act.tvMethod === 'Exit Multiple' ? r('Exit multiple', fmt.x(i.exitMult[cur.active])) : ''}
       ${r('Gordon Growth TV', fmt.mm(act.tvGordon), act.tvMethod === 'Gordon Growth' ? 'total' : 'sub')}${r('Exit Multiple TV', isNum(i.exitMult[cur.active]) ? fmt.mm(act.tvExit) : '<span class="na">no multiple entered</span>', act.tvMethod === 'Exit Multiple' ? 'total' : 'sub')}
       ${r(`PV of terminal value (discounted ${act.tvPeriod} years)`, fmt.mm(act.pvTV), 'key')}
-      ${r('Terminal value as % of EV', fmt.pct(act.tvShare))}${r('Implied exit multiple (TV ÷ year 10 EBITDA)', fmt.x(act.impliedExitMultiple))}
+      ${r('Terminal value as % of EV', fmt.pct(act.tvShare))}${r('Implied exit multiple (TV at end of year 10 ÷ year-10 EBITDA)', fmt.x(act.tvMethod === 'Gordon Growth' && cur.mode === 'corrected' && cur.inputs.midYear === 'Y' ? act.impliedExitMultiple * Math.pow(1 + act.waccUsed, 0.5) : act.impliedExitMultiple))}
     </tbody></table></div></section>
     <section class="panel"><h2>Enterprise value to value per share</h2><div class="tbl-wrap"><table class="fin"><tbody>
       ${r('Sum of PV of FCFF (years 1–10)', fmt.mm(act.sumPV))}${r('+ PV of terminal value', fmt.mm(act.pvTV))}${r('Enterprise value', fmt.mm(act.ev), 'total')}
@@ -5771,7 +6101,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
+      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
@@ -5849,6 +6179,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
     }
     else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
+    else if (t === 'tv') { const parts = el.dataset.k.split('.'); let o = tvState(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tool') { const parts = el.dataset.k.split('.'); let o = toolState(); for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
     else if (t === 'gc') { gc[el.dataset.k] = v; if (isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; } setTimeout(render, 0); return; }
@@ -5928,6 +6259,8 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       DCFModel.logChange(cur, 'hist.years', null, fromYears, H.years.join(', ') + ' (shifted; FY' + cur.histArchive[0].year + ' figures kept in the file)'); persist(); render(); toast(`Added an empty FY${latest + 1} column. Fill it from the new 10-K; the forecast waits for it if the base is the latest fiscal year.`); return; }
     if (b.dataset.toolUse) { const k = b.dataset.toolUse, v = Math.round(+b.dataset.v * 1e6) / 1e6, sc = cur.active; const from = cur.inputs[k][sc]; cur.inputs[k][sc] = v; DCFModel.logChange(cur, k, sc, from, v); if (cur.defaults) delete cur.defaults[k]; persist(); render(); toast(`${FBY[k].label} (${sc}) set to ${(v * 100).toFixed(2)}%. The previous value (${isNum(from) ? (from * 100).toFixed(2) + '%' : 'empty'}) is in the change log.`); return; }
     if (b.dataset.suggest) { const k = b.dataset.suggest, v = Math.round(+b.dataset.v * 1e6) / 1e6; const empty = SC.filter(sc => !isNum(cur.inputs[k][sc])); empty.forEach(sc => { DCFModel.logChange(cur, k, sc, null, v); cur.inputs[k][sc] = v; }); if (empty.length && !cur.sources[k]) cur.sources[k] = { name: 'Historical anchor: ' + b.dataset.l, type: 'Own judgment', cat: 'analyst', notes: 'Filled from the historical anchor by your choice. Review it.' }; persist(); render(); toast(empty.length ? `Filled ${empty.join(', ')} with ${plain(fmtVal(k, v))}. Cells you had filled were not changed.` : 'All three scenarios already have values, so nothing was changed.'); return; }
+    if (b.dataset.tvworkToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.tvWork = !cur.ui.tvWork; persist(); render(); if (cur.ui.tvWork) { const w = document.getElementById('tv-work'); if (w) w.scrollIntoView({ block: 'start' }); } return; }
+    if (b.dataset.tvTool) { const id = b.dataset.tvTool; aidOpen[id] = true; cur.ui = cur.ui || {}; if (cur.ui.learn === false) { cur.ui.learn = true; persist(); } if (drawerKey) { drawerKey = null; renderDrawer(); } const go = () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ block: 'start' }); }; if (page() !== 'terminal') { location.hash = 'terminal'; setTimeout(go, 120); } else { render(); go(); } return; }
     if (b.dataset.learnToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.learn = cur.ui.learn === false; persist(); render(); return; }
     if (b.dataset.aidAll) { const open = b.dataset.aidAll === 'open'; document.querySelectorAll('details[data-aid]').forEach(d => { aidOpen[d.dataset.aid] = open; }); render(); return; }
     if (b.dataset.useDilwa !== undefined) { const r = (cur.ref || {}).dilutedWA; if (!r) return; const from = cur.dilution.est; cur.dilution.est = r.v; cur.dilution.ignore = false; DCFModel.logChange(cur, 'dilution.est', null, from, r.v + ' (diluted weighted-average shares, ' + (r.period || '') + ', chosen by you)'); cur.sources['dil.est'] = { name: r.source || 'Filing', type: '10-Q quarterly report', period: r.period || '', notes: 'Diluted weighted-average shares from the EPS calculation, used as an estimate of current diluted shares by your choice. This is a period average, not a period-end count.' }; persist(); render(); toast('Used the filing figure as your estimate. It is a period average, not a current count.'); return; }

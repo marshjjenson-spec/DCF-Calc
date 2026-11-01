@@ -1291,4 +1291,14 @@ const DIL_HELP = {
   Object.assign(by.kd, { what: 'The rate the company would pay to borrow today, before tax.', enter: 'A percentage. Use current yields on its bonds, or the risk-free rate plus a credit spread. Not needed if the company has no debt in the weights.', source: 'Debt note in the 10-K/10-Q plus bond yields (FINRA), or a synthetic spread from interest coverage (Damodaran).', tip: 'Use yield to maturity, not coupons; interest expense ÷ debt is only a historical cross-check.' });
 })();
 
+// Terminal value inputs: no hard rules presented as identities (full guides live in help.js)
+(() => {
+  const by = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+  Object.assign(by.tg, { what: 'How fast free cash flow grows every year after year 10, forever.', enter: 'A percentage, nominal, in the currency of the cash flows. It must be below WACC. Above the risk-free rate is flagged for a written reason, not blocked.', source: 'Long-run real GDP growth and inflation (Federal Reserve SEP, IMF WEO)', backup: 'Risk-free rate as a ceiling (Damodaran rule of thumb)', tip: 'Nominal long-run growth = (1 + real GDP) × (1 + inflation) − 1. Record the source and date.' });
+  Object.assign(by.tem, { what: 'The EBITDA margin in year 11, held for every year after. EBITDA here = operating income + D&A, with stock compensation as a cost.', enter: 'A percentage. Normally close to your year-10 margin.', source: 'Company history (EBITDA ÷ revenue) and mature peers', backup: 'Damodaran EBITDA/Sales by industry', tip: 'A jump between year 10 and year 11 is applied forever: explain it or avoid it.' });
+  Object.assign(by.troic, { what: 'Return on new capital invested after year 10. Sets terminal reinvestment: reinvestment rate = g ÷ ROIC.', enter: 'A percentage. Above WACC means growth creates value, equal means growth is neutral, below means growth destroys value. None of these is forced.', source: 'Company historical ROIC and Damodaran ROIC by industry (normalized column)', backup: 'Peer ROIC', tip: 'Terminal FCFF = NOPAT × (1 − g ÷ ROIC).' });
+  Object.assign(by.tvMethod, { source: 'Damodaran: prefer Gordon in a DCF; use the multiple as a cross-check', tip: 'Compare both methods on the Terminal value page.' });
+  Object.assign(by.exitMult, { enter: 'A number such as 12 for 12×, from peers or an industry table you cite. Applied to year-10 EBITDA. Only needed when the method is Exit Multiple.', source: 'Peer EV/EBITDA (trailing), with date and source', backup: 'Damodaran EV/EBITDA by industry', tip: 'Today\'s multiples include today\'s growth: a mature year-10 company usually deserves less.' });
+})();
+
 if (typeof module !== 'undefined') module.exports = { FIELDS, GROUPS, HIST_FIELDS, GUIDE_SECTIONS, DIL_HELP };

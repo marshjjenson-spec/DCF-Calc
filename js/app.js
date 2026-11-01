@@ -387,7 +387,7 @@
       let note = '';
       if (f.key === 'exitMult') note = 'Needed only for scenarios that use Exit Multiple.';
       if (!rel && f.key !== 'exitMult') note = 'Not used by the current method.';
-      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : '');
+      if (f.tri) rows += `<div>${labelCell(f, note)}</div>${SC.map(s => `<div class="cell" data-s="${s}">${inputHtml(f, s)}</div>`).join('')}` + (f.kind === 'forecast' && ['revenue', 'margins', 'reinvest'].includes(g) ? aidRow(f) : g === 'wacc' && f.key !== 'we' ? waccAidRow(f) : g === 'terminal' ? tvAidRow(f) : '');
       else rows += `<div>${labelCell(f, note)}</div><div>${inputHtml(f, null)}</div><div class="blank"></div>${tri ? '<div class="blank"></div>' : ''}`;
     });
     // calculated rows for some groups
@@ -1006,7 +1006,7 @@
   function applyWUse(u) {
     const targets = u.scope === 'all' ? SC : [u.scope];
     targets.forEach(x => { const from = cur.inputs[u.key][x]; if (from !== u.v) { DCFModel.logChange(cur, u.key, x, from, u.v); cur.inputs[u.key][x] = u.v; } });
-    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'WACC research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the WACC research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
+    cur.sources[u.key] = Object.assign({}, cur.sources[u.key] || {}, { name: u.note || 'Research calculator', type: 'Own judgment', cat: 'analyst', notes: `Set from the ${TV_KEYS.includes(u.key) || u.key === 'em10' ? 'terminal value' : 'WACC'} research calculator for ${u.scope === 'all' ? 'all scenarios' : u.scope}: ${u.note || ''}`.trim(), retrieved: new Date().toISOString() });
     if (cur.defaults) delete cur.defaults[u.key];
     wUse = null; persist(); render(); toast(`${FBY[u.key].label} set to ${plain(fmtVal(u.key, u.v))} for ${u.scope === 'all' ? 'all three scenarios' : u.scope}. The change is in the log.`);
   }
@@ -1030,6 +1030,141 @@
       persist();
     } catch (e) { rfStatus = 'This browser could not read the Treasury data. Open the Treasury or FRED link, then type the yield and date below.'; }
     render();
+  }
+  // ---------- terminal value guides, calculators, comparison and worksheet ----------
+  const TV_KEYS = ['tg', 'tem', 'troic', 'tvMethod', 'exitMult'];
+  const TNOTE_FIELDS = [['selected', 'Selected value', 'text'], ['how', 'How I calculated it', 'area'], ['hist', 'Historical data used', 'area'], ['evidence', 'Evidence and source URLs (one per line)', 'area'], ['dates', 'Reporting dates of the sources', 'text'], ['why', 'My reasoning', 'area'], ['risks', 'Risks to this assumption', 'area'], ['confidence', 'Confidence', 'conf'], ['reviewed', 'Last reviewed', 'date']];
+  const TV_TOOL = { tg: 'tv-g', tem: 'tv-mg', troic: 'tv-roic', tvMethod: 'tv-cmp', exitMult: 'tv-cmp', tcapex: null };
+  function tvSections(key, compact) {
+    const w = DCFHelp.T[key]; if (!w) return '';
+    const id = x => `t-${key}-${x}${compact ? '-i' : ''}`;
+    const sec = (x, t, body) => `<details class="dsec2" data-aid="${id(x)}" ${aidOpen[id(x)] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
+    const li = a => `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    const where = w.where.map(([h, src, steps]) => `<div class="wstep"><b>${esc(h)}</b> ${srcLink(src)}<ol>${steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>`).join('');
+    const cik = cur.meta && cur.meta.cik;
+    const co = cik && ['tem', 'troic'].includes(key) ? `<div class="wstep"><b>For ${esc(cur.inputs.company.name || 'this company')}</b><ul><li>${srcLink([`${cur.inputs.company.name || 'This company'}: filings on EDGAR`, `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${String(cik).padStart(10, '0')}&type=10-&dateb=&owner=include&count=40`, 'raw'])}</li>${key === 'tem' ? `<li>${srcLink(['Search its filings for "segment information"', DCFHelp.edgarSearch('segment information', cik), 'raw'])}</li>` : `<li>${srcLink(['Search its filings for "total stockholders\' equity"', DCFHelp.edgarSearch("total stockholders' equity", cik), 'raw'])}</li>`}</ul></div>` : '';
+    const calcB = `<div class="formula">${esc(w.calc.formula)}</div>${w.calc.vars.length ? `<dl class="svl">${w.calc.vars.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>` : ''}${w.calc.steps.length ? `<ol>${w.calc.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${TV_TOOL[key] && cur.mode === 'corrected' ? `<p><button class="btn tiny" data-tv-tool="${TV_TOOL[key]}">Calculate this for me</button> <span class="footnote">opens the calculator on the Terminal value page; it uses only figures you enter or that were imported, and fills nothing until you click a scenario.</span></p>` : ''}`;
+    return `<p class="wquick">${esc(w.what)}</p>
+      ${sec('why', 'Why it matters', `<p>${esc(w.why)}</p>`)}
+      ${sec('where', 'Where to find it', where + co)}
+      ${sec('calc', 'How to calculate it', calcB)}
+      ${sec('ex', 'Worked example', `<p>${esc(w.example)}</p>`)}
+      ${sec('fc', 'How to forecast it', li(w.forecast))}
+      ${sec('scen', 'Bear, Base and Bull', `<p>${esc(w.scen)}</p><p class="footnote">Your values: ${SC.map(x => `${x} ${fmtVal(key, cur.inputs[key][x])}`).join(' · ')}</p>`)}
+      ${sec('mist', 'Common mistakes', li(w.mistakes))}
+      ${sec('src', 'Sources', `<ul>${w.sources.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
+      ${compact && cur.ui && cur.ui.tvWork ? '<p class="footnote">Your research notes for this input are in "My work" below.</p>' : sec('notes', 'My research notes' + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, TNOTE_FIELDS))}`;
+  }
+  function tvAidRow(f) {
+    if (cur.ui && cur.ui.learn === false) return '';
+    if (!DCFHelp.T[f.key]) return '';
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${tvSections(f.key, true)}</details></div>`;
+  }
+  function tvState() {
+    cur.tvTools = cur.tvTools || {}; const T = cur.tvTools;
+    T.g = T.g || {}; T.mg = T.mg || {}; T.mg.peers = T.mg.peers || [{}, {}, {}, {}]; T.seg = T.seg || [{}, {}, {}, {}]; T.roic = T.roic || {}; T.roic.rows = T.roic.rows || [{}, {}, {}, {}]; T.peers = T.peers || [{}, {}, {}, {}, {}];
+    return T;
+  }
+  const tvIn = (path, unit, label, ph = 'Enter') => {
+    const id = 'tv-' + path.replace(/\./g, '-'), v = path.split('.').reduce((o, k) => o == null ? o : o[k], tvState());
+    if (unit === 'text' || unit === 'date') return `<input type="${unit === 'date' ? 'date' : 'text'}" class="txt" data-t="tv" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(v || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}">`;
+    if (Array.isArray(unit)) return `<select data-t="tv" data-k="${path}" data-unit="choice" id="${id}" aria-label="${esc(label)}"><option value="">Choose…</option>${unit.map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    return `<div class="inwrap"><input type="text" inputmode="decimal" data-t="tv" data-k="${path}" data-unit="${unit}" id="${id}" value="${esc(parseErrors[id + ':raw'] != null ? parseErrors[id + ':raw'] : toInputText(v, unit))}" placeholder="${esc(ph)}" aria-label="${esc(label)}"><span class="unit">${unit === 'pct' ? '%' : unit === 'usd_mm' ? '$mm' : unit === 'x' ? '×' : ''}</span></div>${parseErrors[id] ? `<div class="errmsg">${esc(parseErrors[id])}</div>` : ''}`;
+  };
+  const pc2 = (v, d = 2) => isNum(v) ? (v * 100).toFixed(d) + '%' : '<span class="na">—</span>';
+  const xx = v => isNum(v) ? v.toFixed(1) + '×' : '<span class="na">—</span>';
+  const mm0 = v => isNum(v) ? fmt.mm(v) : '<span class="na">—</span>';
+  function tvToolsHtml() {
+    const T = tvState(), I = cur.inputs, { all } = calc(), s = cur.active, corr = cur.mode === 'corrected';
+    const det = (id, title, sub, body) => `<details class="panel tool" id="${id}" data-aid="${id}" ${aidOpen[id] ? 'open' : ''}><summary><b>${title}</b> <span class="footnote">${sub}</span></summary>${body}</details>`;
+    // 1. terminal growth
+    const nom = DCFAnalysis.nominalGrowth(T.g.real, T.g.infl);
+    const gRows = SC.map(x => { const r = all.scen[x], w = r.ok ? r.waccUsed : DCFAnalysis.waccParts(cur, x).wacc, g = I.tg[x], rf = I.rf[x];
+      return `<tr><td>${x}</td><td class="num">${pc2(g)}</td><td class="num">${pc2(rf)}</td><td class="num">${pc2(w)}</td><td>${isNum(g) && isNum(w) ? (g < w ? '<span class="pill good">below WACC</span>' : '<span class="pill bad">not below WACC</span>') : '—'} ${isNum(g) && isNum(rf) ? (g <= rf ? '<span class="pill good">at or below risk-free</span>' : '<span class="pill warn">above risk-free: explain</span>') : ''}</td></tr>`; }).join('');
+    const gB = `<p>${srcLink(DCFHelp.S.fedSep)}<br>${srcLink(DCFHelp.S.imfData)}<br>${srcLink(DCFHelp.S.damPrques)}</p>
+      <div class="tgrid"><label>Long-run real GDP growth ${tvIn('g.real', 'pct', 'Real GDP growth')}</label><label>Long-run inflation ${tvIn('g.infl', 'pct', 'Inflation')}</label><label>Source ${tvIn('g.src', 'text', 'Source', 'e.g. Fed SEP longer run')}</label><label>Source date ${tvIn('g.date', 'date', 'Source date')}</label></div>
+      ${isNum(nom) ? `<p>(1 + ${pc2(T.g.real)}) × (1 + ${pc2(T.g.infl)}) − 1 = <b>${pc2(nom)}</b> ${catBadge('calc')} · ${esc(T.g.src || 'source not noted')}${T.g.date ? ', ' + esc(T.g.date) : ''}. ${useBtns('tg', Math.round(nom * 1e6) / 1e6, pc2(nom), `Nominal growth = (1 + real ${pc2(T.g.real)}) × (1 + inflation ${pc2(T.g.infl)}) − 1; ${T.g.src || ''} ${T.g.date || ''}`)}</p>` : '<p class="footnote">Enter both rates to calculate. Nothing is assumed for you.</p>'}
+      <p class="footnote">Reference, not filled in: the Federal Reserve's September 16, 2026 projections show longer-run medians of 2.0% real GDP growth and 2.0% PCE inflation ${catBadge('market', 'Federal Reserve, Summary of Economic Projections')}, which combine to (1.02 × 1.02) − 1 = 4.04%. Whether this company grows with the economy, slower or faster is your judgment.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>Terminal g</th><th>Risk-free</th><th>WACC</th><th>Checks</th></tr></thead><tbody>${gRows}</tbody></table></div>
+      <p class="footnote">g below WACC is required for the Gordon formula. g at or below the risk-free rate is a discipline (Damodaran's rule of thumb), not an identity: a higher g is flagged for a written reason, never blocked.</p>`;
+    // 2. historical margin
+    const A = calc().anchors.tem, ser = DCFAnalysis.series(cur), st = DCFAnalysis.stats(A.vals);
+    const fyCols = ser.fy.map((y, i) => ({ y, m: A.vals[i] })).filter(c => c.y.label).reverse();
+    const peerM = T.mg.peers.filter(p => isNum(p.m)), pst = DCFAnalysis.stats(peerM.map(p => p.m));
+    const cand = [['latest fiscal year', A.latestFY, A.latestLabel], ['TTM', A.ttm, A.ttmLabel], ['five-year average', st && st.n >= 3 ? st.mean : null, st ? st.n + ' years' : ''], ['five-year median', st && st.n >= 3 ? st.median : null, ''], ['peer median', pst ? pst.median : null, pst ? pst.n + ' peers you entered' : '']];
+    const mgB = `<div class="tbl-wrap"><table class="fin"><thead><tr><th>$ millions</th>${fyCols.map(c => `<th>${esc(c.y.label)}</th>`).join('')}${ser.ttm ? `<th>${esc(ser.ttm.label)}</th>` : ''}</tr></thead><tbody>
+        <tr><td>Revenue ${catBadge('sec')}</td>${fyCols.map(c => `<td class="num">${mm0(c.y.rev)}</td>`).join('')}${ser.ttm ? `<td class="num">${mm0(ser.ttm.rev)}</td>` : ''}</tr>
+        <tr><td>EBITDA = gross profit − operating costs excl. D&A ${catBadge('calc')}</td>${fyCols.map(c => `<td class="num">${mm0(c.y.ebitda)}</td>`).join('')}${ser.ttm ? `<td class="num">${mm0(ser.ttm.ebitda)}</td>` : ''}</tr>
+        <tr class="total"><td>EBITDA margin ${catBadge('calc')}</td>${fyCols.map(c => `<td class="num">${pc2(c.m, 1)}</td>`).join('')}${ser.ttm ? `<td class="num">${pc2(A.ttm, 1)}</td>` : ''}</tr></tbody></table></div>
+      <p>${st ? `Average ${pc2(st.mean, 1)} · median ${pc2(st.median, 1)} · range ${pc2(st.min, 1)}–${pc2(st.max, 1)} · trend ${isNum(st.slope) ? (st.slope >= 0 ? '+' : '') + (st.slope * 100).toFixed(2) + ' points a year' : 'needs three years'} (${st.n} years)` : 'No historical margins: import filings or fill in the historical financials.'}</p>
+      <p class="footnote">${esc(A.note || '')}</p>
+      <h3 class="sub-h">Peers and industry</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Peer or industry</th><th>EBITDA margin</th><th>Source and date</th></tr></thead><tbody>${T.mg.peers.map((p, i) => `<tr><td>${tvIn(`mg.peers.${i}.name`, 'text', 'Peer', i === 0 ? 'e.g. Damodaran: Retail (General)' : 'Peer ' + i)}</td><td>${tvIn(`mg.peers.${i}.m`, 'pct', 'Peer margin')}</td><td>${tvIn(`mg.peers.${i}.src`, 'text', 'Source', '10-K FY2025 / Damodaran Jan 2026')}</td></tr>`).join('')}</tbody></table></div>
+      <p class="footnote">${srcLink(DCFHelp.S.damMargin)}. Reference: January 2026 Total Market EBITDA/Sales 16.56% (17.42% without financials) ${catBadge('provider', 'Damodaran Online')}.</p>
+      <h3 class="sub-h">Choose a starting point</h3><ul>${cand.map(([l, v, n]) => `<li>${esc(l)}: <b>${pc2(v, 1)}</b>${n ? ` <span class="footnote">${esc(n)}</span>` : ''} ${useBtns('tem', isNum(v) ? Math.round(v * 1e5) / 1e5 : null, l + ' margin', `Terminal EBITDA margin from the ${l} (${isNum(v) ? (v * 100).toFixed(1) + '%' : ''})`)}</li>`).join('')}</ul>
+      <h3 class="sub-h">Year 10 to year 11</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>Year 10 margin (your path)</th><th>Terminal (year 11)</th><th>Step</th><th></th></tr></thead><tbody>${SC.map(x => { const a = I.em10[x], b = I.tem[x]; return `<tr><td>${x}</td><td class="num">${pc2(a, 1)}</td><td class="num">${pc2(b, 1)}</td><td class="num">${isNum(a) && isNum(b) ? `<span class="pill ${Math.abs(b - a) > 0.02 ? 'warn' : 'good'}">${((b - a) * 100 >= 0 ? '+' : '') + ((b - a) * 100).toFixed(1)} pts</span>` : '—'}</td><td>${isNum(b) && isNum(a) && Math.abs(b - a) > 1e-9 ? `<button class="btn tiny" data-wuse="em10" data-v="${b}" data-scope="${x}" data-note="Year-10 margin set to the terminal margin so years 6–10 converge gradually">Converge years 6–10 to ${pc2(b, 1)}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="footnote">Years 6–9 step evenly from your year-5 margin to your year-10 margin. Setting year 10 equal to the terminal margin makes the change gradual instead of a jump in year 11. It changes your year-10 margin input, so it asks first.</p>`;
+    // 3. segment estimator
+    const latestRev = (() => { for (let i = 4; i >= 0; i--) if (isNum(ser.fy[i].rev)) return { v: ser.fy[i].rev, l: ser.fy[i].label }; return null; })();
+    const sm = DCFAnalysis.segMargin(T.seg, T.segUnalloc, latestRev && latestRev.v);
+    const segB = `<p class="footnote">From the 10-K segment note: each segment's revenue and your view of its mature EBITDA margin. Unallocated or corporate costs come from the segment reconciliation table.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Segment</th><th>Revenue ($mm)</th><th>Mature EBITDA margin</th></tr></thead><tbody>${T.seg.map((x, i) => `<tr><td>${tvIn(`seg.${i}.name`, 'text', 'Segment', 'Segment ' + (i + 1))}</td><td>${tvIn(`seg.${i}.rev`, 'usd_mm', 'Segment revenue')}</td><td>${tvIn(`seg.${i}.m`, 'pct', 'Segment margin')}</td></tr>`).join('')}</tbody></table></div>
+      <label>Unallocated / corporate costs ($mm) ${tvIn('segUnalloc', 'usd_mm', 'Unallocated costs')}</label>
+      ${sm ? `<p>Σ(revenue × margin) − unallocated = ${mm0(sm.ebitda)} on revenue ${mm0(sm.rev)}: consolidated margin <b>${pc2(sm.margin, 1)}</b> ${catBadge('calc')}. ${isNum(sm.gap) ? (Math.abs(sm.gap) > 0.02 ? `<span class="pill warn">Segments add to ${(sm.gap * 100 >= 0 ? '+' : '') + (sm.gap * 100).toFixed(1)}% vs ${esc(latestRev.l)} revenue ${mm0(latestRev.v)}: check periods and intersegment eliminations</span>` : `<span class="pill good">reconciles to ${esc(latestRev.l)} revenue</span>`) : ''} ${useBtns('tem', Math.round(sm.margin * 1e5) / 1e5, 'segment margin', 'Segment-weighted terminal EBITDA margin')}</p>` : ''}`;
+    // 4. ROIC
+    const RR = DCFAnalysis.histRoic(T.roic.rows);
+    const rr = RR.filter(r => isNum(r.roic)), rst = DCFAnalysis.stats(rr.map(r => r.roic));
+    const fin = (cur.fin && cur.fin.years) || [];
+    const hint = (i, k) => { const y = fin[3 - i]; if (!y || !y.values) return ''; const V = y.values; if (k === 'ebit' && isNum(V.ebit)) return nf(V.ebit) + ' (' + y.label + ')'; if (k === 'tax' && isNum(V.tax) && isNum(V.ebt) && V.ebt) return (V.tax / V.ebt * 100).toFixed(1) + ' (' + y.label + ' effective)'; if (k === 'label') return y.label; return ''; };
+    const roicB = `<p class="footnote">Definition used: NOPAT = operating income × (1 − tax rate). Invested capital = total equity + total debt + lease liabilities − cash and short-term investments, from the balance sheet at each year end (financing side). ROIC = NOPAT ÷ average of opening and closing invested capital. Oldest year first; the first row only supplies opening capital. Grey hints are your imported filing figures: type them in to use them.</p>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Year</th><th>EBIT</th><th>Tax rate</th><th>Equity</th><th>Debt</th><th>Leases</th><th>Cash & ST inv.</th><th>NOPAT</th><th>Invested capital</th><th>ROIC</th></tr></thead><tbody>${RR.map((r, i) => `<tr><td>${tvIn(`roic.rows.${i}.label`, 'text', 'Year', hint(i, 'label') || 'FY')}</td><td>${tvIn(`roic.rows.${i}.ebit`, 'usd_mm', 'EBIT', hint(i, 'ebit'))}</td><td>${tvIn(`roic.rows.${i}.tax`, 'pct', 'Tax rate', hint(i, 'tax'))}</td><td>${tvIn(`roic.rows.${i}.equity`, 'usd_mm', 'Equity')}</td><td>${tvIn(`roic.rows.${i}.debt`, 'usd_mm', 'Debt')}</td><td>${tvIn(`roic.rows.${i}.leases`, 'usd_mm', 'Leases')}</td><td>${tvIn(`roic.rows.${i}.cash`, 'usd_mm', 'Cash')}</td><td class="num">${mm0(r.nopat)}</td><td class="num">${mm0(r.ic)}</td><td class="num">${pc2(r.roic, 1)}</td></tr>`).join('')}</tbody></table></div>
+      ${rr.length ? `<p>${rr.map(r => `${esc(r.label || 'Year')}: ${nf(r.nopat)} ÷ ${nf(r.avgIC)} = ${pc2(r.roic, 1)}`).join(' · ')}${rst ? ` · average <b>${pc2(rst.mean, 1)}</b>` : ''} ${catBadge('calc')}</p><p>${rr.map(r => `${esc(r.label || '')} ${useBtns('troic', Math.round(r.roic * 1e5) / 1e5, (r.label || '') + ' ROIC', `Historical ROIC ${r.label || ''}: NOPAT ÷ average invested capital`)}`).join('<br>')}${rst && rst.n > 1 ? `<br>average ${useBtns('troic', Math.round(rst.mean * 1e5) / 1e5, 'average ROIC', 'Average historical ROIC, ' + rst.n + ' years')}` : ''}</p>` : ''}
+      <p class="footnote">${srcLink(DCFHelp.S.damRoc)}. Columns: unadjusted (as reported), lease-adjusted (operating leases treated as debt), lease and R&D adjusted (R&D capitalised), normalized (10-year average). January 2026 data, Total Market without financials: 18.92% unadjusted after-tax, 14.92% normalized ${catBadge('provider', 'Damodaran Online; the page footer still says January 2025')}. Compare like with like: this calculator is unadjusted.</p>
+      <h3 class="sub-h">Reinvestment and terminal free cash flow</h3>
+      ${corr ? `<div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>g</th><th>ROIC</th><th>Reinvestment = g ÷ ROIC</th><th>NOPAT, year 11</th><th>FCFF₁₁ = NOPAT × (1 − rate)</th><th>Year-10 reinvestment rate</th><th>FCFF₁₀</th></tr></thead><tbody>${SC.map(x => { const r = all.scen[x]; if (!r.ok) return `<tr><td>${x}</td><td colspan="7" class="na">Scenario does not calculate yet</td></tr>`; const y10 = r.years[9], y11 = r.years[10]; return `<tr><td>${x}</td><td class="num">${pc2(r.g)}</td><td class="num">${pc2(I.troic[x], 1)}</td><td class="num">${pc2(y11.reinvestRate, 1)}</td><td class="num">${mm0(y11.nopat)}</td><td class="num">${mm0(y11.fcff)}</td><td class="num">${pc2(y10.reinvRateModel, 1)}</td><td class="num">${mm0(y10.fcff)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="footnote">No double counting: in the terminal year the model does not use your CapEx, D&A, working-capital or acquisition inputs. All terminal reinvestment comes from g ÷ ROIC. Years 1–10 use the explicit lines. If the year-10 and terminal reinvestment rates are far apart, free cash flow jumps between year 10 and 11.</p>` : '<p class="footnote">Original-workbook mode: the terminal year uses terminal CapEx and the other explicit lines instead of g ÷ ROIC.</p>'}`;
+    // 5. method comparison
+    const C = SC.map(x => DCFAnalysis.tvCompare(cur, x));
+    const cell = (c, m, f) => { const o = m === 'G' ? c.G : c.X; return o.ok ? f(o) : `<span class="na" title="${esc(o.why)}">—</span>`; };
+    const rowsC = [['Terminal value at end of year 10', o => mm0(o.tv)], ['Discount period (years)', o => o.period.toFixed(1)], ['Present value of terminal value', o => mm0(o.pvTV)], ['Enterprise value', o => mm0(o.ev)], ['Value per share', o => fmt.usd(o.perShare)], ['Terminal value % of EV', o => pc2(o.tvShare, 1)]];
+    const peers = T.peers.filter(p => isNum(p.m)), ps = DCFAnalysis.stats(peers.map(p => p.m));
+    const cmpB = `<div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${C.map(c => `<th colspan="2">${c.s}</th>`).join('')}</tr><tr><th></th>${C.map(c => `<th>Gordon${c.primary === 'Gordon Growth' ? ' ★' : ''}</th><th>Exit${c.primary === 'Exit Multiple' ? ' ★' : ''}</th>`).join('')}</tr></thead><tbody>
+        ${rowsC.map(([l, f]) => `<tr><td>${l}</td>${C.map(c => `<td class="num">${cell(c, 'G', f)}</td><td class="num">${cell(c, 'X', f)}</td>`).join('')}</tr>`).join('')}
+        <tr class="total"><td>Exit − Gordon, per share</td>${C.map(c => `<td class="num" colspan="2">${c.diff ? `${fmt.usd(c.diff.perShare)} (${(c.diff.pct * 100 >= 0 ? '+' : '') + (c.diff.pct * 100).toFixed(1)}%)` : '—'}</td>`).join('')}</tr>
+        <tr><td>Implied EV/EBITDA of the Gordon value, on year-10 EBITDA</td>${C.map(c => `<td class="num" colspan="2">${c.impl ? xx(c.impl.trailing) : '—'}</td>`).join('')}</tr>
+        <tr><td>… on year-11 EBITDA (forward)</td>${C.map(c => `<td class="num" colspan="2">${c.impl ? xx(c.impl.forward) : '—'}</td>`).join('')}</tr>
+        <tr><td>Growth implied by the exit multiple</td>${C.map(c => { if (!c.X.ok) return '<td colspan="2" class="num">—</td>'; const ig = DCFAnalysis.impliedG(cur, c.s, c.X.pvTV); return `<td class="num" colspan="2">${ig.ok ? ig.roots.map(g => pc2(g)).join(' or ') : `<span class="na" title="${esc(ig.why)}">no solution</span>`}</td>`; }).join('')}</tr>
+      </tbody></table></div>
+      <p class="footnote">★ = the method each scenario uses (your choice in the table above); the other column is a cross-check and is not used in the valuation. Implied growth is solved with the full model: year-11 revenue grows by g and reinvestment = g ÷ ROIC, so FCFF₁₁ changes with g. ${C.some(c => c.impl && c.impl.adj) ? 'With mid-year timing the Gordon value is discounted 9.5 years, so for the implied multiple it is first rolled to the end of year 10 (× (1 + WACC)^0.5), the same date as the exit value.' : ''}</p>
+      <h3 class="sub-h">Exit multiple from peers</h3>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th>Peer</th><th>EV/EBITDA</th><th>Basis</th><th>Date</th><th>Source</th></tr></thead><tbody>${T.peers.map((p, i) => `<tr><td>${tvIn(`peers.${i}.name`, 'text', 'Peer', 'Peer ' + (i + 1))}</td><td>${tvIn(`peers.${i}.m`, 'x', 'EV/EBITDA')}</td><td>${tvIn(`peers.${i}.basis`, ['Trailing (last-twelve-month EBITDA)', 'Forward (next-year EBITDA)'], 'Basis')}</td><td>${tvIn(`peers.${i}.date`, 'date', 'Date')}</td><td>${tvIn(`peers.${i}.src`, 'text', 'Source', 'e.g. Yahoo statistics')}</td></tr>`).join('')}</tbody></table></div>
+      ${ps ? `<p>Median <b>${xx(ps.median)}</b>, range ${xx(ps.min)}–${xx(ps.max)}, ${ps.n} peers ${catBadge('calc')}. ${useBtns('exitMult', Math.round(ps.median * 100) / 100, 'peer median', `Median EV/EBITDA of ${ps.n} peers you entered`)}</p>` : '<p class="footnote">No multiple is suggested until you enter peers: the calculator never invents one.</p>'}
+      <p class="footnote">${srcLink(DCFHelp.S.damEbitda)}. Reference: January 2026 Total Market EV/EBITDA 19.73× for positive-EBITDA firms (16.95× without financials) ${catBadge('provider', 'Damodaran Online')}. Today's multiples carry today's growth; a mature year-10 business usually trades lower. EV in a multiple = equity value + debt and other claims − cash and nonoperating assets, so use the same claims your equity bridge subtracts.</p>
+      <h3 class="sub-h">Timing</h3>
+      <p class="footnote">${corr ? `Gordon: TV = FCFF₁₁ ÷ (WACC − g), a value at the end of year 10. ${I.midYear === 'Y' ? 'With mid-year timing, cash flows arrive mid-year, so it is discounted 9.5 years.' : 'It is discounted 10 years.'} Exit multiple: year-10 EBITDA × multiple, a sale price at the end of year 10, discounted 10 years. Both use each scenario's WACC and tax rate; the model has no separate terminal WACC or tax rate.` : 'Original-workbook mode keeps the workbook formulas: Gordon uses year-11 cash flow × (1 + g) and the exit multiple uses year-11 EBITDA, both discounted 10 years.'}</p>`;
+    return `<h2 class="sec-h">Terminal value calculators</h2>${wUseConfirm()}
+      ${det('tv-g', 'Terminal growth estimator', 'nominal growth from real GDP and inflation', gB)}
+      ${det('tv-mg', 'Terminal margin from history and peers', 'five years, TTM, average, median, trend', mgB)}
+      ${det('tv-seg', 'Segment margin estimator', 'segment revenue × margin − unallocated costs', segB)}
+      ${det('tv-roic', 'Historical ROIC and reinvestment', 'line by line, then g ÷ ROIC', roicB)}
+      ${det('tv-cmp', 'Gordon vs exit multiple', 'both methods, implied multiple, implied growth', cmpB)}`;
+  }
+  function tvChecksHtml() {
+    const { all } = calc(), list = DCFAnalysis.tvChecks(cur, all, tvState());
+    return `<section class="panel" id="tv-checks"><div class="panel-head"><h2>Terminal value checks</h2><span class="footnote">Warnings only. Nothing is changed for you.</span></div>
+      ${list.length ? `<ul class="flags">${list.map(c => `<li class="${c.level === 'info' ? '' : c.level}">${c.key && FBY[c.key] ? `<button class="linkbtn" data-goto="${c.key}" ${c.s ? `data-s="${c.s}"` : ''}>${esc(FBY[c.key].label)}</button>: ` : ''}${esc(c.text)}</li>`).join('')}</ul>` : '<p class="pill good">No terminal value conflicts found.</p>'}</section>`;
+  }
+  function tvScenarioHtml() {
+    const I = cur.inputs, keys = ['tg', 'tem', 'troic', 'tvMethod', 'exitMult'];
+    const same = keys.filter(k => SC.every(x => I[k][x] === I[k].Base));
+    return `<section class="panel"><div class="panel-head"><h2>Terminal assumptions by scenario</h2></div>
+      <div class="tbl-wrap"><table class="fin"><thead><tr><th></th>${SC.map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${keys.map(k => `<tr><td>${esc(FBY[k].label)}</td>${SC.map(x => `<td class="num">${fmtVal(k, I[k][x])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="footnote">${same.length ? `Same in all three scenarios: ${same.map(k => esc(FBY[k].label.toLowerCase())).join(', ')}. That is fine: the long run need not differ between scenarios. ` : ''}Differences belong where the scenarios tell different long-run stories (for example, returns fading to WACC in Bear). The calculator never creates Bear and Bull by adding or subtracting a fixed amount.</p></section>`;
+  }
+  function tvWorkHtml() {
+    return `<section class="panel" id="tv-work"><div class="panel-head"><h2>My work: terminal value research</h2><span class="footnote">Per input and scenario. Saved with the model.</span></div>
+      ${TV_KEYS.map(k => `<details class="dsec2" data-aid="tvw-${k}" ${aidOpen['tvw-' + k] ? 'open' : ''}><summary>${esc(FBY[k].label)}${hasNotes(k) ? ' ✓' : ''} <span class="footnote">${SC.map(x => `${x} ${fmtVal(k, cur.inputs[k][x])}`).join(' · ')}</span></summary><div>${notesHtml(k, TNOTE_FIELDS)}</div></details>`).join('')}</section>`;
   }
   // ---------- pages ----------
   const P = {};
@@ -1483,7 +1618,11 @@
     const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and notes</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Click ? on any row for the full guide: what it is, how to estimate it, history, examples, scenarios, common mistakes, effect on value and sources.</span></div>`;
     return `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${basePanel()}${bar}${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}${checksPanelHtml()}${learn ? toolsHtml() : ''}${scenarioAssistHtml()}`;
   };
-  P.terminal = () => `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10, usually 60–80% of the total.</p></div>${groupPanel('terminal')}`;
+  P.terminal = () => {
+    const learn = !(cur.ui && cur.ui.learn === false), work = !!(cur.ui && cur.ui.tvWork);
+    const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and calculators</button><button class="btn" data-tvwork-toggle aria-pressed="${work}">${work ? 'Hide my work' : 'Show my work'}</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Each input has a guide: what it is, why it matters, where to find it, how to calculate it, a worked example, how to forecast it, scenarios, common mistakes and your notes. "Show my work" keeps a research worksheet per input and scenario with the model.</span></div>`;
+    return `<div><h1>Terminal value</h1><p class="lead">The value of everything after year 10. It is often most of the total, so its inputs deserve the most evidence.</p></div>${bar}${groupPanel('terminal')}${tvChecksHtml()}${learn ? tvToolsHtml() : ''}${tvScenarioHtml()}${work ? tvWorkHtml() : ''}`;
+  };
   P.bridge = () => `<div><h1>Equity bridge & scenarios</h1><p class="lead">The balance-sheet items that turn enterprise value into equity value apply to every scenario. Then weight the scenarios.</p></div>${groupPanel('bridge')}${groupPanel('scenarios')}`;
   P.wacc = () => {
     const { wb, inp } = calc();
@@ -1659,7 +1798,7 @@
       ${act.tvMethod === 'Exit Multiple' ? r('Exit multiple', fmt.x(i.exitMult[cur.active])) : ''}
       ${r('Gordon Growth TV', fmt.mm(act.tvGordon), act.tvMethod === 'Gordon Growth' ? 'total' : 'sub')}${r('Exit Multiple TV', isNum(i.exitMult[cur.active]) ? fmt.mm(act.tvExit) : '<span class="na">no multiple entered</span>', act.tvMethod === 'Exit Multiple' ? 'total' : 'sub')}
       ${r(`PV of terminal value (discounted ${act.tvPeriod} years)`, fmt.mm(act.pvTV), 'key')}
-      ${r('Terminal value as % of EV', fmt.pct(act.tvShare))}${r('Implied exit multiple (TV ÷ year 10 EBITDA)', fmt.x(act.impliedExitMultiple))}
+      ${r('Terminal value as % of EV', fmt.pct(act.tvShare))}${r('Implied exit multiple (TV at end of year 10 ÷ year-10 EBITDA)', fmt.x(act.tvMethod === 'Gordon Growth' && cur.mode === 'corrected' && cur.inputs.midYear === 'Y' ? act.impliedExitMultiple * Math.pow(1 + act.waccUsed, 0.5) : act.impliedExitMultiple))}
     </tbody></table></div></section>
     <section class="panel"><h2>Enterprise value to value per share</h2><div class="tbl-wrap"><table class="fin"><tbody>
       ${r('Sum of PV of FCFF (years 1–10)', fmt.mm(act.sumPV))}${r('+ PV of terminal value', fmt.mm(act.pvTV))}${r('Enterprise value', fmt.mm(act.ev), 'total')}
@@ -1822,7 +1961,7 @@
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
-      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
+      ${DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
         <div><dt>What to enter</dt><dd>${esc(f.enter)}</dd></div>
@@ -1900,6 +2039,7 @@
       cur.ttmManual.result = DCFAnalysis.manualTTM(cur.ttmManual); if (!cur.ttmManual.result) cur.ttmManual.use = false;
     }
     else if (t === 'wt') { const parts = el.dataset.k.split('.'); let o = wt(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
+    else if (t === 'tv') { const parts = el.dataset.k.split('.'); let o = tvState(); for (let i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; } o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'tool') { const parts = el.dataset.k.split('.'); let o = toolState(); for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]; o[parts[parts.length - 1]] = v; persist(); setTimeout(render, 0); return; }
     else if (t === 'asof') { const k = el.dataset.k; field = 'asOf.' + k; cur.asOf = cur.asOf || {}; from = cur.asOf[k]; cur.asOf[k] = v; if (k === 'range' && cur.asOf.range && !cur.asOf.price) {} }
     else if (t === 'gc') { gc[el.dataset.k] = v; if (isNum(v) && v < 0) { parseErrors[id] = 'Must be at least 0.'; parseErrors[id + ':raw'] = el.value; } setTimeout(render, 0); return; }
@@ -1979,6 +2119,8 @@
       DCFModel.logChange(cur, 'hist.years', null, fromYears, H.years.join(', ') + ' (shifted; FY' + cur.histArchive[0].year + ' figures kept in the file)'); persist(); render(); toast(`Added an empty FY${latest + 1} column. Fill it from the new 10-K; the forecast waits for it if the base is the latest fiscal year.`); return; }
     if (b.dataset.toolUse) { const k = b.dataset.toolUse, v = Math.round(+b.dataset.v * 1e6) / 1e6, sc = cur.active; const from = cur.inputs[k][sc]; cur.inputs[k][sc] = v; DCFModel.logChange(cur, k, sc, from, v); if (cur.defaults) delete cur.defaults[k]; persist(); render(); toast(`${FBY[k].label} (${sc}) set to ${(v * 100).toFixed(2)}%. The previous value (${isNum(from) ? (from * 100).toFixed(2) + '%' : 'empty'}) is in the change log.`); return; }
     if (b.dataset.suggest) { const k = b.dataset.suggest, v = Math.round(+b.dataset.v * 1e6) / 1e6; const empty = SC.filter(sc => !isNum(cur.inputs[k][sc])); empty.forEach(sc => { DCFModel.logChange(cur, k, sc, null, v); cur.inputs[k][sc] = v; }); if (empty.length && !cur.sources[k]) cur.sources[k] = { name: 'Historical anchor: ' + b.dataset.l, type: 'Own judgment', cat: 'analyst', notes: 'Filled from the historical anchor by your choice. Review it.' }; persist(); render(); toast(empty.length ? `Filled ${empty.join(', ')} with ${plain(fmtVal(k, v))}. Cells you had filled were not changed.` : 'All three scenarios already have values, so nothing was changed.'); return; }
+    if (b.dataset.tvworkToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.tvWork = !cur.ui.tvWork; persist(); render(); if (cur.ui.tvWork) { const w = document.getElementById('tv-work'); if (w) w.scrollIntoView({ block: 'start' }); } return; }
+    if (b.dataset.tvTool) { const id = b.dataset.tvTool; aidOpen[id] = true; cur.ui = cur.ui || {}; if (cur.ui.learn === false) { cur.ui.learn = true; persist(); } if (drawerKey) { drawerKey = null; renderDrawer(); } const go = () => { const el = document.getElementById(id); if (el) el.scrollIntoView({ block: 'start' }); }; if (page() !== 'terminal') { location.hash = 'terminal'; setTimeout(go, 120); } else { render(); go(); } return; }
     if (b.dataset.learnToggle !== undefined) { cur.ui = cur.ui || {}; cur.ui.learn = cur.ui.learn === false; persist(); render(); return; }
     if (b.dataset.aidAll) { const open = b.dataset.aidAll === 'open'; document.querySelectorAll('details[data-aid]').forEach(d => { aidOpen[d.dataset.aid] = open; }); render(); return; }
     if (b.dataset.useDilwa !== undefined) { const r = (cur.ref || {}).dilutedWA; if (!r) return; const from = cur.dilution.est; cur.dilution.est = r.v; cur.dilution.ignore = false; DCFModel.logChange(cur, 'dilution.est', null, from, r.v + ' (diluted weighted-average shares, ' + (r.period || '') + ', chosen by you)'); cur.sources['dil.est'] = { name: r.source || 'Filing', type: '10-Q quarterly report', period: r.period || '', notes: 'Diluted weighted-average shares from the EPS calculation, used as an estimate of current diluted shares by your choice. This is a period average, not a period-end count.' }; persist(); render(); toast('Used the filing figure as your estimate. It is a period average, not a current count.'); return; }

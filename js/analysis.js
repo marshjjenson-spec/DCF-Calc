@@ -275,6 +275,101 @@ const DCFAnalysis = (() => {
     return { s, rf: v('rf'), beta: v('beta'), erp: v('erp'), scp: v('scp'), csrp: v('csrp'), ke, kd, tax, kdAT, E, D, L, leasesIn: inp.leasesInWacc !== false, shares, price: inp.price, we, wd, wacc, wbMode: wb, sum: isNum(we) ? we + wd : null };
   }
 
-  return { parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
+  // ===== terminal value helpers (read-only; the engine still computes value) =====
+  const nominalGrowth = (real, infl) => isNum(real) && isNum(infl) ? (1 + real) * (1 + infl) - 1 : null;
+  function stats(vals) {
+    const pts = vals.map((v, i) => ({ v, i })).filter(p => isNum(p.v));
+    if (!pts.length) return null;
+    const xs = pts.map(p => p.v).sort((a, b) => a - b), n = xs.length;
+    const median = n % 2 ? xs[(n - 1) / 2] : (xs[n / 2 - 1] + xs[n / 2]) / 2;
+    let slope = null;
+    if (n >= 3) { const mx = mean(pts.map(p => p.i)), my = mean(pts.map(p => p.v)); const sxx = pts.reduce((a, p) => a + (p.i - mx) ** 2, 0); slope = sxx ? pts.reduce((a, p) => a + (p.i - mx) * (p.v - my), 0) / sxx : null; }
+    return { n, mean: mean(xs), median, min: xs[0], max: xs[n - 1], slope };
+  }
+  // historical ROIC, line by line. Invested capital = equity + debt + lease liabilities − cash and short-term investments
+  function histRoic(rows) {
+    const ic = r => [r.equity, r.debt].every(isNum) ? r.equity + r.debt + (isNum(r.leases) ? r.leases : 0) - (isNum(r.cash) ? r.cash : 0) : null;
+    return rows.map((r, i) => {
+      const nopat = isNum(r.ebit) && isNum(r.tax) ? r.ebit * (1 - r.tax) : null;
+      const end = ic(r), prev = i > 0 ? ic(rows[i - 1]) : null;
+      const avg = isNum(end) && isNum(prev) ? (end + prev) / 2 : null;
+      return Object.assign({}, r, { nopat, ic: end, avgIC: avg, roic: isNum(nopat) && isNum(avg) && avg > 0 ? nopat / avg : null, roicEnd: isNum(nopat) && isNum(end) && end > 0 ? nopat / end : null });
+    });
+  }
+  // segment EBITDA: Σ(segment revenue × segment margin) − unallocated costs
+  function segMargin(segs, unalloc, totalRev) {
+    const ok = segs.filter(x => isNum(x.rev) && isNum(x.m));
+    if (!ok.length) return null;
+    const rev = ok.reduce((a, x) => a + x.rev, 0), e = ok.reduce((a, x) => a + x.rev * x.m, 0) - (isNum(unalloc) ? unalloc : 0);
+    return { rev, ebitda: e, margin: rev ? e / rev : null, gap: isNum(totalRev) && totalRev ? rev / totalRev - 1 : null, n: ok.length };
+  }
+  // both terminal value methods side by side for one scenario
+  function tvCompare(model, s) {
+    const { inp } = mdl().engineInputs(model), E = eng();
+    const base = E.run(inp, s, model.mode);
+    const one = m => { if (m === 'Exit Multiple' && !isNum(inp.exitMult[s])) return { ok: false, why: 'No exit multiple entered for ' + s + '.' }; const r = E.run(inp, s, model.mode, { tvMethod: m }); return r.ok ? { ok: true, tv: r.tv, pvTV: r.pvTV, ev: r.ev, perShare: r.perShare, tvShare: r.tvShare, period: r.tvPeriod, r } : { ok: false, why: (r.errors[0] || ('Missing: ' + r.missing.join(', '))) }; };
+    const G = one('Gordon Growth'), X = one('Exit Multiple');
+    let impl = null;
+    if (G.ok) {
+      const r = G.r, w = r.waccUsed, y10 = r.years[9], y11 = r.years[10];
+      const atT10 = r.tvGordon * (model.mode === 'corrected' && inp.midYear === 'Y' ? Math.pow(1 + w, 0.5) : 1);
+      impl = { atT10, trailing: atT10 / y10.ebitda, forward: atT10 / y11.ebitda, ebitda10: y10.ebitda, ebitda11: y11.ebitda, adj: atT10 !== r.tvGordon };
+    }
+    return { s, base, primary: inp.tvMethod[s], G, X, impl, diff: G.ok && X.ok ? { perShare: X.perShare - G.perShare, pct: X.perShare / G.perShare - 1, ev: X.ev - G.ev } : null };
+  }
+  // growth rate at which Gordon gives the same present value of terminal value as the exit multiple.
+  // FCFF in year 11 depends on g twice (revenue grows by g, reinvestment = g ÷ ROIC), so it is solved numerically.
+  function impliedG(model, s, targetPV) {
+    const { inp } = mdl().engineInputs(model), E = eng();
+    const base = E.run(inp, s, model.mode, { tvMethod: 'Gordon Growth', tg: 0 });
+    const w = base.ok ? base.waccUsed : (E.wacc(inp, s, model.mode) || {}).wacc;
+    if (!isNum(targetPV) || !isNum(w)) return { ok: false, roots: [], why: 'Needs a calculated scenario and an exit-multiple value.' };
+    const f = g => { const r = E.run(inp, s, model.mode, { tvMethod: 'Gordon Growth', tg: g }); return r.ok ? r.pvTV - targetPV : null; };
+    const lo = -0.05, hi = w - 0.0005, step = 0.0005, roots = [];
+    let pg = lo, pf = f(lo);
+    for (let g = lo + step; g <= hi + 1e-12; g += step) {
+      const fv = f(g);
+      if (isNum(pf) && isNum(fv) && (pf === 0 || pf * fv < 0)) { let a = pg, b = g, fa = pf; for (let k = 0; k < 60; k++) { const m = (a + b) / 2, fm = f(m); if (!isNum(fm)) break; if (fa * fm <= 0) b = m; else { a = m; fa = fm; } } roots.push((a + b) / 2); }
+      pg = g; pf = fv;
+    }
+    const troic = inp.troic[s];
+    return { ok: roots.length > 0, roots, wacc: w, troic, why: roots.length ? '' : (model.mode === 'corrected' && isNum(troic) && troic <= w ? `With terminal ROIC (${(troic * 100).toFixed(1)}%) at or below WACC (${(w * 100).toFixed(1)}%), faster growth does not add value, so no growth rate below WACC reproduces this exit value.` : 'No growth rate between −5% and WACC reproduces this exit value.') };
+  }
+  // terminal value consistency checks: warnings only, nothing is changed
+  function tvChecks(model, all, tvTools) {
+    const I = model.inputs, out = [], pct = x => (x * 100).toFixed(1) + '%', T = tvTools || {};
+    const corr = model.mode === 'corrected';
+    SC.forEach(s => {
+      const r = all.scen[s], g = I.tg[s], rf = I.rf[s], tem = I.tem[s], em10 = I.em10[s], ro = I.troic[s], tax = I.tax[s];
+      const w = r && r.ok ? r.waccUsed : (() => { try { return waccParts(model, s).wacc; } catch (e) { return null; } })();
+      if (isNum(g) && isNum(w) && g >= w) out.push({ level: 'bad', key: 'tg', s, text: `${s}: terminal growth (${pct(g)}) is not below WACC (${pct(w)}). The Gordon formula has no finite answer.` });
+      if (isNum(g) && isNum(rf) && g > rf) out.push({ level: 'warn', key: 'tg', s, text: `${s}: terminal growth (${pct(g)}) is above the risk-free rate (${pct(rf)}). Not impossible, but the risk-free rate is a common ceiling for long-run nominal growth: record why the company can grow faster than the economy forever.` });
+      if (isNum(g) && !(model.notes && model.notes.tg && model.notes.tg[s] && (model.notes.tg[s].why || model.notes.tg[s].evidence || model.notes.tg[s].how))) out.push({ level: 'info', key: 'tg', s, text: `${s}: no research note supports the terminal growth rate yet.` });
+      if (isNum(tem) && isNum(em10) && Math.abs(tem - em10) > 0.02) out.push({ level: 'warn', key: 'tem', s, text: `${s}: the margin steps from ${pct(em10)} in year 10 to ${pct(tem)} in year 11. A jump at the start of the terminal period is applied forever; if it is intended (for example, scaling costs end), say so in the notes, or bring the year-10 margin closer.` });
+      if (corr && isNum(ro) && isNum(w) && isNum(g) && g > 0 && ro < w) out.push({ level: 'warn', key: 'troic', s, text: `${s}: terminal ROIC (${pct(ro)}) is below WACC (${pct(w)}), so every dollar reinvested for growth loses value. That can be a deliberate view (a business without lasting advantages); otherwise ROIC near WACC is the neutral assumption.` });
+      if (corr && isNum(ro) && isNum(g) && g > 0 && g / ro > 1) out.push({ level: 'bad', key: 'troic', s, text: `${s}: reinvestment rate g ÷ ROIC = ${pct(g / ro)} is above 100%, so terminal free cash flow is negative. Growth of ${pct(g)} needs a higher ROIC.` });
+      if (corr && isNum(g) && g < 0) out.push({ level: 'info', key: 'tg', s, text: `${s}: negative terminal growth gives a negative reinvestment rate: the company releases capital as it shrinks, which adds to cash flow.` });
+      if (corr && isNum(ro) && ro > 0.5) out.push({ level: 'warn', key: 'troic', s, text: `${s}: a terminal ROIC of ${pct(ro)} is very high to earn on new capital forever. Check it against the historical ROIC on new investment, not just the average.` });
+      if (r && r.ok) {
+        if (r.tvShare > 0.8) out.push({ level: 'warn', key: 'tvMethod', s, text: `${s}: terminal value is ${pct(r.tvShare)} of enterprise value, so the result depends mostly on the terminal assumptions. Run the sensitivity tables before relying on it.` });
+        const y10 = r.years[9], y11 = r.years[10];
+        if (corr && isNum(y10.reinvRateModel) && isNum(y11.reinvestRate) && Math.abs(y10.reinvRateModel - y11.reinvestRate) > 0.15) out.push({ level: 'warn', key: 'troic', s, text: `${s}: the year-10 reinvestment rate is ${pct(y10.reinvRateModel)} (CapEx, D&A, working capital and acquisitions) but the terminal rate is ${pct(y11.reinvestRate)} (g ÷ ROIC), so free cash flow ${y11.fcff > y10.fcff ? 'jumps' : 'drops'} from ${Math.round(y10.fcff).toLocaleString()} to ${Math.round(y11.fcff).toLocaleString()} $mm. Bring year 8–10 CapEx closer to steady state, or revisit ROIC.` });
+        if (corr && isNum(tax) && tax < 0.15) out.push({ level: 'info', key: 'tax', s, text: `${s}: the terminal year uses the ${s} forecast tax rate (${pct(tax)}). A steady-state business usually pays close to the marginal rate (about 21% US federal plus state).` });
+      }
+      if (I.tvMethod[s] === 'Exit Multiple' && !isNum(I.exitMult[s])) out.push({ level: 'bad', key: 'exitMult', s, text: `${s}: the method is Exit Multiple but no multiple is entered.` });
+    });
+    // exit multiple vs the peers the analyst entered
+    const peers = (T.peers || []).filter(p => isNum(p.m));
+    if (peers.length) {
+      const st = stats(peers.map(p => p.m));
+      SC.forEach(s => { const m = I.exitMult[s]; if (isNum(m) && (m > st.max || m < st.min)) out.push({ level: 'warn', key: 'exitMult', s, text: `${s}: the exit multiple (${m.toFixed(1)}×) is outside the range of the peers you entered (${st.min.toFixed(1)}×–${st.max.toFixed(1)}×, median ${st.median.toFixed(1)}×).` }); });
+      const bases = new Set(peers.map(p => p.basis).filter(Boolean));
+      if (bases.has('Forward (next-year EBITDA)')) out.push({ level: 'warn', key: 'exitMult', text: 'Some peer multiples are on forward EBITDA, but the model applies the exit multiple to year-10 EBITDA (trailing at the exit date). A forward multiple applied to trailing EBITDA overstates value when EBITDA is growing.' });
+      if (bases.size > 1) out.push({ level: 'warn', key: 'exitMult', text: 'Your peer multiples mix trailing and forward EBITDA. Put them on one basis before taking the median.' });
+    }
+    if (!corr && SC.some(s => isNum(I.tcapex[s]) && isNum(I.da[s]) && I.tcapex[s] < I.da[s])) out.push({ level: 'warn', key: 'tcapex', text: 'Terminal CapEx below D&A shrinks the asset base forever while revenue keeps growing.' });
+    return out;
+  }
+  return { nominalGrowth, stats, histRoic, segMargin, tvCompare, impliedG, tvChecks, parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFAnalysis;
