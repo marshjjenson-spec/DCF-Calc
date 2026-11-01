@@ -2007,17 +2007,23 @@ const DCF = (() => {
     const growth = [v('g1'), v('g1'), v('g1'), v('g2'), v('g2'), v('g2'), v('g2'), v('g3'), v('g3'), v('g3'), g];
     const path = (a, b, c, i) => i < 5 ? a + i / 4 * (b - a) : b + (i - 4) / 5 * (c - b);
     const capxPct = [v('capex1'), v('capex1'), v('capex1'), v('capex2'), v('capex2'), v('capex2'), v('capex2'), v('capex3'), v('capex3'), v('capex3'), v('tcapex')];
-    const years = []; let prev = inp.rev0;
+    const years = []; let prev = inp.rev0, lossBal = 0;
     for (let i = 0; i < 11; i++) {
       const rev = prev * (1 + growth[i]);
       const emPct = i < 10 ? path(v('em1'), v('em5'), v('em10'), i) : v('tem');
       const ebitda = rev * emPct, da = rev * v('da'), ebit = ebitda - da;
       const taxRate = v('tax') - (i < 3 ? v('nol') : 0);
-      const taxes = ebit * taxRate, nopat = ebit - taxes;
+      // corrected mode: an operating loss pays no tax (no refund is assumed) and is carried forward against later profits
+      let taxes = ebit * taxRate, lossUsed = 0;
+      if (mode === 'corrected' && i < 10) {
+        if (ebit < 0) { taxes = 0; lossBal += -ebit; }
+        else { lossUsed = Math.min(lossBal, ebit); lossBal -= lossUsed; taxes = (ebit - lossUsed) * taxRate; }
+      } else if (mode === 'corrected' && ebit < 0) taxes = 0;
+      const nopat = ebit - taxes;
       let capex = rev * capxPct[i], dnwc = (rev - prev) * v('nwc'), acq = rev * v('acq');
       let fcff = nopat + da - capex - dnwc - acq;
       const gmPct = (isNum(v('gm1')) && isNum(v('gm5')) && isNum(v('gm10'))) ? (i < 10 ? path(v('gm1'), v('gm5'), v('gm10'), i) : v('gm10')) : null;
-      const y = { gmPct, gp: gmPct === null ? null : rev * gmPct, t: i + 1, growth: growth[i], rev, emPct, ebitda, da, ebit, ebitPct: ebit / rev, taxRate, taxes, nopat, capex, dnwc, acq, fcff };
+      const y = { lossUsed, lossLeft: lossBal, gmPct, gp: gmPct === null ? null : rev * gmPct, t: i + 1, growth: growth[i], rev, emPct, ebitda, da, ebit, ebitPct: ebit / rev, taxRate, taxes, nopat, capex, dnwc, acq, fcff };
       if (i === 10 && mode === 'corrected') {
         // Damodaran stable growth: reinvestment rate = g / ROIC, so FCFF = NOPAT x (1 - g/ROIC)
         y.reinvestRate = g / v('troic'); y.fcff = nopat * (1 - y.reinvestRate);
@@ -3004,6 +3010,10 @@ const DCFData = (() => {
     leasesNC: { c: ['OperatingLeaseLiabilityNoncurrent'], label: 'Operating lease liabilities, non-current' },
     leasesC: { c: ['OperatingLeaseLiabilityCurrent'], label: 'Operating lease liabilities, current' },
     minority: { c: ['MinorityInterest'], label: 'Non-controlling interests' },
+    finL: { c: ['FinanceLeaseLiability'], label: 'Finance lease liabilities' },
+    finLNC: { c: ['FinanceLeaseLiabilityNoncurrent'], label: 'Finance lease liabilities, non-current' },
+    finLC: { c: ['FinanceLeaseLiabilityCurrent'], label: 'Finance lease liabilities, current' },
+    crypto: { c: ['CryptoAssetFairValue'], label: 'Crypto assets at fair value' },
   };
   function secMeta(rec, extra) {
     return Object.assign({ rec, cls: rec.cat === 'calc' ? 'calc' : 'filing', asOf: rec.end, source: `SEC EDGAR XBRL: ${rec.form} ${rec.accn}`, type: /^10-Q/.test(rec.form || '') ? '10-Q quarterly report' : '10-K annual report', url: rec.url, period: rec.periodText, notes: rec.method && rec.method !== 'Reported' ? rec.method : '' }, extra || {});
@@ -3048,10 +3058,22 @@ const DCFData = (() => {
     let debt = null;
     if (lt) debt = Object.assign({}, lt, { value: lt.value + (same(st, lt) ? st.value : 0), method: `Long-term debt including current portion (${lt.concept})${same(st, lt) ? ' + short-term borrowings' : ''}.` });
     else if (nc) debt = Object.assign({}, nc, { value: nc.value + (same(dc, nc) ? dc.value : 0) + (same(st, nc) ? st.value : 0), method: 'Non-current + current long-term debt' + (same(st, nc) ? ' + short-term borrowings' : '') + '.' });
-    if (debt) putR('debt', Object.assign(debt, { cat: debt.method ? 'calc' : 'sec' }), { notes: debt.method + ' Excludes lease liabilities. Check the debt note for finance leases and other borrowings.', review: true });
-    const ol = inst('leases');
+    // a total and its current + non-current parts: use whichever is newer (some companies tag only the parts in 10-Qs)
+    const newer = (tot, a, b, method) => { const sum = a && b && same(a, b) ? Object.assign({}, a, { value: a.value + b.value, method, cat: 'calc' }) : null; return tot && (!sum || tot.end >= sum.end) ? tot : sum; };
+    // finance leases are financial debt under any lease treatment
+    const fl = newer(inst('finL'), inst('finLC'), inst('finLNC'), 'Current + non-current finance lease liabilities');
+    if (debt && fl && same(fl, debt)) debt = Object.assign({}, debt, { value: debt.value + fl.value, cat: 'calc', method: debt.method + ` + finance lease liabilities ${Math.round(fl.value).toLocaleString('en-US')} (${fl.concept || 'current + non-current'}).` });
+    else if (debt && fl) imp.notes.push(`Finance lease liabilities (${Math.round(fl.value).toLocaleString('en-US')} $mm, ${fl.end}) are dated differently from debt (${debt.end}), so they were not added. Add them in the debt worksheet if they are still outstanding.`);
+    else if (debt) imp.notes.push('No finance lease liabilities were found in the SEC data. If the leases note shows any, add them to Total debt.');
+    if (debt) putR('debt', Object.assign(debt, { cat: debt.method ? 'calc' : 'sec' }), { notes: debt.method + ' Operating leases are a separate line. Check the debt note for other borrowings.', review: true });
+    const ol = newer(inst('leases'), inst('leasesC'), inst('leasesNC'), 'Current + non-current operating lease liabilities');
     if (ol) putR('leases', ol);
-    else { const lnc = inst('leasesNC'), lc = inst('leasesC'); if (lnc) putR('leases', Object.assign({}, lnc, { value: lnc.value + (same(lc, lnc) ? lc.value : 0), method: 'Current + non-current operating lease liabilities', cat: 'calc' })); }
+    // digital assets held at fair value: a non-operating asset whose remeasurement runs through operating income
+    const cr = inst('crypto');
+    if (cr) { putRef(imp, 'crypto', cr.value, { label: 'Crypto assets at fair value', source: `SEC EDGAR XBRL: ${cr.form} ${cr.accn}`, period: 'as of ' + cr.end, notes: 'A non-operating asset. Consider adding it in the equity bridge (equity investments worksheet) at fair value on the valuation date.', rec: cr });
+      imp.notes.push(`This company holds crypto assets (${Math.round(cr.value).toLocaleString('en-US')} $mm at fair value on ${cr.end}). Their unrealized gains and losses are reported inside operating income, so historical EBIT and EBITDA margins are not operating margins. Exclude the remeasurement from your margin estimates and value the holdings in the equity bridge.`); }
+    // D&A not in company facts (some companies use their own XBRL tag for the cash-flow line)
+    if (F.years[0] && F.years[0].values.da == null) imp.notes.push(`D&A for ${F.years[0].label} is not in the SEC company facts under a standard tag (the company may use its own tag for "depreciation and amortization" on the cash flow statement). EBITDA is left blank rather than estimated: enter D&A from the cash flow statement.`);
     putR('minority', inst('minority'));
     // shares: separate types
     const SH = Sec.shares(json, { L });
@@ -4296,6 +4318,8 @@ const DCFExcel = (() => {
   async function exportModel(JSZip, templateBuf, model, fields, histFields, template) {
     const zip = await JSZip.loadAsync(templateBuf);
     const paths = await sheetPaths(zip);
+    // standard lease treatment: the template subtracts and weights the lease cell, so it is written as 0 (lease cost stays in the cash flows)
+    if (template === 'corrected' && model.leaseMode !== 'debt') { model = JSON.parse(JSON.stringify(model)); model.inputs.leases = 0; }
     const bySheet = {};
     cellMap(fields, histFields, template).forEach(([sh, ref, get, , unit]) => { (bySheet[sh] = bySheet[sh] || []).push([ref, get(model), unit]); });
     for (const [sh, cells] of Object.entries(bySheet)) {
@@ -6436,6 +6460,7 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
       ['Exit multiple used year-11 EBITDA', 'The multiple was applied to the terminal-year (year 11) EBITDA but discounted as if received at year 10.', 'TV = Year 10 EBITDA × multiple, discounted 10 years.', 'Standard practice: apply the multiple to the final forecast year\'s EBITDA.'],
       ['WACC weights were typed, not market values', 'Equity and debt weights were a typed 97/3 instead of market values.', 'Equity weight = market cap ÷ (market cap + debt), calculated from market values (operating leases added only under the lease-adjusted treatment).', 'Workbook checklist: weight by market values, not book.'],
       ['Operating leases were counted twice', 'Lease cost stayed in operating expenses (and so in EBITDA and free cash flow) while the lease liability was also subtracted in the bridge and counted as debt in the WACC weights.', 'Standard US GAAP treatment by default: lease cost stays in the cash flows; the liability is not subtracted and not in the weights. A lease-adjusted (debt) treatment can be chosen per model.', 'Common practice: treat leases one way consistently across cash flows, EBITDA, weights and the bridge.'],
+      ['Forecast losses produced tax refunds', 'Taxes were EBIT × rate in every year, so a year with an operating loss received a negative tax (a refund) that most companies cannot claim.', 'A loss year pays no tax, and the loss is carried forward against later profits (years 1–10). The terminal year pays no tax on a loss.', 'Damodaran: losses create net operating losses that shelter future income; they do not generate cash refunds.'],
       ['Base revenue was typed twice', 'Base-year revenue on Assumptions was not linked to Historicals.', 'Linked to the latest historical year.', 'Avoids two numbers that should be one.'],
       ['Inputs that did nothing', 'SBC %, interest income rate, NWC base, R&D capitalisation rate and revenue mix never reached the valuation.', 'Removed from the input screens. EBITDA margins are entered after SBC. Gross margin is kept, labelled display only.', 'An input that changes nothing misleads the analyst.'],
       ['Wording that did not match the formulas', 'Sensitivity said "Base-case FCFFs" but used the active scenario; the Readme named the wrong second grid; historical taxes were a hidden 21%.', 'Labels corrected; estimated taxes labelled as estimates at the Base tax rate.', 'No formula change.'],

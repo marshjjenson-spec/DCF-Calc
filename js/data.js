@@ -210,6 +210,10 @@ const DCFData = (() => {
     leasesNC: { c: ['OperatingLeaseLiabilityNoncurrent'], label: 'Operating lease liabilities, non-current' },
     leasesC: { c: ['OperatingLeaseLiabilityCurrent'], label: 'Operating lease liabilities, current' },
     minority: { c: ['MinorityInterest'], label: 'Non-controlling interests' },
+    finL: { c: ['FinanceLeaseLiability'], label: 'Finance lease liabilities' },
+    finLNC: { c: ['FinanceLeaseLiabilityNoncurrent'], label: 'Finance lease liabilities, non-current' },
+    finLC: { c: ['FinanceLeaseLiabilityCurrent'], label: 'Finance lease liabilities, current' },
+    crypto: { c: ['CryptoAssetFairValue'], label: 'Crypto assets at fair value' },
   };
   function secMeta(rec, extra) {
     return Object.assign({ rec, cls: rec.cat === 'calc' ? 'calc' : 'filing', asOf: rec.end, source: `SEC EDGAR XBRL: ${rec.form} ${rec.accn}`, type: /^10-Q/.test(rec.form || '') ? '10-Q quarterly report' : '10-K annual report', url: rec.url, period: rec.periodText, notes: rec.method && rec.method !== 'Reported' ? rec.method : '' }, extra || {});
@@ -254,10 +258,22 @@ const DCFData = (() => {
     let debt = null;
     if (lt) debt = Object.assign({}, lt, { value: lt.value + (same(st, lt) ? st.value : 0), method: `Long-term debt including current portion (${lt.concept})${same(st, lt) ? ' + short-term borrowings' : ''}.` });
     else if (nc) debt = Object.assign({}, nc, { value: nc.value + (same(dc, nc) ? dc.value : 0) + (same(st, nc) ? st.value : 0), method: 'Non-current + current long-term debt' + (same(st, nc) ? ' + short-term borrowings' : '') + '.' });
-    if (debt) putR('debt', Object.assign(debt, { cat: debt.method ? 'calc' : 'sec' }), { notes: debt.method + ' Excludes lease liabilities. Check the debt note for finance leases and other borrowings.', review: true });
-    const ol = inst('leases');
+    // a total and its current + non-current parts: use whichever is newer (some companies tag only the parts in 10-Qs)
+    const newer = (tot, a, b, method) => { const sum = a && b && same(a, b) ? Object.assign({}, a, { value: a.value + b.value, method, cat: 'calc' }) : null; return tot && (!sum || tot.end >= sum.end) ? tot : sum; };
+    // finance leases are financial debt under any lease treatment
+    const fl = newer(inst('finL'), inst('finLC'), inst('finLNC'), 'Current + non-current finance lease liabilities');
+    if (debt && fl && same(fl, debt)) debt = Object.assign({}, debt, { value: debt.value + fl.value, cat: 'calc', method: debt.method + ` + finance lease liabilities ${Math.round(fl.value).toLocaleString('en-US')} (${fl.concept || 'current + non-current'}).` });
+    else if (debt && fl) imp.notes.push(`Finance lease liabilities (${Math.round(fl.value).toLocaleString('en-US')} $mm, ${fl.end}) are dated differently from debt (${debt.end}), so they were not added. Add them in the debt worksheet if they are still outstanding.`);
+    else if (debt) imp.notes.push('No finance lease liabilities were found in the SEC data. If the leases note shows any, add them to Total debt.');
+    if (debt) putR('debt', Object.assign(debt, { cat: debt.method ? 'calc' : 'sec' }), { notes: debt.method + ' Operating leases are a separate line. Check the debt note for other borrowings.', review: true });
+    const ol = newer(inst('leases'), inst('leasesC'), inst('leasesNC'), 'Current + non-current operating lease liabilities');
     if (ol) putR('leases', ol);
-    else { const lnc = inst('leasesNC'), lc = inst('leasesC'); if (lnc) putR('leases', Object.assign({}, lnc, { value: lnc.value + (same(lc, lnc) ? lc.value : 0), method: 'Current + non-current operating lease liabilities', cat: 'calc' })); }
+    // digital assets held at fair value: a non-operating asset whose remeasurement runs through operating income
+    const cr = inst('crypto');
+    if (cr) { putRef(imp, 'crypto', cr.value, { label: 'Crypto assets at fair value', source: `SEC EDGAR XBRL: ${cr.form} ${cr.accn}`, period: 'as of ' + cr.end, notes: 'A non-operating asset. Consider adding it in the equity bridge (equity investments worksheet) at fair value on the valuation date.', rec: cr });
+      imp.notes.push(`This company holds crypto assets (${Math.round(cr.value).toLocaleString('en-US')} $mm at fair value on ${cr.end}). Their unrealized gains and losses are reported inside operating income, so historical EBIT and EBITDA margins are not operating margins. Exclude the remeasurement from your margin estimates and value the holdings in the equity bridge.`); }
+    // D&A not in company facts (some companies use their own XBRL tag for the cash-flow line)
+    if (F.years[0] && F.years[0].values.da == null) imp.notes.push(`D&A for ${F.years[0].label} is not in the SEC company facts under a standard tag (the company may use its own tag for "depreciation and amortization" on the cash flow statement). EBITDA is left blank rather than estimated: enter D&A from the cash flow statement.`);
     putR('minority', inst('minority'));
     // shares: separate types
     const SH = Sec.shares(json, { L });

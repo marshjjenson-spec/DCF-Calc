@@ -14,6 +14,10 @@ The website runs two methods. **Corrected** (the default) applies the fixes belo
 | 6 | Base revenue typed separately from Historicals | Assumptions C26:E26 | Linked to Historicals G7 | One number, one place |
 | 7 | Inputs that changed nothing: SBC %, interest income, NWC base, R&D capitalisation, revenue mix | Assumptions rows 30–31, 41–42, 51, 53 | Removed from the input screens; gross margin kept as display only | An input that changes nothing misleads |
 | 8 | Labels that did not match formulas (Sensitivity note, Readme grid name, hidden 21% historical tax) | Sensitivity B14, Readme D18, Historicals B19 | Wording corrected | No formula change |
+| 9 | Operating leases counted twice: lease cost stayed in operating costs (EBITDA and FCFF) while the lease liability was also subtracted in the bridge and counted as debt in the weights | Assumptions C79–C85, C64 | Standard US GAAP treatment by default: lease cost stays in the cash flows; the liability is neither subtracted nor weighted. A lease-adjusted (debt) treatment can be chosen per model. Excel export writes the lease cell as 0 under the standard treatment | Consistency across cash flows, EBITDA, weights and the bridge |
+| 10 | A forecast operating loss produced a negative tax (a refund) | DCF Engine row 17 | A loss year pays no tax; losses are carried forward against later profits (years 1–10) | Damodaran: losses create NOLs, not refunds |
 
-Effect on the Amazon example: Base $183.78 → $179.20, Bear $47.41 → $47.56, Bull $374.88 → $364.55,
-probability-weighted $204.28 → $199.21.
+Effect on the Amazon example (fixes 1–8): Base $183.78 → $179.20, Bear $47.41 → $47.56, Bull $374.88 → $364.55,
+probability-weighted $204.28 → $199.21. With fix 9 (standard lease treatment, now the default): Base $181.01,
+Bear $53.43, Bull $359.97, probability-weighted $200.23. Choosing the lease-adjusted treatment reproduces the $179.20 figures.
+Fix 10 does not change the example (no forecast losses).

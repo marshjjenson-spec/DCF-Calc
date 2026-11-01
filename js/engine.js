@@ -58,17 +58,23 @@ const DCF = (() => {
     const growth = [v('g1'), v('g1'), v('g1'), v('g2'), v('g2'), v('g2'), v('g2'), v('g3'), v('g3'), v('g3'), g];
     const path = (a, b, c, i) => i < 5 ? a + i / 4 * (b - a) : b + (i - 4) / 5 * (c - b);
     const capxPct = [v('capex1'), v('capex1'), v('capex1'), v('capex2'), v('capex2'), v('capex2'), v('capex2'), v('capex3'), v('capex3'), v('capex3'), v('tcapex')];
-    const years = []; let prev = inp.rev0;
+    const years = []; let prev = inp.rev0, lossBal = 0;
     for (let i = 0; i < 11; i++) {
       const rev = prev * (1 + growth[i]);
       const emPct = i < 10 ? path(v('em1'), v('em5'), v('em10'), i) : v('tem');
       const ebitda = rev * emPct, da = rev * v('da'), ebit = ebitda - da;
       const taxRate = v('tax') - (i < 3 ? v('nol') : 0);
-      const taxes = ebit * taxRate, nopat = ebit - taxes;
+      // corrected mode: an operating loss pays no tax (no refund is assumed) and is carried forward against later profits
+      let taxes = ebit * taxRate, lossUsed = 0;
+      if (mode === 'corrected' && i < 10) {
+        if (ebit < 0) { taxes = 0; lossBal += -ebit; }
+        else { lossUsed = Math.min(lossBal, ebit); lossBal -= lossUsed; taxes = (ebit - lossUsed) * taxRate; }
+      } else if (mode === 'corrected' && ebit < 0) taxes = 0;
+      const nopat = ebit - taxes;
       let capex = rev * capxPct[i], dnwc = (rev - prev) * v('nwc'), acq = rev * v('acq');
       let fcff = nopat + da - capex - dnwc - acq;
       const gmPct = (isNum(v('gm1')) && isNum(v('gm5')) && isNum(v('gm10'))) ? (i < 10 ? path(v('gm1'), v('gm5'), v('gm10'), i) : v('gm10')) : null;
-      const y = { gmPct, gp: gmPct === null ? null : rev * gmPct, t: i + 1, growth: growth[i], rev, emPct, ebitda, da, ebit, ebitPct: ebit / rev, taxRate, taxes, nopat, capex, dnwc, acq, fcff };
+      const y = { lossUsed, lossLeft: lossBal, gmPct, gp: gmPct === null ? null : rev * gmPct, t: i + 1, growth: growth[i], rev, emPct, ebitda, da, ebit, ebitPct: ebit / rev, taxRate, taxes, nopat, capex, dnwc, acq, fcff };
       if (i === 10 && mode === 'corrected') {
         // Damodaran stable growth: reinvestment rate = g / ROIC, so FCFF = NOPAT x (1 - g/ROIC)
         y.reinvestRate = g / v('troic'); y.fcff = nopat * (1 - y.reinvestRate);

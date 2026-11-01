@@ -81,6 +81,8 @@ const DCFExcel = (() => {
   async function exportModel(JSZip, templateBuf, model, fields, histFields, template) {
     const zip = await JSZip.loadAsync(templateBuf);
     const paths = await sheetPaths(zip);
+    // standard lease treatment: the template subtracts and weights the lease cell, so it is written as 0 (lease cost stays in the cash flows)
+    if (template === 'corrected' && model.leaseMode !== 'debt') { model = JSON.parse(JSON.stringify(model)); model.inputs.leases = 0; }
     const bySheet = {};
     cellMap(fields, histFields, template).forEach(([sh, ref, get, , unit]) => { (bySheet[sh] = bySheet[sh] || []).push([ref, get(model), unit]); });
     for (const [sh, cells] of Object.entries(bySheet)) {

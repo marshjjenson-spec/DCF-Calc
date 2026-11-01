@@ -11,6 +11,10 @@ Run `npm test`. The tests compare the website engine with values calculated by a
 | Probability-weighted | $204.28 | $204.28 | < 1e-9 | $199.21 | $199.21 | < 1e-9 |
 | Base enterprise value ($mm) | 2,066,527 | 2,066,527 | < 1e-9 | 2,016,360 | 2,016,360 | < 1e-9 |
 
+The corrected columns above use the lease-adjusted treatment. Under the standard lease treatment (the default since
+the audit) the website gives Base $181.01; an Excel export of that model, recalculated by LibreOffice, gives
+$181.0100682, the same to 1e-9. `tests/audit.test.js` also recalculates 216 cases independently of the engine.
+
 What the 331 engine checks cover:
 
 - Original workbook: value per share, WACC and all 11 FCFF years for Base, Bear and Bull; EV, equity, TV, PV of TV,

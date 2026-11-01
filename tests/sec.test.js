@@ -62,7 +62,17 @@ const m = M.blank(); D.applyImport(m, imp);
 ok('apply: source record has accession, form, filed, measurement date, raw value', m.sources.basic.accn === '0001018724-26-000040' && m.sources.basic.form === '10-Q' && m.sources.basic.filed === '2026-10-30' && m.sources.basic.end === '2026-10-21' && m.sources.basic.raw === 10813138306 && m.sources.basic.cat === 'sec' && m.sources.basic.verified);
 ok('apply: TTM and share data stored for display', near(m.ttm.items.rev.value, 797455) && m.shareData.netDilQ.value === 132);
 const ti = D.mapSEC(tsla);
-ok('TSLA: stale lease figure is flagged with its date', ti.flags.some(f => f.key === 'leases' && /2025-12-31/.test(f.text)));
+ok('TSLA: operating leases use the newer 10-Q parts (1,075 + 5,847) over the older 10-K total', Math.abs(ti.values.leases.v - 6922) < 1e-6 && ti.values.leases.asOf === '2026-09-30' && !ti.flags.some(f => f.key === 'leases' && /2025-12-31/.test(f.text)));
+ok('TSLA: D&A missing from company facts is explained, not estimated', ti.notes.some(n => /D&A for FY2025 is not in the SEC company facts/.test(n)) && ti.fin.years[0].values.da == null);
+// finance leases and crypto: synthetic facts (labelled test data, not SEC figures)
+const syn = JSON.parse(JSON.stringify(require('./fixtures/sec-amzn.json')));
+const base = syn.facts['us-gaap'].CashAndCashEquivalentsAtCarryingValue.units.USD.find(x => x.end === '2026-09-30');
+const fact = v => [Object.assign({}, base, { val: v })];
+syn.facts['us-gaap'].FinanceLeaseLiability = { units: { USD: fact(1000e6) } };
+syn.facts['us-gaap'].CryptoAssetFairValue = { units: { USD: fact(500e6) } };
+const si = D.mapSEC(syn), amzD = D.mapSEC(require('./fixtures/sec-amzn.json')).values.debt.v;
+ok('finance leases on the debt date are added to debt', Math.abs(si.values.debt.v - amzD - 1000) < 1e-6 && /finance lease/.test(si.values.debt.notes));
+ok('crypto holdings become a reference and a note, never auto-added', si.ref.crypto && si.ref.crypto.v === 500 && !si.values.stakes && si.notes.some(n => /crypto assets/.test(n)));
 ok('TSLA actual shares 3,952.757946 mm as of 2026-10-15', near(ti.values.basic.v, 3952.757946) && ti.values.basic.asOf === '2026-10-15');
 const mi = D.mapSEC(mstr);
 ok('MSTR: no basic share count imported', !mi.values.basic);
