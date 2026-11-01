@@ -3720,15 +3720,15 @@ if (typeof module !== 'undefined') module.exports = DCFExcel;
           <li><b>Convertibles:</b> if-converted method. If the share price is above the conversion price, add the conversion shares and remove the principal from debt in the equity bridge, so it is not counted twice. Net share settlement adds only the value above par.</li></ul></details>
       </section>
       <section class="panel gsec" id="g4"><h2><span class="gnum">4</span>Example: Amazon's Q3 2026 10-Q</h2>
-        <p>From Amazon's Form 10-Q for the quarter ended <b>September 30, 2026</b>, the earnings per share calculation for the three months ended that date, in millions of shares:</p>
+        <p>From Amazon's Form 10-Q for the quarter ended <b>September 30, 2026</b>, “the calculation of diluted shares (in millions)” for the three months ended that date:</p>
         <table class="fin gamzn"><tbody>
-          <tr><td>Weighted-average shares used in computation of basic earnings per share</td><td>10,797</td></tr>
+          <tr><td>Shares used in computation of basic earnings per share</td><td>10,797</td></tr>
           <tr><td>Total dilutive effect of outstanding stock awards</td><td>+ 132</td></tr>
-          <tr class="tot"><td>Weighted-average shares used in computation of diluted earnings per share</td><td>10,929</td></tr>
+          <tr class="tot"><td>Shares used in computation of diluted earnings per share</td><td>10,929</td></tr>
         </tbody></table>
         <div class="tags"><span class="badge-s b-fil">SEC filing data</span><span class="tag">Quarterly weighted average</span><span class="tag">Not a current share count</span></div>
-        <details class="gex"><summary>How the EPS denominator is built</summary><p>Amazon starts with the average basic shares over the quarter (10,797 mm) and adds the net shares its stock awards would create, measured at the quarter's average price (132 mm, about 1.2%). Diluted EPS = net income ÷ 10,929 mm. For your DCF, take actual shares from the cover page (a single date, a few weeks after September 30) and estimate dilution from the stock-based compensation note, using this 1.2% as a sense check.</p></details>
-        <p class="footnote">Source: <a href="https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm" target="_blank" rel="noopener">Amazon.com, Inc. Form 10-Q, quarter ended September 30, 2026 (SEC EDGAR)</a>. Statements of Operations and Note 1, “Earnings per share”.</p>
+        <details class="gex"><summary>How the EPS denominator is built</summary><p>Amazon starts with the average basic shares over the quarter (10,797 mm) and adds the net shares its stock awards would create, measured at the quarter's average price (132 mm, about 1.2%). Diluted EPS = net income ÷ 10,929 mm. For your DCF, take actual shares from the cover page instead: “10,813,138,306 shares of common stock … outstanding as of October 21, 2026”, which is 10,813.14 million on a single date. Then estimate dilution from the stock-based compensation note, using this 1.2% as a sense check.</p></details>
+        <p class="footnote">Source: <a href="https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm" target="_blank" rel="noopener">Amazon.com, Inc. Form 10-Q, quarter ended September 30, 2026 (SEC EDGAR)</a>. Consolidated Statements of Operations, and Note 1, Accounting Policies and Supplemental Disclosures, “Earnings Per Share”. Figures checked against the filing on 1 Nov 2026.</p>
       </section>
       <section class="panel gsec" id="g5"><h2><span class="gnum">5</span>Diluted share calculator</h2>
         <p class="footnote">A sandbox. It ${gc.src === 'model' ? 'started from your model\'s figures' : 'starts with a teaching example'} and never changes your DCF inputs. Use it to see how each input moves the result.</p>
