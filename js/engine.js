@@ -78,8 +78,10 @@ const DCF = (() => {
       y.reinvRateModel = 1 - y.fcff / y.nopat;
     });
     const mid = inp.midYear === 'Y';
+    // stub: years already elapsed between the end of the base period and the valuation date (0 = workbook timing)
+    const off = isNum(inp.stub) && inp.stub > 0 ? inp.stub : 0;
     let sumPV = 0;
-    years.slice(0, 10).forEach(y => { y.period = y.t - (mid ? 0.5 : 0); y.df = 1 / Math.pow(1 + w, y.period); y.pv = y.fcff * y.df; sumPV += y.pv; });
+    years.slice(0, 10).forEach(y => { y.period = y.t - (mid ? 0.5 : 0) - off; y.df = 1 / Math.pow(1 + w, y.period); y.pv = y.fcff * y.df; sumPV += y.pv; });
     const T = years[10], Y10 = years[9];
     let tv, tvPeriod = 10, tvGordon, tvExit;
     if (mode === 'workbook') {
@@ -91,6 +93,7 @@ const DCF = (() => {
     }
     if (tvMethod === 'Gordon Growth') { tv = tvGordon; if (mode === 'corrected' && mid) tvPeriod = 9.5; }
     else tv = tvExit;
+    tvPeriod -= off;
     const pvTV = tv / Math.pow(1 + w, tvPeriod);
     const ev = sumPV + pvTV;
     const bridge = inp.cash + inp.sti + inp.stakes - inp.debt - inp.pension - inp.leases - inp.minority - inp.dtl - inp.optVal;
@@ -99,7 +102,7 @@ const DCF = (() => {
     const termRoic = T.roic;
     const impliedReinv = g / (mode === 'corrected' ? v('troic') : termRoic);
     const res = {
-      ok: true, scenario: s, mode, years, W, waccUsed: w, g, tvMethod, tv, tvGordon, tvExit, tvPeriod, pvTV, sumPV, ev, bridge, equity, perShare,
+      ok: true, scenario: s, mode, stub: off, years, W, waccUsed: w, g, tvMethod, tv, tvGordon, tvExit, tvPeriod, pvTV, sumPV, ev, bridge, equity, perShare,
       upside: perShare / inp.price - 1, tvShare: pvTV / ev,
       evEbitda1: ev / years[0].ebitda, evRev1: ev / years[0].rev,
       impliedExitMultiple: tv / Y10.ebitda,

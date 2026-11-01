@@ -68,5 +68,28 @@ ok('MSTR: no basic share count imported', !mi.values.basic);
 ok('MSTR: option exercise price that looks mis-scaled is flagged once a price is known', (() => { mi.values.price = { v: 300 }; return D.validateImport(mi).some(f => f.key === 'sh.optionsK'); })());
 ok('a file for another company is flagged', D.validateImport(imp, Object.assign(M.blank(), { meta: { cik: '0001318605' } })).some(f => f.level === 'bad'));
 
+// ---- forecast base, timing stub, proxy dilution ----
+const DCF = require('../js/engine.js'), sample = require('../data/amzn-sample.json');
+const bm = M.blank(); D.applyImport(bm, imp); bm.inputs.company.valDate = '2026-11-01';
+let bi = M.baseInfo(bm);
+ok('FY base: FY2025 revenue 716,924 ending 2025-12-31', bi.mode === 'fy' && bi.rev === 716924 && bi.end === '2025-12-31');
+ok('FY base 10 months before the valuation date is warned about', bi.stub > 0.8 && bi.warnings.some(w => w.key === 'base'));
+bm.base.mode = 'ttm'; bi = M.baseInfo(bm);
+ok('TTM base: 797,455 ending 2026-09-30', near(bi.rev, 797455) && bi.end === '2026-09-30' && /TTM/.test(bi.label));
+ok('TTM base stub is one month', near(bi.stub, 32 / 365.25, 1e-9));
+ok('forecast year 1 runs 2026-10-01 to 2027-09-30', bi.periods[0].start === '2026-10-01' && bi.periods[0].end === '2027-09-30' && bi.periods[9].end === '2036-09-30');
+ok('TTM base feeds the engine', near(M.engineInputs(bm).inp.rev0, 797455) && near(M.engineInputs(bm).inp.stub, 32 / 365.25, 1e-9));
+const nt = M.blank(); nt.base.mode = 'ttm'; ok('TTM chosen without TTM data is an error, not zero', M.baseInfo(nt).rev == null && M.baseInfo(nt).warnings.some(w => w.level === 'bad'));
+const old = M.upgrade(JSON.parse(JSON.stringify(Object.assign(M.blank(), { timing: undefined, base: undefined }))));
+ok('older saved files keep workbook timing', old.timing === 'workbook' && old.base.mode === 'fy' && old.ui.learn === true);
+const s0 = DCF.run(sample, 'Base'), s1 = DCF.run(Object.assign({}, sample, { stub: 0.5 }), 'Base');
+ok('stub 0 leaves the engine unchanged', DCF.run(Object.assign({}, sample, { stub: 0 }), 'Base').perShare === s0.perShare);
+ok('a stub brings cash flows closer, raising value', s1.perShare > s0.perShare && s1.stub === 0.5);
+const pm = M.blank(); pm.inputs.basic = 10813.138306; pm.dilution.method = 'proxy'; pm.dilution.proxy = { v: 132, period: 'Q3 2026' };
+const pd = M.dilution(pm);
+ok('proxy dilution uses the reported net 132, no extra buyback', pd.ok && pd.gross === 132 && pd.buyback === 0 && near(pd.diluted, 10945.138306));
+ok('proxy dilution is disclosed as a historical proxy', pd.warnings.some(w => /proxy/.test(w) && /past period/.test(w)));
+pm.dilution.proxy = { v: null }; ok('proxy with no value is missing, not zero', !M.dilution(pm).ok);
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

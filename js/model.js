@@ -20,11 +20,14 @@ const DCFModel = (() => {
       // choices that start with a default value: they don't count as complete until the analyst confirms them
       defaults: { tvMethod: true, midYear: true },
       asOf: { price: null, range: null, basic: null },
-      dilution: blankDilution() };
+      dilution: blankDilution(),
+      // forecast starting point: 'fy' (latest completed fiscal year) or 'ttm'; timing 'dated' discounts from the valuation date
+      base: { mode: 'fy', fyEnd: null }, timing: 'dated',
+      notes: {}, ui: { learn: true } };
   }
   function blankDilution(method = null) {
     const row = () => ({ label: null, n: null, k: null });
-    return { method, est: null, ignore: false, none: false, options: [row(), row(), row(), row()], rsu: { n: null, unrecog: null }, warrants: [row(), row()], converts: [Object.assign(row(), { net: false }), Object.assign(row(), { net: false })] };
+    return { method, est: null, ignore: false, none: false, proxy: null, options: [row(), row(), row(), row()], rsu: { n: null, unrecog: null }, warrants: [row(), row()], converts: [Object.assign(row(), { net: false }), Object.assign(row(), { net: false })] };
   }
   function fromSample(s, name) {
     const m = blank(name || s.company.name);
@@ -36,6 +39,7 @@ const DCFModel = (() => {
     m.sample = true;
     m.defaults = {};
     m.dilution = blankDilution('totals');
+    m.timing = 'workbook';
     m.asOf = { price: s.company.valDate || null, range: s.company.valDate || null, basic: null };
     return m;
   }
@@ -80,6 +84,14 @@ const DCFModel = (() => {
       if (!isNum(o) || !isNum(t)) { out.problem = 'Missing'; return out; }
       if (o < 0 || t < 0) { out.problem = 'Must be at least 0.'; return out; }
       return fin(o, t);
+    }
+    if (D.method === 'proxy') {
+      const p = D.proxy;
+      if (!p || !isNum(p.v)) { out.problem = 'Enter the reported net dilutive effect from the latest EPS note'; return out; }
+      if (p.v < 0) { out.problem = 'The net dilutive effect cannot be negative'; out.invalid.push('proxy'); return out; }
+      out.rows.push({ type: 'Reported net dilution', label: 'Net dilutive effect of stock awards' + (p.period ? ` (${p.period})` : ''), n: p.v, gross: p.v, buyback: 0, net: p.v, note: 'Already net of the treasury stock method in the EPS calculation: no further buyback is subtracted' });
+      out.warnings.push(`Using the reported net dilutive effect${p.period ? ' for ' + p.period : ''} as a proxy. It is a weighted average for a past period, at that period's average share price, not a measure of current dilution.`);
+      return fin(p.v, 0);
     }
     if (D.method === 'simple') {
       if (D.ignore) { out.warnings.push('Valuing on actual shares outstanding only: dilution from options, RSUs, warrants and convertibles is ignored.'); return fin(0, 0); }
@@ -158,6 +170,32 @@ const DCFModel = (() => {
     d.warnings.forEach(t => add('warn', 'dilution', t));
     return w;
   }
+  // The forecast starting point: which 12 months year 1 follows, and how far the valuation date is past their end
+  function baseInfo(model) {
+    const B = model.base || { mode: 'fy' }, T = model.ttm, H = model.hist;
+    const vd = model.inputs.company.valDate;
+    const out = { mode: B.mode || 'fy', rev: null, end: null, label: '', warnings: [] };
+    if (out.mode === 'ttm') {
+      const r = T && T.items && T.items.rev;
+      if (r && isNum(r.value)) { out.rev = r.value; out.end = T.end; out.label = `TTM to ${T.end}`; }
+      else { out.warnings.push({ level: 'bad', text: 'TTM is selected as the forecast base, but no TTM revenue is available. Load the SEC company facts file, or switch to the latest fiscal year.' }); }
+    } else {
+      out.rev = H.rev[4]; out.end = B.fyEnd || (model.fin && model.fin.years && model.fin.years[0] && String(model.fin.years[0].fy) === String(H.years[4]) ? model.fin.years[0].end : null);
+      out.label = H.years[4] ? `FY${H.years[4]}${out.end ? ' (ended ' + out.end + ')' : ''}` : 'latest fiscal year';
+    }
+    if (model.mode === 'workbook') { out.rev = model.inputs.rev0; out.label = 'Base-year revenue (typed)'; }
+    out.stub = null;
+    if (isDate(vd) && isDate(out.end)) {
+      out.stub = Math.max(0, days(out.end, vd) / 365.25);
+      if (days(out.end, vd) < -1) out.warnings.push({ level: 'warn', text: `The valuation date ${vd} is before the end of the base period (${out.end}). Year 1 then includes days before the valuation date.` });
+    } else if (model.timing === 'dated') out.warnings.push({ level: 'warn', text: 'Add the end date of the base period and a valuation date, so the forecast years line up with the valuation date.' });
+    // balance sheet date vs base end: cash flows between them would be counted twice (in year 1 and in cash)
+    const bs = model.sources && model.sources.cash && (model.sources.cash.end || model.sources.cash.asOf);
+    if (isDate(bs) && isDate(out.end) && days(out.end, bs) > 45) out.warnings.push({ level: 'warn', key: 'base', text: `The forecast starts after ${out.end}, but cash and debt are as of ${bs}. Cash flows earned between those dates are already in the balance sheet and would be counted again in year 1. Use TTM to ${bs}, or a balance sheet from the same date as the base period.` });
+    if (out.stub != null && out.stub > 0.5) out.warnings.push({ level: 'warn', key: 'base', text: `The base period ended ${(out.stub * 12).toFixed(0)} months before the valuation date. Year 1 is mostly in the past. A TTM base keeps the forecast current.` });
+    out.periods = isDate(out.end) ? Array.from({ length: 10 }, (_, i) => { const s = new Date(out.end); s.setUTCDate(s.getUTCDate() + 1); s.setUTCFullYear(s.getUTCFullYear() + i); const e = new Date(out.end); e.setUTCFullYear(e.getUTCFullYear() + i + 1); return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }; }) : null;
+    return out;
+  }
   // Build the flat engine input, dropping invalid values (they count as missing, never as zero)
   function engineInputs(model) {
     const out = {}, invalid = [];
@@ -167,7 +205,9 @@ const DCFModel = (() => {
       if (f.tri) { out[f.key] = {}; SC.forEach(s => { const e = fieldError(f, v[s]); if (e) invalid.push({ key: f.key, s, e }); out[f.key][s] = e ? null : v[s]; }); }
       else { const e = fieldError(f, v); if (e) invalid.push({ key: f.key, e }); out[f.key] = e ? null : v; }
     });
-    if (model.mode === 'corrected') { const r = model.hist.rev[4]; out.rev0 = isNum(r) && r > 0 ? r : null; }
+    const b = baseInfo(model);
+    if (model.mode === 'corrected') out.rev0 = isNum(b.rev) && b.rev > 0 ? b.rev : null;
+    out.stub = model.timing === 'dated' && isNum(b.stub) ? b.stub : 0;
     const d = dilution(model);
     if (d.method && d.method !== 'totals') { out.options = d.ok ? d.gross : null; out.treasury = d.ok ? d.buyback : null; }
     return { inp: out, invalid, dilution: d };
@@ -276,8 +316,13 @@ const DCFModel = (() => {
     out.asOf = Object.assign({ price: null, range: null, basic: null }, m.asOf || {});
     // older files typed the workbook's two totals directly: keep that method
     out.dilution = m.dilution ? Object.assign(blankDilution(), m.dilution) : blankDilution(isNum(out.inputs.options) || isNum(out.inputs.treasury) ? 'totals' : null);
+    // older files were valued on workbook timing: keep it so their saved values do not move
+    out.timing = m.timing || 'workbook';
+    out.base = Object.assign({ mode: 'fy', fyEnd: null }, m.base || {});
+    out.notes = m.notes || {};
+    out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { baseInfo, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;
