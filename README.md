@@ -53,6 +53,32 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
 - Warnings cover a missing or stale price or share date, a 52-week high below the low, a price outside the range, likely unit errors, and a market cap that differs from the provider's.
 - **Share dilution guide** (sidebar, or "Learn about diluted shares") explains basic vs diluted shares, where to find each figure on EDGAR, the formula and treasury stock method, Amazon's Q3 2026 EPS share table, a sandbox calculator and common mistakes. It shows your model's share counts read-only and never changes your inputs.
 
+## Stock Price Simulator
+
+A separate model at `#sim` (switch at the top of every page) for questions such as "if earnings grow and the stock keeps a
+30× P/E, what could it reach?". It has its own saved simulations (browser key `dcfsim.models.v1`) and never changes DCF,
+Trading Comps or Three-Statement models.
+
+- **Methods:** P/E (revenue × net margin ÷ diluted weighted-average shares × P/E), EPS growth, EV/EBITDA, EV/EBIT and
+  EV/Revenue (enterprise value − debt − other claims + cash, ÷ year-end diluted shares), P/S and P/FCF (equity multiples,
+  no bridge). Every method is calculated side by side; one is selected for the dashboard.
+- **Assumptions** per Bear/Base/Bull scenario: revenue growth, net/EBITDA/operating/FCF margins, EPS growth, net share
+  change (dilution or buybacks), change in cash and debt, dividends (payout or DPS growth) and future multiples, each
+  constant or set by year (with a fade helper). Projection period 1–10 years.
+- **Starting figures** reuse the SEC/FMP import (actual figures with sources; re-imports never overwrite manual entries)
+  plus five fiscal years of reported history. Assumptions can be proposed from history and today's multiples, a DCF
+  forecast or a three-statement forecast; every proposal is reviewed first and analyst-entered values are only replaced
+  when ticked.
+- **Outputs:** dashboard, year-by-year table and charts, scenarios with probabilities, five sensitivity tables, returns
+  (price CAGR from the price date, total return and IRR with dividends, value today at a required return), reverse
+  projection (required EPS, growth, margin, P/E, EBITDA, EV/EBITDA, each re-checked forward) and a comparison with the
+  DCF value, the Trading Comps value and the market price.
+- **Edge cases:** negative earnings (P/E and EPS growth give no price, with a reason), claims above EV (price floored at
+  0), missing debt or dilution inputs reported as missing, unusual multiples and inconsistent margins flagged, stock-split
+  mismatches detected and adjustable, TTM or fiscal-year base with the elapsed time taken off the holding period.
+- Files: `js/sim-engine.js` (formulas), `js/sim-model.js` (storage, imports, proposals), `js/sim-help.js` (guides),
+  `js/sim-app.js` (interface). Tests: `tests/sim.test.js` re-derives every formula independently.
+
 ## Structure
 
 | Path | What it is |

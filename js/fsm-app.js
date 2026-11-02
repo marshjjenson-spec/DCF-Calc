@@ -325,7 +325,7 @@ const FsmApp = (() => {
     const list = Object.values(models).sort((a, b) => b.updated.localeCompare(a.updated)); if (!models[cur.id]) list.unshift(cur);
     const { runs } = calc();
     const st = SC.map(s => { const r = runs[s]; const f = r.ok ? r.checks.filter(c => c.status === 'fail').length : null; return `<span class="pill ${!r.ok ? 'neutral' : f ? 'bad' : 'good'}" title="${s}: ${!r.ok ? 'assumptions incomplete' : f ? f + ' failing check(s)' : 'all checks pass'}">${s}${r.ok ? (f ? ' ✕' : ' ✓') : ' …'}</span>`; }).join('');
-    $('#fs-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm" aria-current="true">Three-Statement Model</a></div>
+    $('#fs-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm" aria-current="true">Three-Statement Model</a><a href="#sim">Stock Price Simulator</a></div>
       <div class="model-pick"><label for="fs-model" class="footnote">Model</label><select id="fs-model" class="plain">${list.map(m => opt(m.id, m.name, cur.id)).join('')}</select></div>
       <div class="seg" role="group" aria-label="Scenario">${SC.map(s => `<button data-fscen="${s}" aria-pressed="${s === scen()}">${s}</button>`).join('')}</div>
       <button class="btn ghost" id="fs-data">${icon('db')} Data source: ${fmpKey() ? 'Financial Modeling Prep' : 'SEC files'}</button>

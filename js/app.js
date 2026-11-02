@@ -227,8 +227,9 @@
   }
 
   // ---------- routing ----------
-  const compsOn = () => /^#(comps|fsm)(\/|$)/.test(location.hash); // another workspace (Trading Comps or the Three-Statement Model) owns the page
+  const compsOn = () => /^#(comps|fsm|sim)(\/|$)/.test(location.hash); // another workspace (Trading Comps, the Three-Statement Model or the Stock Price Simulator) owns the page
   const fsmOn = () => /^#fsm(\/|$)/.test(location.hash);
+  const simOn = () => /^#sim(\/|$)/.test(location.hash);
   function page() { const h = location.hash.slice(1); return PAGES.find(p => p.id === h) ? h : 'dashboard'; }
   // another workspace (the Three-Statement Model's DCF link) may have saved this model while it was away: pick up the stored copy
   function refreshFromStorage() { if (!cur) return; try { const all = DCFModel.loadAll(); const st = all[cur.id]; if (st && st.updated && st.updated !== cur.updated) { models = all; cur = st; calcCache = null; } } catch (e) {} }
@@ -310,7 +311,7 @@
     top.querySelector('#search-sel').innerHTML = selName ? `<span class="chip">${esc(selName)}</span>` : '<span class="chip muted">No company selected</span>';
     renderSearchResults();
     $('#hdr-sub').innerHTML = `
-      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm">Three-Statement Model</a></div>
+      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm">Three-Statement Model</a><a href="#sim">Stock Price Simulator</a></div>
       <div class="model-pick"><label for="model-select" class="footnote">Model</label>
         <select id="model-select" class="plain">${opts}</select></div>
       <div class="model-pick"><label for="mode-select" class="footnote">Method</label>
@@ -2542,8 +2543,9 @@
   // ---------- render ----------
   function render() {
     if (fsmOn()) { if (typeof FsmApp !== 'undefined') FsmApp.render(); return; }
+    if (simOn()) { if (typeof SimApp !== 'undefined') SimApp.render(); return; }
     if (compsOn()) { if (typeof CompsApp !== 'undefined') CompsApp.render(); return; }
-    ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && r.dataset.owner === 'comps') { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
+    ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && (r.dataset.owner === 'comps' || r.dataset.owner === 'sim')) { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
     calcCache = null;
     const active = document.activeElement && document.activeElement.id;
     renderTop(); renderRail();
