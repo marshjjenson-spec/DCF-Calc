@@ -53,6 +53,42 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
 - Warnings cover a missing or stale price or share date, a 52-week high below the low, a price outside the range, likely unit errors, and a market cap that differs from the provider's.
 - **Share dilution guide** (sidebar, or "Learn about diluted shares") explains basic vs diluted shares, where to find each figure on EDGAR, the formula and treasury stock method, Amazon's Q3 2026 EPS share table, a sandbox calculator and common mistakes. It shows your model's share counts read-only and never changes your inputs.
 
+## Stock Price Simulator
+
+A separate model at `#sim` (switch at the top of every page) for questions such as "if earnings grow and the stock keeps a
+30× P/E, what could it reach?". It has its own saved simulations (browser key `dcfsim.models.v1`) and never changes DCF,
+Trading Comps or Three-Statement models.
+
+- **Methods:** P/E (revenue × net margin ÷ diluted weighted-average shares × P/E), EPS growth, EV/EBITDA, EV/EBIT and
+  EV/Revenue (enterprise value − debt − other claims + cash, ÷ year-end diluted shares), P/S and P/FCF (equity multiples,
+  no bridge). Every method is calculated side by side; one is selected for the dashboard.
+- **Assumptions** per Bear/Base/Bull scenario: revenue growth, net/EBITDA/operating/FCF margins, EPS growth, net share
+  change (dilution or buybacks), change in cash and debt, dividends (payout or DPS growth) and future multiples, each
+  constant or set by year (with a fade helper). Projection period 1–10 years.
+- **Starting figures** reuse the SEC/FMP import (actual figures with sources; re-imports never overwrite manual entries)
+  plus five fiscal years of reported history. Assumptions can be proposed from history and today's multiples, a DCF
+  forecast or a three-statement forecast; every proposal is reviewed first and analyst-entered values are only replaced
+  when ticked.
+- **Outputs:** dashboard, year-by-year table and charts, scenarios with probabilities, five sensitivity tables, returns
+  (price CAGR from the price date, total return and IRR with dividends, value today at a required return), reverse
+  projection (required EPS, growth, margin, P/E, EBITDA, EV/EBITDA, each re-checked forward) and a comparison with the
+  DCF value, the Trading Comps value and the market price.
+- **Edge cases:** negative earnings (P/E and EPS growth give no price, with a reason), claims above EV (price floored at
+  0), missing debt or dilution inputs reported as missing, unusual multiples and inconsistent margins flagged, stock-split
+  mismatches detected and adjustable, TTM or fiscal-year base with the elapsed time taken off the holding period.
+- Files: `js/sim-engine.js` (formulas), `js/sim-model.js` (storage, imports, proposals), `js/sim-help.js` (guides),
+  `js/sim-app.js` (interface). Tests: `tests/sim.test.js` re-derives every formula independently.
+
+## Beginner's guides in every help panel
+
+Every help panel in all four models (Discounted Cash Flow, Trading Comps, Three-Statement Model, Stock Price Simulator)
+opens with a first-time guide from `js/learn.js`: the idea in plain English, step-by-step instructions for finding
+the number in the filings or free data sources, typical values for different kinds of companies, why the usual choice
+is made (for example why terminal growth stays at or below long-run nominal GDP and the risk-free rate), and real
+YouTube lessons (Damodaran, Wall Street Prep, Breaking Into Wall Street, CFI and others). Each video's title and
+channel were checked against YouTube's own record; there are no search links standing in for videos.
+`tests/learn.test.js` checks that every panel has a complete guide and at least one video.
+
 ## Structure
 
 | Path | What it is |
@@ -62,6 +98,7 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
 | `js/data.js` | Data providers (FMP, Alpha Vantage, SEC company facts): fetch, map to model figures with sources, apply with provenance |
 | `js/charts.js` | SVG charts: football field, free cash flow, completion ring |
 | `js/fields.js` | Every input field: label, unit, scenario columns, workbook cell, help text from the workbook checklist |
+| `js/learn.js` | Beginner's guides and checked video links shown at the top of every help panel |
 | `js/excel.js` | Excel export (writes inputs into the workbook template) and import |
 | `js/app.js` | User interface only |
 | `templates/` | The original workbook and the corrected workbook used for export |
@@ -76,8 +113,10 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
   period and the measurement date separately, and lets amendments replace the facts they restate. Actual shares
   (cover page), weighted-average basic/diluted shares and the reported net dilutive effect are kept as separate types.
 - **TTM** = latest fiscal year + current year to date − same period a year earlier, for each line, with the three
-  source figures, accession numbers and dates shown. Historicals run newest first: TTM, then five fiscal years. TTM can
-  also be built by hand from the 10-K and 10-Q.
+  source figures, accession numbers and dates shown. Historicals run newest first: TTM, then five fiscal years. Every TTM
+  box is editable: the calculated figure is the default (cyan), a typed figure replaces it for that line (amber, logged),
+  and clearing the box goes back. With no SEC file loaded the TTM column can be typed directly. TTM can also be built
+  line by line from the three 10-K and 10-Q figures.
 - **Forecast base**: latest fiscal year or TTM, with a preview before switching. New models line the forecast years up
   with the valuation date (the elapsed part of year 1 is taken off each discount period); older saved models keep the
   workbook timing, so their values do not move.
@@ -94,6 +133,54 @@ The model shows Complete, and 100%, only when all of these pass; defaults and pl
   CapEx), sales-to-capital explained, research notes per input and scenario, consistency checks, and a scenario
   overview. Guides can be hidden with one switch.
 
+## Change in NWC guide
+
+The **?** on Historical financials → Change in NWC opens an 11-section guide: what NWC is and why analysts calculate it,
+each component with worked examples, the sign rules, operating NWC and the balance-sheet method, the ten steps to find
+the lines in a 10-K, Amazon's FY2025 lines (sum of all lines −19,969; receivables + inventory + payables +896, a partial
+subset), FCFF with working capital, forecasting (incremental ratio and % of revenue), a filing worksheet, a learning
+calculator, common mistakes and research notes saved with the model.
+
+- **Importer** (`js/nwc.js`): reads every working-capital change line of the cash flow statement, keeps its sign,
+  period, filing and link, classifies it (operating, mixed, not operating, reported total), never adds a part of a
+  combined line twice, and takes each period's lines from one filing. A year is filled in only when every material line
+  is clearly operating; otherwise it is left blank and marked for review. Nothing is guessed or set to zero.
+- **Worksheet**: three separate outputs (all reported lines, clearly operating lines, analyst-adjusted), complete or
+  incomplete status, adjustments with reasons and links, and an explicit choice of the value to use, confirmed before
+  it replaces anything.
+- **History and forecast**: operating NWC, balance-sheet and cash flow changes, NWC % of revenue and the incremental
+  ratio for five years and TTM; a forecasting worksheet that applies to "Change in NWC % of change in revenue" only after
+  confirmation, with a check for the common sign error.
+- **EDGAR links** search only the selected company's filings (by CIK); without a CIK no cross-company search is shown.
+
 Limitations: browsers cannot read the SEC company facts file directly (no CORS), so it is downloaded and loaded by
 hand; facts tagged with dimensions (for example Amazon's RSU count) and company-specific tags are not in that file;
 some companies do not tag D&A or working-capital totals, and those lines are left blank rather than estimated.
+
+## Three-Statement Model
+
+A third workspace next to Discounted Cash Flow and Trading Comps (`#fsm`), with its own saved models (`dcf3s.models.v1`).
+It builds a linked income statement, balance sheet and cash flow statement for ten forecast years in Base, Bear and Bull
+scenarios, with schedules for revenue and operating costs, working capital, CapEx and PP&E, D&A, debt (tranches and a
+revolver, opening or average-balance interest solved iteratively), taxes (deferred taxes and loss carryforwards) and
+equity (stock compensation, buybacks, dividends, share count).
+
+- **Import:** five fiscal years and a separate TTM column from the SEC company facts file (or FMP), each figure with its
+  source, filing and period. Missing figures stay blank. A company already loaded in the DCF is imported without asking for the file again.
+- **No plugs:** cash comes only from the cash flow statement; the balance check and fifteen other reconciliations
+  (Pass / Warning / Fail by year and scenario) are on the Model reconciliation page.
+- **DCF Forecast Source:** a DCF can use its own drivers (Original) or this model's projected free cash flows (Linked).
+  Linking never changes the DCF's stored inputs, records the model, version and time, and can be switched back at any time.
+- **Guides:** every line, input, setting and ratio has a nine-part guide with a formula, a worked example and sources.
+- **Export:** Excel workbook with one formula-linked sheet per scenario (re-checked against the app in the tests), printable report, model file.
+
+| Path | What it is |
+|---|---|
+| `js/fsm-engine.js` | Three-statement calculation engine and checks (no UI) |
+| `js/fsm-data.js` | SEC and FMP import, statement classification |
+| `js/fsm-model.js` | Saved models, versions, set-up from history |
+| `js/fsm-help.js` | Guides |
+| `js/fsm-export.js` | Excel and printable report |
+| `js/fsm-app.js` | User interface |
+| `js/sec-cache.js` | SEC files kept in this browser (IndexedDB) for reuse |
+| `tests/fsm.test.js` | Independent recalculation and six real companies (fixtures in `tests/fixtures/fsm/`) |

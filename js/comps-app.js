@@ -134,7 +134,7 @@ const CompsApp = (() => {
     const { b, imp } = calc();
     const live = isNum(imp.perShare) ? `<div><div class="lbl">Implied (${esc(b.label)})</div><div class="big">${f.px(imp.perShare, t.priceCurrency)}</div></div><div><div class="lbl">vs price ${plain(f.px(E.val(t, 'price'), t.priceCurrency))}</div><div>${f.up(imp.upside)}</div></div>`
       : `<a class="pill bad" href="#comps/checklist">Valuation incomplete</a>`;
-    $('#cx-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps" aria-current="true">Trading Comps</a></div>
+    $('#cx-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps" aria-current="true">Trading Comps</a><a href="#fsm">Three-Statement Model</a><a href="#sim">Stock Price Simulator</a></div>
       <div class="model-pick"><label for="cx-model" class="footnote">Comps model</label><select id="cx-model" class="plain">${list.map(m => opt(m.id, m.name, cur.id)).join('')}</select></div>
       <div class="model-pick"><label for="cx-group" class="footnote">Peer group</label><select id="cx-group" class="plain">${groupOptions(cur.selection.group)}</select></div>
       <button class="btn ghost" id="cx-data">${icon('db')} Data source: ${fmpKey() ? 'Financial Modeling Prep' : 'not connected'}</button>
@@ -164,7 +164,7 @@ const CompsApp = (() => {
       const badge = s ? `<span class="pct ${s.status === 'complete' ? 'done' : ''}">${s.status === 'complete' ? '✓' : Math.round(s.done / s.total * 100) + '%'}</span>` : '';
       h += `<a href="#comps/${p.id}" ${page() === p.id ? 'aria-current="page"' : ''}>${icon(p.icon)}<span class="t">${p.title}</span>${badge}</a>`;
     });
-    h += `<h4>Other model</h4><a href="#dashboard">${icon('calc')}<span class="t">Discounted Cash Flow</span></a>`;
+    h += `<h4>Other models</h4><a href="#dashboard">${icon('calc')}<span class="t">Discounted Cash Flow</span></a><a href="#sim">${icon('trend')}<span class="t">Stock Price Simulator</span></a>`;
     $('#rail').innerHTML = h;
   }
 
@@ -684,7 +684,7 @@ const CompsApp = (() => {
         else body = `<p>${esc(body)}</p>`;
         return `<details ${i < 2 || ui.open['h' + i] ? 'open' : ''} data-k="h${i}"><summary>${i + 1}. ${title}</summary>${body}</details>`;
       }).join('');
-      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2><div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
+      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2>${typeof Learn !== 'undefined' ? Learn.render('comps', drawer.key, esc, g.t) : ''}<div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
     } else {
       const c = byId(drawer.cid); const r = c && c.v[drawer.key];
       if (!r) { drawer = null; root.innerHTML = ''; return; }

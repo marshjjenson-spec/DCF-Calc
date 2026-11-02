@@ -4,7 +4,7 @@
   "private": true,
   "description": "Guided DCF valuation calculator rebuilt from the dcf-model-amzn-CMGs6046.xlsx teaching workbook.",
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/model-excel.test.js && node tests/data-tracker.test.js && node tests/sec.test.js && node tests/analysis.test.js && node tests/help.test.js && node tests/wacc.test.js && node tests/tv.test.js && node tests/bridge.test.js && node tests/audit.test.js && node tests/comps.test.js",
+    "test": "node tests/engine.test.js && node tests/model-excel.test.js && node tests/data-tracker.test.js && node tests/sec.test.js && node tests/analysis.test.js && node tests/help.test.js && node tests/wacc.test.js && node tests/tv.test.js && node tests/bridge.test.js && node tests/audit.test.js && node tests/comps.test.js && node tests/nwc.test.js && node tests/fsm.test.js && node tests/sim.test.js && node tests/learn.test.js",
     "start": "python3 -m http.server 8000"
   }
 }
