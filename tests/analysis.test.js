@@ -28,6 +28,25 @@ ok('manual TTM date checks pass for consistent dates', A.manualTTMChecks({ end: 
 ok('manual TTM date checks catch a wrong prior period', A.manualTTMChecks({ end: '2026-09-30', priorEnd: '2025-06-30', fyEnd: '2025-12-31' }).some(f => f.level === 'bad'));
 const m2 = JSON.parse(JSON.stringify(m)); m2.ttm = null; m2.ttmManual = { use: true, result: mt }; m2.base.mode = 'ttm';
 ok('manual TTM can be the forecast base', near(M.baseInfo(m2).rev, 797455));
+// TTM figures typed straight into the TTM column override the calculated ones line by line
+const m3 = JSON.parse(JSON.stringify(m)); m3.base.mode = 'ttm';
+m3.ttmOverride = { rev: 800000, capex: -200000, baseEnd: '2026-09-30' };
+const tc3 = A.ttmColumn(m3);
+ok('typed TTM revenue replaces the calculated one', near(tc3.v.rev, 800000) && near(tc3.calc.rev, 797455));
+ok('typed TTM CapEx kept in table form (negative); items stay positive', near(tc3.v.capex, -200000) && near(M.ttmOf(m3).items.capex.value, 200000));
+ok('lines not typed keep the calculated figure', near(tc3.v.gp, 409682) && near(tc3.v.opex, 409682 - 183719));
+ok('typed lines are listed and not flagged stale', tc3.overrides.join() === 'rev,capex' && !tc3.stale);
+ok('typed TTM revenue becomes the forecast base', near(M.baseInfo(m3).rev, 800000));
+ok('TTM FCF recalculated from the typed CapEx', near(M.ttmOf(m3).items.fcf.value, M.ttmOf(m3).items.cfo.value - 200000));
+ok('the calculated TTM is untouched underneath', near(m3.ttm.items.rev.value, 797455) && near(M.ttmCalc(m3).items.rev.value, 797455));
+m3.ttmOverride.opex = 220000;
+ok('typed operating expenses give EBITDA = GP − opex', near(M.ttmOf(m3).items.ebitda.value, 409682 - 220000) && near(A.ttmColumn(m3).v.opex, 220000));
+m3.ttmOverride.baseEnd = '2026-06-30';
+ok('typed figures from an older TTM period are flagged', A.ttmColumn(m3).stale && A.ttmColumn(m3).stale.now === '2026-09-30');
+const m4 = M.blank(); m4.ttmOverride = { rev: 1000, gp: 400, opex: 250, da: 50, end: '2026-09-30' };
+const tc4 = A.ttmColumn(m4);
+ok('TTM can be typed with no SEC file loaded', tc4 && tc4.typedOnly && near(tc4.v.rev, 1000) && near(tc4.v.opex, 250) && tc4.end === '2026-09-30' && near(M.ttmOf(m4).items.ebitda.value, 150));
+ok('no typed figures: TTM is exactly the calculated one', M.ttmOf(m) === m.ttm && !A.ttmColumn(M.blank()));
 // estimators
 const rp = A.revenuePath(716924, [0.12, 0.08, 0.05]);
 ok('revenue tool: 716,924 × 1.12 = 802,954.88', near(rp[0].rev, 802954.88, 1e-6) && rp.length === 10 && near(rp[3].g, 0.08));

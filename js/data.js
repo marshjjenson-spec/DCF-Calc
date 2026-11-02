@@ -241,11 +241,32 @@ const DCFData = (() => {
     H.sbc = ys.map(y => v(y, 'sbc'));
     H.dnwc = ys.map(y => v(y, 'dnwc'));
     H.capex = ys.map(y => v(y, 'capex') == null ? null : -v(y, 'capex'));
+    // working capital: the separate change lines of the cash flow statement, each with its source, sign and class.
+    // A year is filled in only when every material line is clearly operating; otherwise it is left for review.
+    const NW = typeof DCFNwc !== 'undefined' ? DCFNwc : require('./nwc.js');
+    const nd = NW.fromSec(json, { L, ends: F.years.map(y => y.end), at: imp.retrieved });
+    imp.nwcData = nd;
+    const nwcNote = [];
+    ys.forEach((y, i) => {
+      if (!y.fy) return;
+      const p = nd.periods['FY' + y.fy];
+      if (isNum(H.dnwc[i])) { nwcNote.push(`FY${y.fy}: the company's reported total (IncreaseDecreaseInOperatingCapital)${p && p.lines.length > 1 ? `; ${p.lines.length - 1} component lines are in the worksheet` : ''}. Check it uses an operating definition.`); return; }
+      const r = NW.importable(p);
+      if (isNum(r.v)) { H.dnwc[i] = r.v; nwcNote.push(`FY${y.fy}: ${NW.fmt(r.v)} = ${r.reason}`); }
+      else if (p && p.lines.length) nwcNote.push(`FY${y.fy}: ${r.reason}`);
+    });
+    if (nd.finArm) nwcNote.push('The company reports finance receivables (a finance arm). They are classed as not operating working capital.');
+    if (nwcNote.length) imp.notes.push('Change in NWC from the cash flow statement lines: ' + nwcNote.join(' '));
+    if (!(F.ttm.items.dnwc && isNum(F.ttm.items.dnwc.value)) && nd.periods.TTM && F.ttm.end && nd.periods.TTM.end === F.ttm.end) {
+      const r = NW.importable(nd.periods.TTM);
+      if (isNum(r.v)) F.ttm.items.dnwc = { metric: 'Change in NWC (cash flow sign)', cat: 'calc', periodType: 'TTM', value: r.v, end: F.ttm.end, periodText: 'twelve months ended ' + F.ttm.end, provider: 'Calculated from SEC EDGAR XBRL', method: `${nd.periods.TTM.method} ${r.reason}`, nwc: true };
+    }
     imp.hist = H; imp.histSrc = {};
     const newestY = F.years[0];
     const concept = k => F.conceptUsed[k] ? `XBRL tag us-gaap:${F.conceptUsed[k]}. ` : '';
-    const notes = { rev: concept('rev'), gp: newestY.recs.gp && newestY.recs.gp.cat === 'calc' ? 'Calculated: revenue − cost of revenue.' : concept('gp'), opex: 'Calculated: gross profit − (operating income + D&A).', da: concept('da'), interest: concept('interest'), sbc: concept('sbc'), dnwc: concept('dnwc') + (Sec.CONCEPT_NOTES.IncreaseDecreaseInOperatingCapital || ''), capex: concept('capex') + (Sec.CONCEPT_NOTES[F.conceptUsed.capex] || '') + ' Shown as a negative cash outflow.' };
+    const notes = { rev: concept('rev'), gp: newestY.recs.gp && newestY.recs.gp.cat === 'calc' ? 'Calculated: revenue − cost of revenue.' : concept('gp'), opex: 'Calculated: gross profit − (operating income + D&A).', da: concept('da'), interest: concept('interest'), sbc: concept('sbc'), dnwc: F.conceptUsed.dnwc ? concept('dnwc') + (Sec.CONCEPT_NOTES.IncreaseDecreaseInOperatingCapital || '') + ' Review it in the Change in NWC worksheet.' : 'Calculated from the separate working-capital lines of the cash flow statement, only for years whose material lines are all clearly operating. Other years are left blank for review in the Change in NWC worksheet.', capex: concept('capex') + (Sec.CONCEPT_NOTES[F.conceptUsed.capex] || '') + ' Shown as a negative cash outflow.' };
     Object.keys(notes).forEach(k => { if (H[k].some(isNum)) imp.histSrc[k] = { source: `SEC EDGAR XBRL (10-K annual periods)`, type: '10-K annual report', cls: 'filing', url: newestY.recs.rev ? newestY.recs.rev.url : filingUrl(cik), period: periodText(H.years, H[k]), notes: notes[k], rec: newestY.recs[k] || null }; });
+    if (imp.histSrc.dnwc) imp.histSrc.dnwc.review = true;
     imp.ttm = F.ttm; imp.quarter = F.quarter; imp.ttmPrior = F.ttmPrior;
     const rows = F.years.map(y => ({ year: y.fy, tax: y.values.tax == null ? null : y.values.tax * 1e6, ebt: y.values.ebt == null ? null : y.values.ebt * 1e6 }));
     const eff = effectiveTax(rows); if (eff) putRef(imp, 'effTax', eff.v, { source: 'Calculated from SEC 10-K figures', type: 'Calculated', period: eff.period, label: 'Effective tax rate (3-year average)', calculated: true });
@@ -358,6 +379,14 @@ const DCFData = (() => {
       company: imp.company.name || null, ticker: imp.symbol || imp.company.ticker || null, metric: r.metric || null, raw: r.raw == null ? null : r.raw, rawUnit: r.rawUnit || null, unit: r.unit || null, scale: r.scale || null,
       form: r.form || null, accn: r.accn || null, fp: r.fp || null, fy: r.fy || null, start: r.start || null, end: r.end || null, filed: r.filed || null, concept: r.concept || null, method: r.method || null, stale: !!r.stale };
   }
+  // an older CIK is kept only when the new import is for the same company (same ticker or name)
+  function sameCo(model, imp) {
+    const t = x => String(x || '').split(/[\s/:]/)[0].toUpperCase();
+    const a = t(model.meta && model.meta.symbol) || t(model.inputs.company.ticker), b = t(imp.symbol) || t(imp.company.ticker);
+    if (a && b) return a === b;
+    const n = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/(inc|corp|corporation|co|ltd|plc)$/, '');
+    return !!(n(model.inputs.company.name) && n(model.inputs.company.name) === n(imp.company.name));
+  }
   function applyImport(model, imp, opts = {}) {
     const at = imp.retrieved, fresh = !!opts.fresh;
     model.imported = model.imported || {};
@@ -390,7 +419,7 @@ const DCFData = (() => {
       log('company.valDate', null, vd); C.valDate = vd; model.imported['company.valDate'] = { v: vd, at };
       model.sources['company.valDate'] = { name: d ? 'Set to the date of the imported share price' : 'Set to the import date', type: 'Own judgment', cat: 'analyst', period: vd, notes: 'Change it if you value the company as of another date.', retrieved: at };
     }
-    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || (model.meta && model.meta.cik) || null, exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
+    model.meta = Object.assign({}, model.meta || {}, { cik: imp.company.cik || (model.meta && model.meta.cik && sameCo(model, imp) ? model.meta.cik : null), exchange: imp.company.exchange || null, sector: imp.company.sector || null, country: imp.company.country || null, website: imp.company.website || null, description: imp.company.description || null, provider: imp.provider, providerId: imp.providerId, retrieved: at, symbol: imp.symbol || (model.meta && model.meta.symbol) || null });
     SINGLE_KEYS.forEach(key => {
       const x = imp.values[key]; if (!x) return;
       offer(key, model.inputs[key], x.v, x, (same) => {
@@ -426,6 +455,7 @@ const DCFData = (() => {
     }
     // calculated and reference data are refreshed: they never replace an input
     if (imp.ttm) model.ttm = { end: imp.ttm.end, isFY: imp.ttm.isFY, items: imp.ttm.items, quarter: imp.quarter || null, prior: imp.ttmPrior || null, at, provider: imp.provider };
+    if (imp.nwcData) model.nwcData = imp.nwcData;
     if (imp.fin) model.fin = { years: imp.fin.years.map(y => ({ label: y.label, end: y.end, fy: y.fy, form: y.form, accn: y.accn, filed: y.filed, values: y.values, recs: y.recs })), at };
     if (imp.shareData) model.shareData = Object.assign({ at }, imp.shareData);
     if (imp.filings) model.filings = Object.assign({ checked: at }, imp.filings);
