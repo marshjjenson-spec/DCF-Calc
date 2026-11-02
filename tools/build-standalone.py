@@ -3,7 +3,7 @@ embedded) that runs by double-clicking it, with no web server."""
 import base64, json, pathlib
 R = pathlib.Path(__file__).resolve().parent.parent
 css = (R / 'css/app.css').read_text()
-js = ''.join((R / f).read_text() + '\n' for f in ['js/vendor/jszip.min.js', 'js/fields.js', 'js/engine.js', 'js/model.js', 'js/sec.js', 'js/nwc.js', 'js/data.js', 'js/analysis.js', 'js/help.js', 'js/nwc-help.js', 'js/charts.js', 'js/excel.js', 'js/comps-engine.js', 'js/comps-data.js', 'js/comps-model.js', 'js/comps-help.js', 'js/comps-export.js', 'js/comps-app.js', 'js/sec-cache.js', 'js/fsm-engine.js', 'js/fsm-data.js', 'js/fsm-model.js', 'js/fsm-help.js', 'js/fsm-export.js', 'js/fsm-app.js', 'js/sim-engine.js', 'js/sim-model.js', 'js/sim-help.js', 'js/sim-app.js', 'js/app.js'])
+js = ''.join((R / f).read_text() + '\n' for f in ['js/vendor/jszip.min.js', 'js/fields.js', 'js/engine.js', 'js/model.js', 'js/sec.js', 'js/nwc.js', 'js/data.js', 'js/analysis.js', 'js/help.js', 'js/learn.js', 'js/nwc-help.js', 'js/charts.js', 'js/excel.js', 'js/comps-engine.js', 'js/comps-data.js', 'js/comps-model.js', 'js/comps-help.js', 'js/comps-export.js', 'js/comps-app.js', 'js/sec-cache.js', 'js/fsm-engine.js', 'js/fsm-data.js', 'js/fsm-model.js', 'js/fsm-help.js', 'js/fsm-export.js', 'js/fsm-app.js', 'js/sim-engine.js', 'js/sim-model.js', 'js/sim-help.js', 'js/sim-app.js', 'js/app.js'])
 sample = json.loads((R / 'data/amzn-sample.json').read_text())
 tpl = {k: base64.b64encode((R / f'templates/dcf-template-{k}.xlsx').read_bytes()).decode() for k in ('corrected', 'original')}
 html = f'''<!doctype html>

@@ -816,6 +816,24 @@ table.fin.sim-proj td:first-child { min-width: 220px; }
 .formula b { font-family: var(--font-num); font-weight: 500; }
 @media (max-width: 720px) { .sim-meth { grid-template-columns: 1fr; } .sim-a input { width: 5em; } }
 @media (max-width: 560px) { .model-switch { flex: 1 1 100%; max-width: 100%; } .model-switch a { flex: 1 1 0; min-width: 0; white-space: normal; text-align: center; line-height: 1.2; } }
+
+/* ===== First-time (beginner's) guides, js/learn.js ===== */
+.lrn { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--accent-soft); padding: 10px 14px 6px; margin: 10px 0 12px; font-size: 13.5px; line-height: 1.55; }
+.lrn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 2px; }
+.lrn-badge { background: var(--accent); color: var(--surface); font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.lrn h4 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.lrn p { margin: 4px 0; }
+.lrn-steps { margin: 4px 0; padding-left: 22px; } .lrn-steps li { margin: 4px 0; }
+.lrn-links { font-size: 12.5px; } .lrn a { color: var(--link); }
+table.lrn-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface); }
+table.lrn-tbl th, table.lrn-tbl td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; white-space: normal; }
+table.lrn-tbl th { font-weight: 600; background: var(--surface-2); }
+table.lrn-tbl td:nth-child(2) { font-weight: 600; min-width: 90px; }
+.lrn-vids { list-style: none; padding: 0; margin: 4px 0; display: grid; gap: 6px; }
+.lrn-vids a { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; text-decoration: none; color: var(--ink); background: var(--surface); }
+.lrn-vids a:hover, .lrn-vids a:focus-visible { border-color: var(--accent); }
+.lrn-vids .play { width: 28px; height: 28px; border-radius: 50%; background: var(--bad); color: #fff; display: grid; place-items: center; flex: none; font-size: 11px; }
+@media (max-width: 560px) { .lrn { padding: 8px 10px 4px; } table.lrn-tbl th, table.lrn-tbl td { padding: 4px 6px; } }
 </style></head><body>
 <div class="app"><header class="topbar" id="topbar"></header><nav class="rail" id="rail" aria-label="Model sections"></nav><main class="main" id="main"></main></div>
 <div id="drawer-root"></div><div id="modal-root"></div>
@@ -4857,6 +4875,739 @@ const DCFHelp = (() => {
 })();
 if (typeof module !== 'undefined') module.exports = DCFHelp;
 
+// ===== FIRST-TIME GUIDES (content only, no model state) =====
+// A beginner layer shown at the top of every help panel in every model (DCF, Trading Comps, Three-Statement Model,
+// Stock Price Simulator). Each panel gets: the idea in plain English, step-by-step instructions for finding the
+// number, typical ranges for different kinds of companies, the reasoning behind the usual choice, and videos.
+//
+// Videos: every entry in V was checked on 2026-11-02 against YouTube's own title and channel record (oEmbed via
+// noembed.com). Only real watch pages are listed: no search links stand in for a video. If a video is taken down,
+// remove it here; tests/learn.test.js checks that every topic still has at least one.
+//
+// Ranges are a rough orientation for a first model, not rules. They come from common practice and the free
+// industry tables of Professor Aswath Damodaran (NYU Stern), which are linked so the reader can check the
+// current figure for their own industry.
+const Learn = (() => {
+  // [title, channel, YouTube video id]
+  const V = {
+    dcf1: ['Financial Modeling Quick Lesson: Building a Discounted Cash Flow (DCF) Model - Part 1', 'Wall Street Prep', 'gLUlP6jyFvE'],
+    dcf2: ['Financial Modeling Quick Lessons: Building a Discounted Cash Flow (DCF) Model (Part 2)', 'Wall Street Prep', 'bCCrACXrVPQ'],
+    four: ['Valuation in Four Lessons | Aswath Damodaran | Talks at Google', 'Talks at Google', 'Z5chrxMuBoo'],
+    cflow: ['Session 7: Estimating Cash Flows', 'Aswath Damodaran', '8gYT3Xgs6NE'],
+    growth: ['Session 11: Closure on Growth and First Steps on Terminal Value', 'Aswath Damodaran', 'C4zBohJ_Pts'],
+    tv: ['Session 9: Terminal Value', 'Aswath Damodaran', '83yR6EFEl5Y'],
+    tvMeth: ['Terminal Value: Gordon Growth vs. Exit Multiple Method (Step-by-Step)', 'Wall Street Unpacked!', 'SP9ceeNyfsI'],
+    rf: ['Session 4: Riskfree Rates & Equity Risk Premiums', 'Aswath Damodaran', 'FWdN6SDYIB8'],
+    rfCapm: ['Implementing CAPM: How to Estimate the Risk-Free Rate | The General Approach', 'Professor Ikram', 'SvQxXLSQbWI'],
+    erp: ['Session 4: Equity Risk Premiums', 'Aswath Damodaran', 'U3D9a_H_Vrs'],
+    erpBeta: ['Session 7: Equity Risk Premiums & First steps on Betas', 'Aswath Damodaran', 'lL3cdChtx5U'],
+    beta: ['Session 6: Measuring Beta, cost of debt & capital', 'Aswath Damodaran', 'wGyEpg1aRU0'],
+    uBeta: ['Unlevered Beta (Asset Beta) Explained', 'Corporate Finance Institute', 'IbQd8udm0kI'],
+    kd: ['Session 6: Cost of Debt and Capital', 'Aswath Damodaran', 'Jr4codgQhzg'],
+    cocData: ['Cost of Capital Data: Guide to Spreadsheet', 'Aswath Damodaran', 'ypvQuufNUrY'],
+    wacc: ['WACC Formula: Concept, Quick Calculations, Leases, Interview Questions, and More', 'Mergers & Inquisitions / Breaking Into Wall Street', '73lCVQ81xRU'],
+    cash: ['Session 11: Cash, Cross holdings and Other Assets', 'Aswath Damodaran', '_XrcS7NV_ss'],
+    looseEnds: ['Session 13: Loose Ends - Distress, Dilution and Illiquidity', 'Aswath Damodaran', 'Ae3iitQA9Ms'],
+    sbcD: ['Session 13: Stock-based Compensation and Stories in Valuation', 'Aswath Damodaran', 'nmPDxY7Q3lk'],
+    sbcB: ['Stock-Based Compensation in a DCF', 'Mergers & Inquisitions / Breaking Into Wall Street', 'djtA-tWcmtE'],
+    sbcH: ['Stock-Based Compensation and DCF Valuation', 'Hamid Boustanifar', 'toM6yy3DDVU'],
+    relVal: ['Session 14: Relative Valuation - First Principles', 'Aswath Damodaran', 'WDZwqSierZ4'],
+    roic: ['Return on Invested Capital (ROIC): Dataset Support', 'Aswath Damodaran', 'r3RtE6lOha0'],
+    edgar: ['How to Find and Read a 10-K Annual Report Found on EDGAR in 7 Minutes', 'Accounting with Iana Zemniakova, CPA', 'c6Dtmz7k7uY'],
+    nwc: ['Projecting Net Working Capital For Free Cash Flow Calculation, DCF Model Insights', 'FinanceKid', '2E1Hca2dVbI'],
+    tsm: ['Treasury Stock Method (Formula, Examples) | Effect of Stock Options on EPS', 'WallStreetMojo', 'Hj0AhJ5jtOM'],
+    diluted: ['What Are Diluted Shares? (Understanding Share Dilution) | Investing Basics', 'Fundamental Investing Institute', 'yiE-AlCFskE'],
+    bridge: ['The Bridge Between Enterprise Value and Equity Value', 'Hamid Boustanifar', 'xpwoYO-csW0'],
+    nci: ['Why We Add Minority Interest and Preferred Stock to Enterprise Value', 'Abhi Prakash', 'lhG5hdYZ1GY'],
+    evItems: ['Enterprise Value: Why You Add and Subtract Certain Items (Version 2.0)', 'Mergers & Inquisitions / Breaking Into Wall Street', 'ucfHVJW3nyM'],
+    comps: ['Financial Modeling Quick Lessons: Trading Comps (Part 1)', 'Wall Street Prep', 'DrdqhwzRlJQ'],
+    compsMult: ['Comparable Company Analysis (Comps): Valuation Multiples [Free]', 'Eric Andrews', 'nDa-hjtXC3M'],
+    evEbitda: ['EV to EBITDA Valuation | Calculate EV/EBITDA Multiple', 'WallStreetMojo', '-a8NIX2x_-c'],
+    midYear: ['How to Explain the Mid-Year Convention in a DCF', 'Wall Street Mastermind Case Studies', 'i3SltJ4Rsn0'],
+    ltm: ['How to Compute Last Twelve Month, LTM, or TTM Data', 'Hamid Boustanifar', 'vA5ObxQSXlM'],
+    sens: ['DCF Sensitivity Analysis with Excel Data Table (UPDATED)', 'Strategize Financial Modelling', '8eIW2LN6LeY'],
+    scen: ['Scenario Analysis Explained: Base, Bull and Bear', "Ryan O'Connell, CFA, FRM", 'xmtmrepo8yE'],
+    nol: ['Net Operating Losses in a DCF Analysis', 'Mergers & Inquisitions / Breaking Into Wall Street', 'L9bfozDwmtc'],
+    capex: ['How analysts typically forecast Capex and Depreciation in Financial Models', 'The Investment Analyst', 'Yp4aNFIYejE'],
+    fsm: ['Build a 3-Statement Financial Model [Free Course]', 'Wall Street Prep', 'Rmi9fwkJjHw'],
+    link3: ['How to Link the 3 Financial Statements in Excel', 'Corporate Finance Institute', 'mt5Ve01n_X0'],
+    revolver: ['Financial Statement Modeling Course: Revolver: Circularity', 'Wall Street Oasis', 'fWODspWpsVM'],
+    debtSch: ['How to Build a Debt Schedule in Excel | Financial Modeling Tutorial', 'Logos & Markets', 'LHuizz9G5X0'],
+    fcf: ['What is Free Cash Flow? [REVISED] Meaning, Calculations, Variations, and IFRS Differences', 'Mergers & Inquisitions / Breaking Into Wall Street', 'A1lS4KnANBw'],
+    bs: ['How to Read a Balance Sheet', 'Charles Schwab', 'r6h0R1sDx50'],
+    bs10: ['How to Read a Balance Sheet in 10 Minutes', 'The Daily Investor', '4bYM3QH7X2Q'],
+    cfs: ["The BEST BEGINNER'S GUIDE to the Cash Flow Statement! (Explained by Former Investment Banker)", 'rareliquid', 'xSo3IlkGipo'],
+    is: ['Breaking Down the Income Statement', 'Finally Learn', 'OeR_uRZZw00'],
+    margins: ['Margins Explained: EBITDA, EBIT & What They Really Tell You', 'CNBC-TV18', '1a2QxbHhTzk'],
+    dtax: ['Deferred tax explained', 'The Finance Storyteller', '7QKvzNV1Qw8'],
+    gw: ['Goodwill explained', 'The Finance Storyteller', 'yq9qjCmUfS4'],
+    ratios: ['Financial Ratios Explained | Profitability, Liquidity & Efficiency | Accounting', 'SkillUp Smart', '6YlY1OgaSgg'],
+    pe: ['The Price To Earnings Ratio - Trailing PE vs Forward PE Ratios', 'The Organic Chemistry Tutor', '0WfwBAnhADs'],
+    fpe: ['Forward P/E Ratio in Stocks Explained (Fundamental Analysis)', 'PromoAmbitions', '2Zk1dCYZ7qU'],
+    payout: ['Dividend Payout ratio calculated and explained with example', 'Gabriel Josiah', 'tapDCa2ZZ38'],
+    revFc: ['Revenue Forecasting Step by Step | Build Assumptions Like an Analyst', 'Richa Motwani', 'yiWAE7aE6zk'],
+    lease842: ['How does Lease Classification Impact the Financials Under ASC 842?', 'Occupier', 'ypbQfGxPF1E'],
+    leaseD: ['Valuation Tools Webcast #4: Capitalizing Leases', 'Aswath Damodaran', 'cxAM6p8dyS4'],
+    leaseFK: ['Lease Capitalization For Financial Analysis Pt 1 - Accounting Fundamentals, DCF Model Explained', 'FinanceKid', 'Wu-jRgHUc4Q'],
+    reverse: ['Reverse DCF: How To Value Stocks Like the Pros.', 'Brian Feroldi', 'fRac19fUKiE'],
+    ccc: ['Working Capital Management 3 - DIO, DPO, DSO & Cash Conversion Cycle', 'Corporate Finance', 'r4DgIkHE8vU'],
+    ccc2: ['Cash Conversion Cycle Explained | DSO, DIO & DPO Explained', 'CandiMentor', 'ydRBLh7LpOg'],
+  };
+  const url = id => 'https://www.youtube.com/watch?v=' + V[id][2];
+  const VERIFIED = '2026-11-02';
+
+  // Free reference pages used in the steps
+  const L = {
+    edgar: ['SEC EDGAR company search', 'https://www.sec.gov/edgar/search/'],
+    damHome: ['Damodaran Online: data by industry (free)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html'],
+    damMargin: ['Damodaran: operating and EBITDA margins by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html'],
+    damBeta: ['Damodaran: betas by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/Betas.html'],
+    damWacc: ['Damodaran: cost of capital by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/wacc.html'],
+    damCapex: ['Damodaran: capital expenditures by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html'],
+    damWc: ['Damodaran: working capital ratios by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/wcdata.html'],
+    damRoc: ['Damodaran: return on capital by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/roc.html'],
+    damTax: ['Damodaran: tax rates by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/taxrate.html'],
+    damEbitda: ['Damodaran: EV/EBITDA and other multiples by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/vebitda.html'],
+    damPE: ['Damodaran: P/E ratios by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/pedata.html'],
+    damPS: ['Damodaran: price-to-sales and EV/sales by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/psdata.html'],
+    damGrowth: ['Damodaran: historical growth in revenue and earnings by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histgr.html'],
+    damDebt: ['Damodaran: debt ratios and interest coverage by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/dbtfund.html'],
+    damDiv: ['Damodaran: dividend payout by industry', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/divfund.html'],
+    damErp: ['Damodaran Online home page (current implied ERP, updated at the start of each month)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/home.htm'],
+    damRating: ['Damodaran: credit ratings, interest coverage and default spreads', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ratings.html'],
+    damSales: ['Damodaran: sales-to-capital ratios by industry (in the capital expenditures table)', 'https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html'],
+    fred10: ['FRED: 10-year Treasury yield (DGS10), daily', 'https://fred.stlouisfed.org/series/DGS10'],
+    fedSep: ['Federal Reserve: Summary of Economic Projections (long-run GDP and inflation)', 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm'],
+    yahoo: ['Yahoo Finance (price, 52-week range, beta)', 'https://finance.yahoo.com/'],
+    finra: ['FINRA bond data (yields on a company\'s bonds)', 'https://www.finra.org/finra-data/fixed-income'],
+  };
+
+  const NOTE_RANGES = 'A rough guide for a first model, not a rule. Check the company\'s own history and a current industry table before you choose.';
+
+  // Topic content. steps may use {label} for the panel's own line name.
+  // ranges: [kind of company, typical value, why it sits there]
+  const T = {
+    // ---------- company and market ----------
+    company: { t: 'Company details',
+      plain: 'Who you are valuing, in which currency, and as of which day. These do not change the maths, but every later number has to match them: same company, same currency, same date.',
+      steps: ['Go to SEC EDGAR (link below) and type the company name or ticker.', 'Open the newest 10-K (annual report). The first page is the cover page.', 'Copy the exact legal name (for example "Amazon.com, Inc."), the trading symbol and the exchange from the cover page.', 'Find the reporting currency in the heading of the income statement ("in millions, except per share data" and a currency sign).', 'Set the valuation date to the day you take your share price and Treasury yield: usually today, or the last trading day.'],
+      ranges: [['US-listed company', 'Files a 10-K each year and a 10-Q each quarter', 'Use the newest of the two for balance-sheet items'], ['Foreign company listed in the US', 'Files a 20-F (annual) or 40-F, and 6-K updates', 'Check the reporting currency: it is often not US dollars'], ['ADR (American depositary receipt)', 'One ADR can be several underlying shares', 'Read the ADR ratio before mixing ADR prices with share counts']],
+      why: 'A DCF only works when every input describes the same company on the same date in the same currency. Most beginner errors are mismatches: a price from today with a share count from two years ago, or euro cash flows discounted with a US-dollar rate.',
+      links: ['edgar'], vids: ['edgar', 'dcf1'] },
+    industry: { t: 'Industry',
+      plain: 'The business the company is mainly in. You use it to find comparable companies and industry averages for beta, margins, reinvestment and multiples.',
+      steps: ['Read Item 1 "Business" of the 10-K: it says what the company sells and who its competitors are.', 'Open the segment note near the end of the 10-K: the segment with most revenue or profit is usually the industry.', 'Open Damodaran\'s industry data page (link below) and pick the closest industry name from his list (for example "Retail (General)" or "Software (System & Application)").', 'Write that exact industry name here so you can look up the same row on every Damodaran table later.'],
+      ranges: [['Focused company (one business)', 'One industry', 'Use that industry for beta and margins'], ['Two or three large businesses', 'Weight by revenue or operating income', 'Or value each segment separately (sum of the parts)'], ['Conglomerate', 'No single industry fits', 'Prefer a segment-by-segment approach']],
+      why: 'Industry averages are the reality check for every assumption. If your margin, growth or beta is far from the industry\'s, you need a reason the company is different.',
+      links: ['damHome'], vids: ['relVal', 'edgar'] },
+    valdate: { t: 'Valuation date',
+      plain: 'The day your valuation is "as of". The share price, Treasury yield and balance-sheet figures should all be as close to this date as possible.',
+      steps: ['Pick the date you are doing the work, or the last trading day.', 'Take the share price at that day\'s close.', 'Take the 10-year Treasury yield for the same day from FRED (DGS10).', 'Use the newest balance sheet available on that date (the latest 10-Q or 10-K).', 'If the fiscal year ended months ago, the model can use a part-year (stub) period: check the Equity bridge page.'],
+      ranges: [['Class exercise', 'Today', 'Simplest: all market data from one day'], ['Valuing for a report', 'Date of the report', 'Write it on the front page'], ['Right after earnings', 'The day after the 10-Q is filed', 'Freshest balance sheet']],
+      why: 'Value changes every day because prices and interest rates change. Fixing one date stops you from mixing information from different moments.',
+      links: ['fred10', 'edgar'], vids: ['dcf1'] },
+    price: { t: 'Share price and 52-week range',
+      plain: 'What one share costs in the market today, plus the highest and lowest price of the past year. The DCF tells you what a share should be worth; the price tells you what the market is paying.',
+      steps: ['Open Yahoo Finance (link below) and type the ticker.', 'Read the closing price for your valuation date (the "Historical Data" tab lists every day\'s close).', 'On the summary page, read the "52 Week Range": the first number is the low, the second the high.', 'Write the date and source in "Record your source" below.'],
+      ranges: [['Large, stable company', '52-week high is often 20–40% above the low', 'Steady businesses move less'], ['Fast-growing or cyclical company', 'High can be 2× the low or more', 'Small changes in expectations move the price a lot'], ['Penny stock or recent IPO', 'Very wide ranges', 'Treat any single price with caution']],
+      why: 'The price is not an input to the value of the business; it is what you compare your answer with. Recording the 52-week range shows whether your value is inside or far outside where the market has traded recently.',
+      links: ['yahoo'], vids: ['dcf2'] },
+    shares: { t: 'Shares outstanding',
+      plain: 'How many shares exist. Value per share = equity value ÷ shares, so this number turns the company\'s total value into a price you can compare.',
+      steps: ['On EDGAR, open the newest 10-Q or 10-K (whichever was filed last).', 'Look at the cover page (first page). Find the sentence "As of [date], there were N shares of common stock outstanding."', 'Divide by 1,000,000 to enter it in millions (10,813,138,306 shares = 10,813.1 million).', 'If there are several share classes (Class A, Class B), add them up unless their prices differ.', 'Do not use "weighted-average shares" from the income statement: that is an average over a past period, not today\'s count.'],
+      ranges: [['Company buying back shares (for example large tech, banks)', 'Count falls 1–4% a year', 'Buybacks reduce the share count'], ['Company paying staff in stock (many software firms)', 'Count rises 1–3% a year', 'New shares go to employees'], ['Company raising money (young biotech, start-ups)', 'Count can rise 10%+ a year', 'New shares sold to fund losses']],
+      why: 'The newest cover-page count is the only figure that says how many shares exist on a date. Using an old count after a buyback understates value per share; using an average mixes in shares that no longer exist.',
+      links: ['edgar'], vids: ['diluted', 'edgar'] },
+    dilution: { t: 'Diluted shares (options, RSUs, warrants, convertibles)',
+      plain: 'Employees and some investors hold rights to get new shares later. If they would get them, today\'s owners share the company with more people. Diluted shares add those future shares to today\'s count.',
+      steps: ['In the newest 10-K, find the note called "Stock-Based Compensation" (or "Stockholders\' Equity").', 'Options: read the table row "Outstanding at end of year": number of options and the weighted-average exercise price.', 'RSUs: read the row "Unvested at end of year" in the restricted stock unit table.', 'Warrants and convertible notes: read the "Warrants" or "Debt" note for the number of shares and the conversion price.', 'Apply the treasury stock method: an option only counts if the share price is above its exercise price, and the cash the company receives buys some shares back. The Advanced method on this page does this for you.'],
+      ranges: [['Mature industrial or consumer company', 'Dilution under 1% of shares', 'Small equity awards'], ['Large technology company', 'About 1–3% of shares', 'RSUs are a big part of pay'], ['Young high-growth company', '3–10% or more', 'Heavy use of options and convertibles']],
+      why: 'Ignoring dilution makes each share look more valuable than it is. Counting every option in full overstates dilution, because out-of-the-money options will never be exercised and in-the-money ones bring cash in. The treasury stock method is the standard middle ground.',
+      links: ['edgar'], vids: ['tsm', 'diluted', 'looseEnds'] },
+    mcap: { t: 'Market capitalisation',
+      plain: 'What the stock market says all the shares together are worth: share price × shares outstanding.',
+      steps: ['Take the share price on your valuation date.', 'Take the newest cover-page share count in millions.', 'Multiply them: the answer is in $ millions.', 'Compare with the market cap on Yahoo Finance; a big gap usually means a different share count or date.'],
+      ranges: [['Mega cap', 'Above $200 billion', 'Largest, most-followed companies'], ['Large cap', '$10–200 billion', 'Usually well covered by analysts'], ['Mid cap', '$2–10 billion', ''], ['Small cap', '$300 million–$2 billion', 'Less coverage; some analysts add a size premium'], ['Micro cap', 'Below about $300 million', 'Thin trading; prices can be noisy']],
+      why: 'Market cap is the value of equity only. Enterprise value adds debt and subtracts cash, which is why companies with the same market cap can be very different sizes as businesses.',
+      links: ['yahoo'], vids: ['evItems'] },
+    fx: { t: 'Currency conversion',
+      plain: 'When companies report in different currencies you convert them to one currency before comparing. Use one exchange rate date for everyone.',
+      steps: ['Find each company\'s reporting currency on its income statement heading.', 'Open the Federal Reserve H.10 page (in the sources below) or another FX source and read the rate on your valuation date.', 'Convert balance-sheet items at the valuation-date rate and income items at the average rate for the period if you can.', 'Record the rate and date.'],
+      ranges: [['All peers report in US dollars', 'Rate = 1', 'Nothing to convert'], ['European or Japanese peers', 'Convert every figure', 'Price, shares and statements must end in the same currency'], ['ADRs', 'Price in USD, statements in local currency', 'Convert the statements, not just the price']],
+      why: 'A multiple is a ratio of two numbers; if they are in different currencies the ratio is meaningless.',
+      links: [], vids: ['comps'] },
+    // ---------- revenue and margins ----------
+    baserev: { t: 'Revenue',
+      plain: 'All the money the company earned from selling its products and services in a period, before any costs. Every forecast in a DCF starts from revenue.',
+      steps: ['On EDGAR, open the newest 10-K and go to Item 8 "Financial Statements".', 'Open the income statement (also called "Consolidated Statements of Operations").', 'The first line is revenue. It may be called "Total net sales", "Net revenues" or "Total revenues".', 'Read the column for the latest fiscal year. Numbers are usually in millions.', 'For a more recent figure, build trailing-twelve-months (TTM) revenue from the latest 10-Q (see the TTM guide).'],
+      ranges: [['Retailer', 'Revenue is large compared with profit', 'Thin margins on high volume'], ['Software company', 'Revenue is smaller, margins high', 'Read "subscription" vs "services" lines'], ['Bank or insurer', 'No ordinary "revenue" line', 'A DCF of free cash flow is not the right tool: use equity models']],
+      why: 'A mistake in base-year revenue flows through every year of the forecast. Use reported revenue as filed, not an "adjusted" figure from a press release, so anyone can check it.',
+      links: ['edgar'], vids: ['is', 'edgar'] },
+    growth: { t: 'Revenue growth',
+      plain: 'How fast you expect sales to grow each year. In a ten-year DCF, growth usually starts near what the company has been doing and fades toward the growth of the whole economy by year 10.',
+      steps: ['Work out past growth: (this year\'s revenue ÷ last year\'s) − 1, for each of the last five years. The Historical financials page shows it.', 'Read what management expects: "Outlook" or "Guidance" in the latest earnings release (8-K) or the MD&A in the 10-K.', 'Look up consensus analyst estimates for the next one or two years (Yahoo Finance "Analysis" tab).', 'Check the industry growth table on Damodaran\'s site (link below).', 'Set years 1–3 close to recent growth and guidance, years 4–7 lower, and years 8–10 close to your terminal growth rate.'],
+      ranges: [['Mature consumer staples, utilities, telecom', '0–5% a year', 'Markets grow with population and prices'], ['Large established technology', '8–15% a year', 'Growing, but already huge'], ['Young high-growth company', '20–40%+ early, fading fast', 'Small base; competition and size slow it'], ['Cyclical (autos, chemicals, energy)', '−15% to +20% swings', 'Use an average across the cycle, not the best year'], ['Every company by year 10', 'Close to 3–5% nominal', 'Nothing outgrows the economy forever']],
+      why: 'High growth cannot last because every market has a size limit and success attracts competitors. Fading growth toward the economy\'s rate by year 10 makes the jump into the terminal value smooth instead of a cliff.',
+      links: ['damGrowth'], vids: ['revFc', 'growth', 'cflow'] },
+    gm: { t: 'Gross margin',
+      plain: 'The share of each sales dollar left after paying the direct cost of what was sold (materials, factory labour, shipping): gross profit ÷ revenue.',
+      steps: ['Open the income statement in the 10-K.', 'Find "Cost of sales" (also "Cost of revenue" or "Cost of goods sold").', 'Gross profit = revenue − cost of sales. Some companies show it as a line; others do not, so calculate it.', 'Gross margin = gross profit ÷ revenue. Do this for each of the last five years.', 'Look for a trend (rising, falling, stable) before you choose a forecast.'],
+      ranges: [['Software', '70–90%', 'Copying software costs almost nothing'], ['Pharmaceuticals', '60–80%', 'Patented products'], ['Branded consumer goods', '40–60%', 'Brand lets them charge more'], ['General retail', '20–35%', 'Buy goods and resell them'], ['Warehouse clubs and grocery', '10–30%', 'Low prices, high volume'], ['Car makers', '10–20%', 'Heavy materials and labour']],
+      why: 'Gross margin shows pricing power. It rarely changes fast unless the business mix changes, so a forecast that moves it a lot needs a clear reason (a new high-margin segment, for example).',
+      links: ['damMargin'], vids: ['margins', 'is'] },
+    ebitdam: { t: 'EBITDA margin',
+      plain: 'EBITDA is earnings before interest, taxes, depreciation and amortisation: roughly the cash profit from running the business. EBITDA margin = EBITDA ÷ revenue.',
+      steps: ['In the 10-K income statement, find "Operating income" (also "Income from operations").', 'In the cash flow statement, find "Depreciation and amortization" (one of the first lines under operating activities).', 'EBITDA = operating income + depreciation and amortisation.', 'EBITDA margin = EBITDA ÷ revenue, for each year. The historical calculator here does this from your imported figures.', 'Compare with the industry on Damodaran\'s margin table (link below) and with two or three close competitors.'],
+      ranges: [['Software and internet platforms', '25–45%', 'Little cost to serve one more customer'], ['Utilities and telecom', '30–45%', 'Big fixed networks, steady prices'], ['Industrial manufacturers', '12–20%', ''], ['Restaurants', '15–25%', ''], ['General retail', '5–12%', 'Thin margins on high volume'], ['Grocery', '3–6%', 'Very competitive'], ['All US companies (Damodaran, Jan 2026)', 'About 17% excluding financials', 'A useful "average company" anchor']],
+      why: 'Margins usually move toward a level that competition allows. A company far above its industry needs a lasting advantage to stay there; one far below might improve if it has a credible plan. By year 10 the margin should look like a mature company in its industry.',
+      links: ['damMargin'], vids: ['margins', 'cflow'] },
+    ebit: { t: 'Operating income (EBIT)',
+      plain: 'Profit from the business after all operating costs, including depreciation, but before interest and tax. EBIT margin = EBIT ÷ revenue.',
+      steps: ['Open the income statement in the 10-K.', 'Find "Operating income" or "Income from operations" (the line just above interest and other income).', 'If the company does not show it, calculate revenue − cost of sales − operating expenses.', 'Divide by revenue to get the margin.'],
+      ranges: [['Software', '20–40%', ''], ['Industrial manufacturers', '8–15%', ''], ['General retail', '3–8%', ''], ['Grocery', '1–4%', ''], ['All US companies (excluding financials)', 'Roughly 10–15%', 'Check Damodaran\'s table for the current year']],
+      why: 'EBIT is the profit that belongs to all investors (lenders and shareholders) before tax. It is the starting point for NOPAT and free cash flow to the firm.',
+      links: ['damMargin'], vids: ['margins', 'is'] },
+    netmargin: { t: 'Net profit margin',
+      plain: 'The share of each sales dollar that ends up as profit for shareholders after every cost, interest and tax: net income ÷ revenue.',
+      steps: ['Open the income statement in the 10-K or latest 10-Q.', 'Find "Net income" near the bottom (use the line attributable to the company, not including non-controlling interests).', 'Divide by revenue for the same period.', 'Look at five years and note any one-off gains or charges.'],
+      ranges: [['Software', '15–30%', ''], ['Consumer staples', '8–15%', ''], ['General retail', '2–5%', ''], ['Grocery', '1–3%', ''], ['Airlines and car makers', '0–8%, often negative in bad years', 'Highly cyclical']],
+      why: 'Net margin includes interest and one-off items, so it moves more than operating margin. Forecast it from a normal year, not the best or worst.',
+      links: ['damMargin'], vids: ['margins', 'is'] },
+    opex: { t: 'Operating expenses',
+      plain: 'The costs of running the business that are not the direct cost of the product: research and development (R&D), selling, general and administrative (SG&A), and other operating items.',
+      steps: ['Open the income statement in the 10-K.', 'Find the line called "{label}" (or the closest wording) between gross profit and operating income.', 'Divide each year\'s amount by revenue to see it as a % of revenue.', 'Read the MD&A section for why it changed, and remove one-off items (restructuring, legal settlements) before forecasting.'],
+      ranges: [['Software (R&D)', '15–30% of revenue', 'Product development is ongoing'], ['Pharmaceuticals (R&D)', '15–25%', ''], ['Consumer brands (SG&A)', '20–35%', 'Heavy marketing'], ['Retail (SG&A)', '15–25%', 'Stores and staff'], ['Industrials (SG&A)', '8–15%', '']],
+      why: 'As companies grow, some costs grow more slowly than revenue (operating leverage), so margins can rise. Forecast these costs as % of revenue and let them fall only where you can explain why.',
+      links: ['damMargin'], vids: ['is', 'margins'] },
+    da: { t: 'Depreciation and amortisation (D&A)',
+      plain: 'The accounting cost of wearing out buildings and equipment (depreciation) and using up purchased intangibles (amortisation). It is not a cash payment, but it reduces taxable profit.',
+      steps: ['Open the cash flow statement in the 10-K.', 'Under "Operating activities", find "Depreciation and amortization" (often the first add-back after net income).', 'Divide by revenue to see D&A as % of revenue for each year.', 'Compare it with capital expenditures: a growing company usually spends more on CapEx than its D&A.'],
+      ranges: [['Software and services', '2–5% of revenue', 'Few physical assets'], ['General retail', '2–4%', ''], ['Industrial manufacturers', '3–6%', ''], ['Large online retail plus cloud (Amazon FY2025)', 'About 9%', 'Data centres and warehouses'], ['Telecom and utilities', '10–20%', 'Huge networks wear out']],
+      why: 'D&A lowers tax, so it matters for cash flow even though it is not cash. In the long run D&A and CapEx should be related: you cannot keep depreciating assets you never bought. By year 10, CapEx should be at or a bit above D&A for a company still growing.',
+      links: ['damCapex'], vids: ['capex', 'cfs'] },
+    tax: { t: 'Tax rate',
+      plain: 'The share of pre-tax profit paid in income tax. The effective rate is what the company actually paid (tax expense ÷ pre-tax income); the marginal rate is the rate on the next dollar (21% US federal plus state taxes).',
+      steps: ['Open the income statement in the 10-K.', 'Find "Provision for income taxes" (tax expense) and "Income before income taxes".', 'Effective tax rate = tax expense ÷ income before taxes. Do this for several years.', 'Open the "Income Taxes" note: it reconciles the effective rate to the 21% statutory rate and explains the differences.', 'Use the effective rate for the early years if it is stable, and move toward the marginal rate (about 24–26% for US companies including state taxes) by year 10.'],
+      ranges: [['US company, mostly domestic', 'Effective 20–25%', 'Close to 21% federal plus state'], ['US multinational', 'Effective 12–20%', 'Profits in lower-tax countries, credits'], ['Company with past losses', 'Near 0% for a while', 'Losses carried forward shelter profit'], ['Marginal rate for a US company', 'About 24–26%', '21% federal plus state taxes']],
+      why: 'Low effective rates often come from things that do not last (tax credits, losses, temporary deals). Over ten years and forever after, a company tends to pay closer to the marginal rate, so the terminal year should use it.',
+      links: ['damTax'], vids: ['dtax', 'cflow'] },
+    nol: { t: 'Tax losses carried forward (NOLs)',
+      plain: 'If a company lost money in the past, it can use those losses to reduce tax on future profits. That saves cash.',
+      steps: ['Open the "Income Taxes" note in the 10-K.', 'Search the text for "net operating loss carryforwards". It gives the amount and when they expire.', 'Multiply the amount by the tax rate to get the possible tax saving.', 'Spread that saving over the years the company will have enough profit to use it (the model uses years 1–3 here).', 'US federal losses from 2018 on can only offset 80% of taxable income each year.'],
+      ranges: [['Profitable mature company', 'Usually 0', 'Nothing left to use'], ['Recently profitable company', 'A meaningful saving for a few years', 'Losses from growth years'], ['Still loss-making company', 'Losses keep growing', 'Value only what you expect to use']],
+      why: 'The saving is real cash, but only if the company earns profits before the losses expire. Counting losses that will never be used overstates value.',
+      links: ['edgar'], vids: ['nol'] },
+    sbc: { t: 'Stock-based compensation (SBC)',
+      plain: 'Pay given to employees in shares or options instead of cash. It is a real cost: the company either issues new shares (dilution) or spends cash buying them back.',
+      steps: ['Open the cash flow statement in the 10-K.', 'Under operating activities, find "Stock-based compensation" (an add-back because it is not cash).', 'Divide by revenue to get SBC as % of revenue.', 'For detail, read the "Stock-Based Compensation" note: grants, unvested awards and unrecognised cost.'],
+      ranges: [['Mature industrial or consumer company', '0.5–2% of revenue', 'Mostly cash pay'], ['Large technology company', '3–10% of revenue', 'Shares are a big part of pay'], ['Young software company', '10–25% of revenue', 'Cash is scarce, so stock is used']],
+      why: 'If you add SBC back as if it were free and also ignore the extra shares, you count the same benefit twice. This model treats it as a cost in EBITDA, which is the cautious standard many professors teach.',
+      links: [], vids: ['sbcB', 'sbcD', 'sbcH'] },
+    interest: { t: 'Interest',
+      plain: 'Interest expense is what the company pays its lenders; interest income is what it earns on cash. In a free-cash-flow-to-the-firm DCF, interest is not subtracted from cash flow: it is captured in the discount rate (WACC).',
+      steps: ['Open the income statement in the 10-K.', 'Find "Interest expense" and "Interest income" below operating income (sometimes combined as "Interest and other income (expense), net").', 'If they are combined, the "Other income (expense)" note splits them.', 'Average interest rate on debt ≈ interest expense ÷ average debt over the year.'],
+      ranges: [['Investment-grade company', 'Interest rate on debt 3–6%', 'Lower credit risk'], ['High-yield (junk-rated) company', '7–12%', 'Higher default risk'], ['Interest coverage (EBIT ÷ interest)', 'Above 8× is strong; below 3× is risky', 'How easily profit pays interest']],
+      why: 'Mixing interest into free cash flow and then discounting at WACC counts the cost of debt twice. Keep financing costs out of FCFF; use them only to estimate the cost of debt and in the three-statement model.',
+      links: ['damDebt'], vids: ['debtSch', 'is'] },
+    nonop: { t: 'Non-operating income and expense',
+      plain: 'Gains or losses that do not come from the main business: investment gains, currency gains, one-off items. They sit below operating income.',
+      steps: ['Open the income statement and find "{label}" or "Other income (expense), net".', 'Read the related note for what is inside (it may include interest, FX and investment gains).', 'Decide which parts recur. Most valuation models forecast this at zero or a small steady amount.'],
+      ranges: [['Most companies', 'Small and noisy', 'Forecast near zero unless clearly recurring'], ['Company with large investments', 'Can be large', 'Value the investments separately instead']],
+      why: 'A DCF values operating cash flow. Non-operating assets (cash, investments) are added separately in the equity bridge, so their income should not also be in the cash flows.',
+      links: [], vids: ['is', 'cash'] },
+    ni: { t: 'Net income',
+      plain: 'The profit left for shareholders after every expense, interest and tax. It is the "bottom line" of the income statement.',
+      steps: ['Open the income statement in the 10-K or latest 10-Q.', 'Find "Net income" near the bottom. If there is a line "attributable to non-controlling interests", use the part attributable to the company.', 'For the latest twelve months, add the last 10-K year to this year\'s year-to-date and subtract last year\'s same period.'],
+      ranges: [['Software', 'Net margin 15–30%', ''], ['Retail', '2–5%', ''], ['Loss-making growth company', 'Negative', 'Value with revenue or cash-flow methods, not P/E']],
+      why: 'Net income drives earnings per share and the P/E ratio. It also links the three statements: it starts the cash flow statement and adds to retained earnings on the balance sheet.',
+      links: ['edgar'], vids: ['is', 'link3'] },
+    eps: { t: 'Earnings per share (EPS)',
+      plain: 'Net income divided by shares. Diluted EPS uses the share count including options and RSUs. P/E ratios are price ÷ EPS.',
+      steps: ['Open the income statement in the 10-K or 10-Q.', 'At the bottom, find "Diluted earnings per share".', 'For trailing twelve months, add the last four quarters (or 10-K year + this year-to-date − last year\'s same period).', 'Read the "Earnings Per Share" note for the share counts used.'],
+      ranges: [['Mature company', 'EPS grows 3–8% a year', 'Earnings growth plus buybacks'], ['Growth company', '15%+ a year', 'Revenue growth and rising margins'], ['Loss-making company', 'Negative', 'P/E has no meaning']],
+      why: 'Use diluted EPS so that options and RSUs that will become shares are counted. Use the same EPS definition for every company you compare.',
+      links: ['edgar'], vids: ['pe', 'diluted'] },
+    // ---------- reinvestment ----------
+    capex: { t: 'Capital expenditures (CapEx)',
+      plain: 'Cash spent on long-lived assets: buildings, equipment, data centres, software built for internal use. It is subtracted from free cash flow because it is cash leaving the business.',
+      steps: ['Open the cash flow statement in the 10-K.', 'Under "Investing activities", find "Purchases of property and equipment" (or "Capital expenditures"). It is shown as a negative number.', 'Divide by revenue to get CapEx as % of revenue for each of the last five years.', 'Read the MD&A for management\'s spending plans (big projects, new factories).', 'Compare with D&A: CapEx well above D&A means the company is building for growth.'],
+      ranges: [['Software', '1–5% of revenue', 'Few physical assets'], ['General retail', '2–5%', 'Stores and warehouses'], ['Industrial manufacturers', '3–7%', ''], ['Telecom', '15–20%', 'Networks need constant upgrades'], ['Utilities', '20–35%', 'Power plants and grids'], ['Semiconductor makers with factories', '25–40%', 'Very expensive plants']],
+      why: 'Growth needs investment. If you forecast fast growth with very low CapEx, you are assuming growth for free. As growth slows, CapEx usually falls toward D&A (just replacing what wears out).',
+      links: ['damCapex'], vids: ['capex', 'cflow'] },
+    ppe: { t: 'Property and equipment (PP&E)',
+      plain: 'The buildings, machines and equipment the company owns, at cost less depreciation so far. It grows with CapEx and shrinks with depreciation.',
+      steps: ['Open the balance sheet in the 10-K or 10-Q and find "Property and equipment, net".', 'For detail, open the "Property and Equipment" note: gross cost by category and accumulated depreciation.', 'Read the accounting policies note for useful lives (for example, buildings 40 years, servers 5–6 years).', 'Roll-forward check: opening PP&E + CapEx − depreciation − disposals ≈ closing PP&E.'],
+      ranges: [['Software', 'Small vs revenue', 'Asset-light'], ['Manufacturing', 'Large vs revenue', 'Asset-heavy'], ['Utilities and telecom', 'Larger than annual revenue', 'Very asset-heavy']],
+      why: 'PP&E links the cash flow statement (CapEx) and the income statement (depreciation) to the balance sheet. If the roll-forward does not hold, the model is not balanced.',
+      links: ['edgar'], vids: ['capex', 'bs'] },
+    nwc: { t: 'Change in net working capital (NWC)',
+      plain: 'Working capital is money tied up in running the business day to day: what customers owe you (receivables) plus inventory, minus what you owe suppliers (payables). When it grows, cash is used; when it shrinks, cash is released.',
+      steps: ['Open the cash flow statement in the 10-K.', 'Under operating activities, find "Changes in operating assets and liabilities": accounts receivable, inventories, accounts payable, accrued expenses, unearned revenue.', 'Add those lines. A negative total means working capital used cash.', 'To forecast, divide the change in NWC by the change in revenue for each year: that is "NWC as % of the change in revenue".', 'Use the NWC guide on this page for a line-by-line worksheet.'],
+      ranges: [['Grocery, warehouse clubs and some online retail', 'Negative (0% to −20% of revenue change)', 'They sell goods before they pay suppliers'], ['Subscription software', 'Negative', 'Customers pay up front (deferred revenue)'], ['Industrial manufacturers', '10–25% of revenue change', 'Inventory and receivables grow with sales'], ['Construction, aerospace, defence', '20–40%', 'Long projects tie up cash']],
+      why: 'A growing company usually needs more working capital each year, which reduces free cash flow. Linking it to the change in revenue keeps it in proportion: no growth, no extra working capital.',
+      links: ['damWc'], vids: ['nwc', 'ccc'] },
+    wcline: { t: 'Working capital line',
+      plain: '"{label}" is one part of working capital: money tied up in, or provided by, running the business day to day.',
+      steps: ['Open the balance sheet in the newest 10-K or 10-Q.', 'Find "{label}" (or the closest wording) under current assets or current liabilities.', 'Divide by revenue (or by cost of sales for payables and inventory) to see it as a ratio for each year.', 'Forecast it with that ratio or with "days" (balance ÷ annual revenue × 365). The guide below explains which driver this line uses.'],
+      ranges: [['Receivables (DSO)', 'Retail 0–10 days; business-to-business 30–60; government contractors 60–90', 'How fast customers pay'], ['Inventory (DIO)', 'Grocery 20–40 days; apparel 90–120; aerospace 150+', 'How long goods sit before sale'], ['Payables (DPO)', 'Usually 30–90 days', 'How long the company takes to pay suppliers'], ['Deferred revenue', 'Large for subscription businesses', 'Customers prepay']],
+      why: 'Forecasting each line with its own driver shows where cash is tied up and makes it easy to explain changes.',
+      links: ['damWc'], vids: ['ccc', 'nwc'] },
+    days: { t: 'Days ratios (DSO, DIO, DPO)',
+      plain: 'Working capital expressed in days. DSO: how many days customers take to pay. DIO: how many days inventory sits. DPO: how many days the company takes to pay suppliers. Cash conversion cycle = DSO + DIO − DPO.',
+      steps: ['From the income statement take revenue and cost of sales for the year.', 'From the balance sheet take receivables, inventory and payables at year end (or the average of start and end).', 'DSO = receivables ÷ revenue × 365. DIO = inventory ÷ cost of sales × 365. DPO = payables ÷ cost of sales × 365.', 'Calculate for five years and look for a trend before you forecast.'],
+      ranges: [['Grocery and warehouse clubs', 'Cash conversion cycle near zero or negative', 'Fast inventory, card sales, slow supplier payments'], ['Large online retail', 'Often negative', 'Suppliers fund the business'], ['Industrial manufacturers', '60–120 days', 'Inventory and receivables'], ['Aerospace and defence', '120+ days', 'Long production cycles']],
+      why: 'Days ratios change slowly and depend on the business model, so they are good forecasting drivers. A sudden change in history is worth investigating (a new customer, a supply problem).',
+      links: ['damWc'], vids: ['ccc', 'ccc2'] },
+    acq: { t: 'Acquisitions',
+      plain: 'Cash spent buying other companies. Some companies grow by buying others; if you include that growth in your forecast, include the cost too.',
+      steps: ['Open the cash flow statement and find "Acquisitions, net of cash acquired" under investing activities.', 'Divide by revenue for each of the last five years.', 'Read the "Business Combinations" or "Acquisitions" note for what was bought and why.', 'If the company buys businesses every year as its strategy, forecast a steady %; if it was one large deal, forecast zero and do not count its growth twice.'],
+      ranges: [['Most companies', '0% in the forecast', 'Organic growth only'], ['Serial acquirers (some software, healthcare, industrials)', '2–10% of revenue a year', 'Buying is the growth strategy']],
+      why: 'Growth from acquisitions is not free: the purchase price is a cash outflow. Either forecast both the growth and the spending, or neither.',
+      links: [], vids: ['cflow'] },
+    s2c: { t: 'Sales-to-capital ratio',
+      plain: 'How many dollars of extra revenue each dollar of new investment (CapEx + working capital + acquisitions − D&A) produces. Higher means growth is cheaper.',
+      steps: ['Open Damodaran\'s capital expenditures table (link below) and find your industry\'s "Sales/Invested Capital".', 'From the company\'s history: change in revenue over several years ÷ total net reinvestment over the same years.', 'Use it as a check on your CapEx and NWC: implied reinvestment = change in revenue ÷ sales-to-capital.'],
+      ranges: [['Software and services', '2–5', 'Little capital needed'], ['General retail', '2–4', ''], ['Manufacturing', '1–2', ''], ['Utilities and telecom', 'Below 1', 'Capital-heavy']],
+      why: 'This ratio ties growth to the investment needed to deliver it. If your forecast implies a ratio far above the industry, you may be assuming growth without paying for it.',
+      links: ['damSales'], vids: ['cflow', 'growth'] },
+    // ---------- discount rate ----------
+    rf: { t: 'Risk-free rate',
+      plain: 'The return you can earn with almost no risk, usually the 10-year US Treasury yield for US-dollar cash flows. Every other required return is built on top of it.',
+      steps: ['Open FRED (link below) and search "DGS10", or use the link.', 'Read the yield for your valuation date (for example 4.1 means 4.1%).', 'Enter that number. Record the date.', 'If your cash flows are in another currency, use that government\'s long-term bond yield instead.'],
+      ranges: [['US dollars', 'The 10-year Treasury on your date', 'It has moved between about 0.5% and 5% since 2010'], ['Euros', 'German 10-year Bund yield', 'Lowest-risk euro government'], ['Emerging-market currencies', 'Local government yield minus the country\'s default spread', 'Damodaran explains the adjustment']],
+      why: 'Use today\'s rate, not a historical average: you are valuing the company today, and investors can buy Treasuries at today\'s yield. The 10-year matches the long life of the cash flows better than a 3-month bill.',
+      links: ['fred10'], vids: ['rf', 'rfCapm'] },
+    erp: { t: 'Equity risk premium (ERP)',
+      plain: 'The extra return investors want each year for owning stocks instead of a riskless bond. Cost of equity = risk-free rate + beta × ERP.',
+      steps: ['Open Damodaran Online (link below). Near the top of the home page he posts the current implied ERP for the S&P 500, updated at the start of each month.', 'Read that figure (for example 4.3%).', 'Enter it and record the month you used.', 'Alternative: Kroll\'s recommended US ERP (a paid source, often quoted in news articles).'],
+      ranges: [['Most practitioners (US)', '4–6%', 'Range used by most textbooks and banks'], ['Damodaran implied ERP since 2008', 'Roughly 4–6.5%', 'Moves with market prices'], ['Riskier countries', 'US ERP plus a country risk premium', 'Damodaran publishes country premiums']],
+      why: 'The ERP is the price of taking stock-market risk. An implied ERP is backed out of today\'s market prices, so it fits a valuation done today. Historical averages depend heavily on the period chosen.',
+      links: ['damErp'], vids: ['erp', 'erpBeta'] },
+    beta: { t: 'Beta',
+      plain: 'How much a stock tends to move when the whole market moves. 1.0 = same as the market; 1.5 = moves 50% more; 0.5 = half as much. Higher beta means higher required return.',
+      steps: ['Quick: on Yahoo Finance, the summary page shows "Beta (5Y Monthly)".', 'Better: open Damodaran\'s betas by industry (link below) and read the "unlevered beta" for your industry.', 'Re-lever it for your company\'s debt: levered beta = unlevered beta × (1 + (1 − tax rate) × debt ÷ equity).', 'Compare the two. The industry beta is less noisy than one company\'s regression.'],
+      ranges: [['Utilities', '0.3–0.6', 'Steady demand'], ['Consumer staples', '0.5–0.8', 'People buy food in recessions'], ['Whole market', '1.0', 'By definition'], ['Technology', '1.1–1.5', 'Sensitive to the economy'], ['Semiconductors and young growth companies', '1.3–2.0', 'Very cyclical or unproven']],
+      why: 'Beta measures the risk you cannot remove by holding many stocks. A single stock\'s beta from five years of prices has a large error, so industry averages are often more reliable.',
+      links: ['damBeta', 'yahoo'], vids: ['beta', 'uBeta', 'erpBeta'] },
+    premia: { t: 'Size and company-specific premiums',
+      plain: 'Optional extra return some analysts add for small companies (size premium) or for risks not captured elsewhere (company-specific premium). Zero is a perfectly valid answer.',
+      steps: ['For a large listed company, enter 0%.', 'For a small company, a size premium needs a source (for example Kroll\'s Cost of Capital Navigator, a paid service). Record the edition and size group.', 'For a company-specific premium, write the exact risk (one customer is 40% of sales, for example) and why it is not already in your cash flows.'],
+      ranges: [['Large-cap listed company', '0%', 'Beta already captures market risk'], ['Small-cap listed company', '0–3% size premium, with a source', 'Evidence is debated'], ['Small private business', '2–5% or more', 'Used in private valuations'], ['Company-specific premium', 'Usually 0%', 'Put specific risks in the cash flows instead']],
+      why: 'It is better to show a risk in the cash flows (lower growth, a bear scenario) than to hide it in the discount rate. Use these premiums only with evidence.',
+      links: ['damWacc'], vids: ['erpBeta', 'beta'] },
+    kd: { t: 'Cost of debt',
+      plain: 'The interest rate the company would pay to borrow today, before tax. Because interest is tax-deductible, WACC uses it after tax: cost of debt × (1 − tax rate).',
+      steps: ['If the company has a credit rating (S&P, Moody\'s), find it in the 10-K "Liquidity" section or in news.', 'Open Damodaran\'s ratings table (link below) and read the default spread for that rating.', 'Cost of debt = risk-free rate + default spread.', 'Or: look up the yield on the company\'s own bonds on FINRA bond data.', 'Do not just use interest expense ÷ debt: that is the rate on old loans, not today\'s.'],
+      ranges: [['AAA–AA rated', 'Risk-free + about 0.5–1%', 'Very safe'], ['A rated', 'Risk-free + about 1–1.5%', ''], ['BBB rated', 'Risk-free + about 1.5–2.5%', 'Lowest investment grade'], ['BB–B rated (high yield)', 'Risk-free + about 3–6%', 'Real default risk'], ['No rating', 'Estimate from interest coverage', 'Damodaran\'s table maps coverage to a rating']],
+      why: 'WACC should reflect what capital costs today. Debt is cheaper than equity because lenders are paid first and interest saves tax.',
+      links: ['damRating', 'finra'], vids: ['kd', 'cocData'] },
+    weights: { t: 'Capital weights (WACC)',
+      plain: 'WACC blends the cost of equity and the after-tax cost of debt, weighted by how much of each the company uses, measured at market values.',
+      steps: ['Equity weight: market cap = share price × shares outstanding.', 'Debt weight: total debt from the balance sheet (plus lease liabilities if you treat leases as debt).', 'Equity % = equity ÷ (equity + debt). Debt % = 1 − equity %.', 'WACC = equity % × cost of equity + debt % × cost of debt × (1 − tax rate).', 'Check against Damodaran\'s cost of capital by industry (link below).'],
+      ranges: [['Large stable company', 'WACC about 6–8%', 'Low risk, some cheap debt'], ['Average US company', 'About 8–10%', ''], ['Small or risky company', '10–14%', 'Higher beta, costlier debt'], ['Start-up', '15% or more', 'High chance of failure']],
+      why: 'Use market values, not book values, because investors earn returns on what their stake is worth today. A small change in WACC moves a DCF a lot, so always look at the sensitivity table.',
+      links: ['damWacc'], vids: ['wacc', 'cocData', 'kd'] },
+    // ---------- terminal value ----------
+    tg: { t: 'Terminal growth rate',
+      plain: 'How fast free cash flow grows every year after year 10, forever. Because "forever" is a long time, the rate has to be one the company could keep up as long as the economy exists.',
+      steps: ['Open the Federal Reserve\'s Summary of Economic Projections (link below). Read the "Longer run" median for real GDP growth (about 1.8–2%) and PCE inflation (2%).', 'Combine them: nominal growth ≈ (1 + real growth) × (1 + inflation) − 1. With 2% and 2% that is about 4%. This is the ceiling for a company that keeps pace with the economy.', 'Look up the 10-year Treasury yield on FRED. Many professors use it as a second ceiling: long-run growth should not exceed the risk-free rate.', 'Choose a rate at or below both ceilings. Most analysts end up between 2% and 3% for a mature US company.', 'Check that it is well below your WACC (at least 2–3 points). The model warns you if it is not.'],
+      ranges: [['Mature US company growing with the economy', '2–3% (rarely above 4%)', 'Inflation plus a little real growth'], ['Company in a shrinking industry (print media, tobacco)', '0–1%, or even negative', 'Demand is falling'], ['Strong company in a growing industry', 'Up to nominal GDP, about 3–4%', 'Even the best cannot outgrow the economy forever'], ['Cash flows in a high-inflation currency', 'Higher, matching that country\'s inflation', 'Growth and discount rate must use the same currency']],
+      why: 'Three reasons. (1) A company growing faster than the economy forever would one day be bigger than the economy, which is impossible. (2) The risk-free rate already reflects investors\' view of long-run growth and inflation, so growth above it is hard to justify. (3) In the formula TV = cash flow ÷ (WACC − g), g close to WACC makes the denominator tiny and the value explode. Terminal value is often 60–80% of the whole DCF, so half a point of g can move the answer by 10% or more. Remember too that higher growth needs more reinvestment (this model uses g ÷ ROIC), so it is not free.',
+      links: ['fedSep', 'fred10'], vids: ['tv', 'tvMeth', 'growth'] },
+    tem: { t: 'Terminal margin',
+      plain: 'The profit margin the company keeps forever after year 10. It should look like a mature company in its industry.',
+      steps: ['Look at your year-10 margin: the terminal margin should normally be close to it.', 'Open Damodaran\'s margin table (link below) and read the EBITDA margin for your industry.', 'Look at the most mature competitors: their margin today is a guide to where this company could settle.', 'If you choose a margin well above the industry, write down the lasting advantage that protects it.'],
+      ranges: [['Company with a strong lasting advantage', 'Above industry average', 'Brand, network, patents'], ['Typical company', 'Close to industry average', 'Competition evens things out'], ['Company under pressure', 'Below industry average', 'Losing pricing power']],
+      why: 'High margins attract competitors. Over decades they tend to drift toward the industry average unless something stops new entrants. A margin that jumps between year 10 and year 11 is applied forever, so it has a big effect.',
+      links: ['damMargin'], vids: ['tv', 'margins'] },
+    roic: { t: 'Return on invested capital (ROIC)',
+      plain: 'Profit after tax (NOPAT) divided by the capital invested in the business. It says how good the company is at turning investment into profit. In the terminal value it decides how much the company must reinvest to grow.',
+      steps: ['NOPAT = operating income × (1 − tax rate), from the income statement.', 'Invested capital = equity + debt − cash, from the balance sheet (or the operating side: working capital + net PP&E + intangibles).', 'ROIC = NOPAT ÷ average invested capital for the year. The calculator on this page does it.', 'Compare with Damodaran\'s return on capital by industry (link below).', 'For the terminal value, choose a ROIC between WACC (no lasting advantage) and the company\'s current ROIC (a lasting advantage).'],
+      ranges: [['Company with no lasting advantage', 'ROIC = WACC (about 7–10%)', 'Growth then adds no value'], ['Average US company (excluding financials)', 'About 10–15% normalised', 'Damodaran\'s table'], ['Strong brand or network company', '15–25%', 'Hard for competitors to copy'], ['Above 25% forever', 'Rarely defensible', 'Write down why if you use it']],
+      why: 'Reinvestment rate = g ÷ ROIC. At 3% growth and 10% ROIC, the company reinvests 30% of profit forever; at 20% ROIC only 15%. Growth only creates value when ROIC is above WACC, which is why terminal ROIC is one of the most important choices in the model.',
+      links: ['damRoc'], vids: ['roic', 'tv'] },
+    tcapex: { t: 'Terminal CapEx',
+      plain: 'Capital spending after year 10, used by the original workbook. In the corrected method the model sets reinvestment from growth and ROIC instead.',
+      steps: ['Look at your year 8–10 CapEx and D&A as % of revenue.', 'For a company still growing, terminal CapEx should be at or a little above D&A.', 'If you use the corrected method, leave this alone: reinvestment = g ÷ ROIC.'],
+      ranges: [['Mature company growing slowly', 'CapEx ≈ D&A, slightly above', 'Mostly replacing what wears out'], ['CapEx below D&A forever', 'Not sustainable', 'The asset base would shrink']],
+      why: 'You cannot grow forever without investing. Setting terminal CapEx below D&A while assuming growth inflates the terminal value.',
+      links: ['damCapex'], vids: ['tv', 'capex'] },
+    tvmethod: { t: 'Terminal value method',
+      plain: 'Two ways to value everything after year 10. Gordon growth: cash flow in year 11 ÷ (WACC − g). Exit multiple: year-10 EBITDA × a multiple like peers trade at today.',
+      steps: ['Use Gordon growth as your main method (it is based on the company\'s own cash flows).', 'Look at the exit-multiple answer as a cross-check on the Terminal value page.', 'If the two are far apart, read the implied growth rate behind the multiple, or the implied multiple behind your growth rate. One of them is probably unrealistic.'],
+      ranges: [['Academic and intrinsic valuation', 'Gordon growth', 'Consistent with the DCF idea'], ['Investment banking practice', 'Often exit multiple, with Gordon as a check', 'Ties the answer to market prices'], ['Either method', 'Terminal value 60–80% of the total is common', 'Above 85% means most value is far in the future']],
+      why: 'A DCF is meant to value cash flows. An exit multiple brings today\'s market mood into the year-10 value, which partly turns the DCF back into a comps valuation. Comparing both is the safest habit.',
+      links: ['damEbitda'], vids: ['tvMeth', 'tv'] },
+    exitmult: { t: 'Exit multiple (EV/EBITDA)',
+      plain: 'The EV/EBITDA multiple you assume the company would sell or trade at in year 10.',
+      steps: ['Open Damodaran\'s EV/EBITDA by industry (link below) and read your industry.', 'Look at the multiples of mature, slower-growing peers today (Trading Comps tab).', 'Pick a multiple at or below today\'s peer median, because by year 10 the company will be growing more slowly.', 'Check the growth rate this multiple implies on the Terminal value page.'],
+      ranges: [['Mature, slow-growing industries', '6–10×', 'Utilities, telecom, autos'], ['Average company', 'About 10–14×', ''], ['High-quality growth companies', '15–25×', 'Market expects more growth'], ['Year-10 exit', 'Usually lower than today', 'Growth slows by then']],
+      why: 'Today\'s multiples reflect today\'s growth. A year-10 company is more mature, so using a high current multiple quietly assumes high growth continues.',
+      links: ['damEbitda'], vids: ['tvMeth', 'evEbitda'] },
+    // ---------- equity bridge ----------
+    cash: { t: 'Cash and short-term investments',
+      plain: 'Money the company holds in the bank or in safe short-term investments. A DCF of operating cash flow does not include it, so you add it to get to equity value.',
+      steps: ['Open the balance sheet in the newest 10-Q or 10-K.', 'Find "Cash and cash equivalents" (first line of current assets).', 'Find "Marketable securities" or "Short-term investments" just below it.', 'Use the same balance sheet date for cash and debt.', 'Strategic stakes in other companies go in "Equity stakes", not here.'],
+      ranges: [['Large technology companies', 'Often large cash piles', 'Add it all, unless it is trapped abroad or needed to operate'], ['Retailers and restaurants', 'Some cash is needed in tills and stores', 'Some analysts keep 1–2% of revenue as operating cash'], ['Most companies', 'Add the full balance', 'The standard approach']],
+      why: 'Enterprise value is the value of the business only. Equity holders also own the cash, so it is added. Using the same date as debt avoids counting cash raised from a loan without the loan.',
+      links: ['edgar'], vids: ['cash', 'bridge'] },
+    debt: { t: 'Debt',
+      plain: 'Money the company has borrowed and must repay: bonds, bank loans, commercial paper, and finance leases. Lenders are paid before shareholders, so debt is subtracted to get equity value.',
+      steps: ['Open the balance sheet in the newest 10-Q or 10-K.', 'Add "Short-term borrowings", "Current portion of long-term debt" and "Long-term debt".', 'Open the "Debt" note to check the total and see maturities and interest rates.', 'Add finance lease liabilities (in the "Leases" note) if the model treats them as debt.', 'Do not include accounts payable or accrued expenses: those are working capital.'],
+      ranges: [['Net debt ÷ EBITDA under 1×', 'Low debt', 'Many technology companies'], ['1–3×', 'Normal for investment-grade companies', ''], ['3–5×', 'Heavily borrowed', 'Common after buyouts'], ['Above 5×', 'Risky', 'Default risk matters']],
+      why: 'Equity holders own what is left after lenders. Use the face value from the balance sheet unless the debt trades far from it (then market value is better).',
+      links: ['edgar'], vids: ['bridge', 'evItems', 'debtSch'] },
+    pension: { t: 'Pension underfunding',
+      plain: 'If a company promised employees a fixed pension and has not set aside enough money, the shortfall is like debt: someone has to pay it.',
+      steps: ['Open the 10-K and search for the "Retirement Plans" or "Pension" note.', 'Find "Projected benefit obligation" (what is owed) and "Fair value of plan assets" (what is set aside).', 'Underfunding = obligation − plan assets. If assets exceed the obligation, enter 0.', 'Enter it in $ millions.'],
+      ranges: [['Most technology and newer companies', '0', 'No defined-benefit plans'], ['Old industrials, airlines, car makers', 'Can be billions', 'Long histories of pension promises']],
+      why: 'Pension promises are paid before shareholders get anything, just like debt. Leaving out a big deficit overstates equity value.',
+      links: ['edgar'], vids: ['evItems', 'bridge'] },
+    leases: { t: 'Leases',
+      plain: 'Rent the company has committed to pay for stores, offices, equipment and so on. Since 2019 US companies show them on the balance sheet. Some analysts treat lease obligations like debt; others keep lease payments as an operating cost.',
+      steps: ['Open the balance sheet: find "Operating lease liabilities" (current and non-current) and "Operating lease right-of-use assets".', 'Open the "Leases" note for finance leases, lease cost and maturities.', 'Decide one treatment and use it everywhere: either lease cost stays in operating expenses (standard here) or leases count as debt and lease cost is removed from expenses.', 'Use the same treatment for peers in Trading Comps.'],
+      ranges: [['Retailers, restaurants, airlines', 'Leases are large', 'Stores, aircraft'], ['Software', 'Small', 'Offices only'], ['IFRS reporters (Europe)', 'All leases already sit outside EBITDA', 'Adjust when comparing with US peers']],
+      why: 'Counting leases as debt and also subtracting rent from cash flows counts them twice. Pick one method and apply it to every company and every input.',
+      links: ['edgar'], vids: ['leaseD', 'lease842', 'leaseFK'] },
+    nci: { t: 'Non-controlling (minority) interest',
+      plain: 'When a company owns most but not all of a subsidiary, it reports 100% of that subsidiary\'s results. The part owned by others is the non-controlling interest, and it belongs to them, not to the company\'s shareholders.',
+      steps: ['Open the balance sheet and find "Noncontrolling interests" (in the equity section, sometimes just above it).', 'Use that amount, in $ millions.', 'If the subsidiary is listed, its market value is better than the book value.'],
+      ranges: [['Most companies', '0 or very small', 'Subsidiaries are wholly owned'], ['Companies with partly owned listed subsidiaries', 'Can be large', 'Common in Asia and in telecom and energy']],
+      why: 'The DCF includes 100% of subsidiaries\' cash flows, so the share owned by others must be subtracted to get the value that belongs to this company\'s shareholders.',
+      links: ['edgar'], vids: ['nci', 'evItems'] },
+    preferred: { t: 'Preferred stock',
+      plain: 'A type of share that gets paid before common shareholders, often with a fixed dividend. Like debt, it is subtracted to reach common equity value.',
+      steps: ['Open the balance sheet: look for "Preferred stock" in or above equity.', 'Read the "Stockholders\' Equity" note for the liquidation value and dividend rate.', 'Enter the liquidation value, or market value if it trades.'],
+      ranges: [['Most large companies', '0', 'Rare outside banks and utilities'], ['Banks, utilities, REITs', 'Common', 'Used as cheap long-term funding']],
+      why: 'Preferred holders are paid first, so their claim reduces what is left for common shareholders.',
+      links: ['edgar'], vids: ['nci', 'evItems'] },
+    stakes: { t: 'Equity stakes and investments',
+      plain: 'Shares the company owns in other businesses that are not consolidated. They are worth something, but their cash flows are not in your forecast, so you add their value separately.',
+      steps: ['Open the balance sheet and find "Long-term investments", "Equity-method investments" or "Non-marketable equity investments".', 'Read the "Investments" note to see what they are and whether a market value is given.', 'For listed stakes, multiply the number of shares held by today\'s price.', 'Do not add them if their income is already in your forecast cash flows.'],
+      ranges: [['Most companies', '0 or small', ''], ['Holding companies and some tech companies', 'Can be a large share of value', 'Stakes in start-ups or partners']],
+      why: 'Each asset should be counted exactly once: either through its cash flows in the forecast, or as a separate value in the bridge.',
+      links: ['edgar'], vids: ['cash', 'bridge'] },
+    dtl: { t: 'Deferred taxes',
+      plain: 'Differences between tax paid now and tax expense in the accounts. A deferred tax liability means tax has been put off to later; an asset means tax was paid early or losses can be used later.',
+      steps: ['Open the balance sheet: look for "Deferred tax liabilities" and "Deferred tax assets" (often inside other liabilities or other assets).', 'Open the "Income Taxes" note: it lists the components.', 'In this DCF, cash taxes in the forecast usually handle it already. Enter 0 unless you have a specific reason, and write it down.'],
+      ranges: [['Most DCF models', '0 in the bridge', 'Taxes are in the cash flows'], ['Companies with big accelerated tax depreciation', 'Large liabilities', 'Only adjust if the forecast misses them']],
+      why: 'Subtracting the whole deferred tax liability usually double-counts taxes you have already put in the cash flows. Keep it simple unless you have a reason.',
+      links: ['edgar'], vids: ['dtax'] },
+    optval: { t: 'Options value',
+      plain: 'A second way to account for employee options: value them (for example with Black–Scholes) and subtract that value, instead of adding shares.',
+      steps: ['Choose one method only: diluted shares (more shares) or option value (subtract value).', 'For option value, the "Stock-Based Compensation" note gives the number outstanding, exercise price, remaining life and volatility assumptions.', 'If you already used diluted shares, enter 0 here.'],
+      ranges: [['Most models', '0 here, dilution in the share count', 'Simpler'], ['Companies with many long-dated options', 'Value them', 'More accurate than the treasury method']],
+      why: 'Options are a claim on the company held by employees. You can count that claim as extra shares or as a value to subtract, but not both: using both methods counts the options twice and understates value per share.',
+      links: [], vids: ['looseEnds', 'tsm'] },
+    otherclaims: { t: 'Other claims and non-operating items',
+      plain: 'Anything else that has a claim on the company before shareholders (pension deficits, preferred stock) or an asset that is not in the operating business.',
+      steps: ['Read the balance sheet line by line and the notes for pensions, preferred stock, legal settlements.', 'Add debt-like claims; subtract non-operating assets.', 'Record why each item is included.'],
+      ranges: [['Most companies', 'Small', ''], ['Old industrials and conglomerates', 'Can be material', 'Pensions, legal claims']],
+      why: 'Enterprise value and equity value differ by every claim that ranks ahead of common shareholders.',
+      links: ['edgar'], vids: ['evItems', 'bridge'] },
+    otherlt: { t: 'Other long-term items',
+      plain: '"{label}" collects smaller items the company does not show separately. In a model they are usually held flat or grown with revenue.',
+      steps: ['Open the balance sheet and find "{label}".', 'Check the notes for what is inside (deposits, deferred costs, long-term accruals).', 'Unless something large is inside, forecast it flat or as a small % of revenue.'],
+      ranges: [['Most companies', 'Small vs total assets', 'Hold flat']],
+      why: 'These lines keep the balance sheet complete. Large unexplained swings deserve a look in the notes.',
+      links: ['edgar'], vids: ['bs', 'bs10'] },
+    equityacc: { t: 'Shareholders\' equity accounts',
+      plain: '"{label}" is part of shareholders\' equity: what owners put in (common stock and paid-in capital), what the company kept (retained earnings), and other items.',
+      steps: ['Open the balance sheet and find "{label}" in the equity section.', 'Open the "Statement of Stockholders\' Equity" to see what changed it during the year.', 'Retained earnings: last year + net income − dividends (− some buybacks).', 'Paid-in capital grows with stock compensation and new shares.'],
+      ranges: [['Mature company with big buybacks', 'Equity can be small or negative', 'Buybacks reduce it'], ['Young company', 'Mostly paid-in capital', 'Losses reduce retained earnings']],
+      why: 'Equity links the income statement to the balance sheet. If it does not roll forward correctly, the balance sheet will not balance.',
+      links: ['edgar'], vids: ['link3', 'bs'] },
+    bookequity: { t: 'Book value of equity',
+      plain: 'Total shareholders\' equity on the balance sheet: assets minus liabilities. Used for price-to-book and return on equity.',
+      steps: ['Open the balance sheet and find "Total stockholders\' equity" (excluding non-controlling interests).', 'Use the newest balance sheet.'],
+      ranges: [['Banks and insurers', 'Price-to-book is a key multiple', 'Assets are mostly financial'], ['Technology and brands', 'Book value says little', 'Most value is intangible']],
+      why: 'Book value is accounting history. It matters most where assets are carried near market value.',
+      links: ['edgar'], vids: ['bs'] },
+    goodwill: { t: 'Goodwill and intangible assets',
+      plain: 'When a company buys another for more than the value of its identifiable assets, the extra is goodwill. Intangibles are things like customer lists, patents and brands bought in deals. Intangibles are amortised; goodwill is tested for impairment.',
+      steps: ['Open the balance sheet and find "Goodwill" and "Intangible assets, net".', 'Open the "Goodwill and Intangible Assets" note for amounts by segment and amortisation expected in each future year.', 'Forecast amortisation from that schedule; forecast goodwill flat unless you model new acquisitions or impairments.'],
+      ranges: [['Companies that grew by acquisition', 'Goodwill can be the largest asset', ''], ['Companies that grew on their own', 'Small or none', '']],
+      why: 'Impairments and amortisation are non-cash. They reduce profit but not cash flow, so they are added back in the cash flow statement.',
+      links: ['edgar'], vids: ['gw', 'bs'] },
+    bscheck: { t: 'Balance check',
+      plain: 'Assets must always equal liabilities plus equity. If the forecast balance sheet does not balance, something in the model is not linked.',
+      steps: ['Look at the year where the check first fails.', 'Check that ending cash on the cash flow statement equals cash on the balance sheet.', 'Check that net income flows into retained earnings, and D&A and CapEx into PP&E.', 'Check that every balance sheet change appears once in the cash flow statement.'],
+      ranges: [['A correct model', 'Difference of 0 every year', 'Small rounding only']],
+      why: 'A balanced balance sheet proves every dollar is accounted for. It is the best single check of a three-statement model.',
+      links: [], vids: ['link3', 'fsm'] },
+    cfo: { t: 'Cash from operations',
+      plain: 'Cash generated by the business itself: net income, plus non-cash costs (D&A, stock compensation), plus or minus changes in working capital.',
+      steps: ['Open the cash flow statement in the 10-K.', 'Read "Net cash provided by operating activities" (the subtotal of the first section).', 'Compare with net income: cash from operations well below net income for years is a warning sign.'],
+      ranges: [['Healthy mature company', 'CFO ≥ net income', 'D&A adds back'], ['Fast-growing company', 'CFO can lag net income', 'Working capital grows'], ['Cash conversion (FCF ÷ net income)', 'Above 80–100% is strong', '']],
+      why: 'Profits are an opinion; cash is a fact. The cash flow statement shows whether profit turns into cash.',
+      links: ['edgar'], vids: ['cfs', 'fcf'] },
+    fcf: { t: 'Free cash flow',
+      plain: 'Cash the business produces after paying for everything it needs to keep running and growing. Free cash flow to the firm (FCFF) = EBIT × (1 − tax) + D&A − CapEx − change in working capital. It is what a DCF discounts.',
+      steps: ['From the income statement: operating income (EBIT) and the tax rate.', 'From the cash flow statement: D&A, capital expenditures and changes in working capital.', 'FCFF = EBIT × (1 − tax rate) + D&A − CapEx − increase in NWC.', 'A quick version for comparison: cash from operations − CapEx (this one is after interest).'],
+      ranges: [['Software', 'FCF margin 20–35%', 'Little reinvestment'], ['Consumer staples', '8–15%', ''], ['Retail', '2–6%', ''], ['Young growth company', 'Negative for years', 'Heavy investment ahead of profit']],
+      why: 'A company is worth the cash it will give back to its investors over its life. Free cash flow measures exactly that, which is why a DCF uses it instead of earnings.',
+      links: [], vids: ['fcf', 'cflow', 'dcf1'] },
+    // ---------- scenarios and conventions ----------
+    prob: { t: 'Scenario probabilities',
+      plain: 'How likely you think each scenario (Bear, Base, Bull) is. The model uses them to weight the three values into one.',
+      steps: ['Write a short story for each scenario: what happens to growth, margins and risk.', 'Ask how often things like that happen in this industry and for this company.', 'A common starting point in class is Base 50%, Bear 25%, Bull 25%; change it when you have evidence for one side.', 'The three must add up to 100%.'],
+      ranges: [['Balanced view', 'Base 50–60%, Bear and Bull 20–25% each', 'Common starting point'], ['Uncertain company (new product, legal case)', 'Wider: Base 40%, Bear 30%, Bull 30%', 'More weight in the tails'], ['Very stable company', 'Base 60–70%', 'Outcomes cluster']],
+      why: 'Probabilities force you to say how confident you are. There is no standard split; the reason you write down matters more than the numbers.',
+      links: [], vids: ['scen', 'sens'] },
+    midyear: { t: 'Mid-year convention',
+      plain: 'Cash comes in through the year, not all on 31 December. The mid-year convention discounts each year\'s cash flow by half a year less, which is closer to reality.',
+      steps: ['Choose Y for most operating businesses (cash arrives steadily).', 'Choose N if cash really arrives at year end, or to match the original workbook.', 'See the effect on the Equity bridge page: it usually raises value by about half a year of WACC (4–5% at a 9% WACC).'],
+      ranges: [['Most operating businesses', 'Y (mid-year)', 'Steady cash through the year'], ['Seasonal business with year-end cash', 'N may fit', ''], ['Investment banking practice', 'Mid-year is common', '']],
+      why: 'Discounting a full year when cash arrived on average halfway through understates value. It is a modelling choice, not a filing figure, so record it.',
+      links: [], vids: ['midYear'] },
+    ttm: { t: 'Trailing twelve months (TTM)',
+      plain: 'The most recent twelve months of results, built from the latest annual report and the latest quarterly report. It is fresher than the last fiscal year.',
+      steps: ['Take the figure for the last full fiscal year from the 10-K.', 'Add the year-to-date figure from the latest 10-Q (for example nine months to September).', 'Subtract the same year-to-date period from a year earlier (shown next to it in the same 10-Q).', 'TTM = fiscal year + this year to date − last year same period. Balance sheet items are not added: just use the latest balance sheet.'],
+      ranges: [['Right after the 10-K', 'TTM = fiscal year', 'Nothing newer yet'], ['Late in the year', 'TTM can differ a lot from the fiscal year', 'Use it for a fast-changing company']],
+      why: 'Valuations should use the latest information. TTM keeps the start of your forecast current without waiting for the next annual report.',
+      links: ['edgar'], vids: ['ltm', 'edgar'] },
+    ntm: { t: 'Next twelve months (NTM, forward)',
+      plain: 'Analyst forecasts for the coming twelve months. Forward multiples (forward P/E, NTM EV/EBITDA) use them.',
+      steps: ['Open Yahoo Finance "Analysis" tab, or a data provider, for consensus estimates.', 'Use the same provider and the same date for every company.', 'Blend the current and next fiscal year if needed to get twelve months.'],
+      ranges: [['Stable companies', 'NTM close to TTM', ''], ['Fast-changing companies', 'NTM can differ a lot', 'Forward multiples look much lower']],
+      why: 'Markets price the future. Forward multiples are often more comparable for growing companies, but they depend on estimates that may be wrong.',
+      links: ['yahoo'], vids: ['fpe', 'comps'] },
+    // ---------- comps ----------
+    ev: { t: 'Enterprise value',
+      plain: 'The value of the whole business to all investors: market cap + debt + other claims (preferred, minority interest) − cash. It is what you would pay to buy the company and take on its debts.',
+      steps: ['Start with market cap (price × shares).', 'Add total debt and, if you treat them as debt, lease liabilities.', 'Add preferred stock and non-controlling interests.', 'Subtract cash and short-term investments (and non-operating assets).'],
+      ranges: [['Company with lots of cash and no debt', 'EV below market cap', ''], ['Company with heavy debt', 'EV well above market cap', '']],
+      why: 'EV multiples (EV/EBITDA, EV/revenue) compare companies regardless of how they are financed, because EBITDA and revenue belong to all investors.',
+      links: [], vids: ['evItems', 'bridge'] },
+    multiples: { t: 'Valuation multiples',
+      plain: 'A multiple compares a price with a measure of the business: EV/EBITDA, EV/revenue, P/E. Comps value a company by applying the multiples similar companies trade at.',
+      steps: ['Pick 5–10 similar companies (see Peer selection).', 'For each, calculate EV (or market cap) and the matching metric for the same period (TTM or NTM).', 'Divide: EV ÷ EBITDA, price ÷ EPS, and so on.', 'Take the median, apply it to your company\'s metric, and bridge to a value per share.'],
+      ranges: [['EV/EBITDA, mature industries', '6–10×', ''], ['EV/EBITDA, typical market', 'About 10–14×', ''], ['P/E, long-run market average', 'About 15–20×', 'Higher when rates are low'], ['EV/revenue, retail', '0.3–1.5×', 'Thin margins'], ['EV/revenue, software', '5–15×', 'High margins and growth'], ['Price/book, banks', 'About 0.8–2×', 'Assets carried near market value'], ['Price/free cash flow, mature company', 'About 12–25×', 'Inverse of the FCF yield']],
+      why: 'Match numerators and denominators: EV goes with metrics before interest (revenue, EBITDA, EBIT); market cap goes with metrics after interest (net income, EPS). Mixing them is the most common comps mistake.',
+      links: ['damEbitda', 'damPE', 'damPS'], vids: ['compsMult', 'comps', 'evEbitda'] },
+    stats: { t: 'Peer statistics',
+      plain: 'Summary numbers for the peer group: median, mean, 25th and 75th percentile. The median is the usual starting point because one odd company cannot pull it far.',
+      steps: ['Look at the full list of peer multiples, not just the median.', 'Check any flagged outliers: are they odd because of a one-off (near-zero earnings) or because they are different businesses?', 'Use the median by default; use the 25th or 75th percentile when your company is clearly weaker or stronger than peers.'],
+      ranges: [['Tight peer group', '25th–75th percentile within ±20% of the median', 'Peers are similar'], ['Wide peer group', 'Range of 2× or more', 'Peers may not be comparable']],
+      why: 'The median is a description of how peers are priced, not a "fair" value. Where your company sits in the range is a judgement you need to explain.',
+      links: [], vids: ['relVal', 'comps'] },
+    peers: { t: 'Choosing peers',
+      plain: 'The companies you compare with. They should sell similar things to similar customers, with similar growth, margins and risk.',
+      steps: ['Read Item 1 "Business" of the target\'s 10-K: the "Competition" paragraph names competitors.', 'Read the same section in competitors\' 10-Ks: who do they name?', 'Check size, growth and margins: very different numbers mean very different multiples.', 'Aim for 5–10 core peers and write one sentence on why each belongs.'],
+      ranges: [['Narrow industry (for example US railroads)', '4–6 peers', 'Few listed companies'], ['Broad industry (software)', '8–15 peers', 'Pick the closest sub-sector']],
+      why: 'A comps valuation is only as good as its peer group. Industry codes alone often group very different businesses.',
+      links: ['edgar'], vids: ['comps', 'relVal'] },
+    sotp: { t: 'Sum of the parts',
+      plain: 'Value each business segment separately with its own peers and multiple, then add them up. Useful for companies with very different businesses.',
+      steps: ['Open the segment note in the 10-K: revenue and operating income by segment.', 'Pick peers and a multiple for each segment.', 'Value each segment, add them, then subtract debt and add cash once for the whole company.'],
+      ranges: [['Focused company', 'Not needed', ''], ['Company with a retail arm and a cloud arm', 'Very useful', 'Segments trade at very different multiples']],
+      why: 'A single blended multiple can badly misvalue a company whose segments are priced very differently by the market.',
+      links: ['edgar'], vids: ['relVal'] },
+    normalize: { t: 'Normalising (adjusting) figures',
+      plain: 'Removing one-off items so every company\'s earnings reflect a normal year: restructuring costs, legal settlements, gains on asset sales.',
+      steps: ['Read the income statement and the MD&A for unusual items.', 'Check the company\'s non-GAAP reconciliation in the earnings release (a starting point, not gospel).', 'Adjust only genuinely one-off items, and apply the same rules to every company.', 'Record each adjustment and its source.'],
+      ranges: [['Most years', 'Small adjustments', ''], ['Year with a big charge or gain', 'Can change the multiple a lot', 'Show reported and adjusted']],
+      why: 'Multiples are meant to compare normal earning power. But "adjusted" numbers from companies often remove real recurring costs, so be sceptical.',
+      links: [], vids: ['comps'] },
+    premium: { t: 'Premium or discount to peers',
+      plain: 'An adjustment to the peer multiple when your company is clearly better or worse than its peers: faster growth, higher margins, lower risk.',
+      steps: ['Compare your company with the peer median on growth, margins, returns and debt.', 'If it is better on most, a premium may be justified; if worse, a discount.', 'Keep it moderate (often within ±10–25%) and write the reason.'],
+      ranges: [['Similar to peers', '0%', ''], ['Clearly stronger', '+10% to +25%', ''], ['Clearly weaker', '−10% to −25%', '']],
+      why: 'Without a reason, a premium is just a way to get the answer you wanted.',
+      links: [], vids: ['relVal'] },
+    bridge: { t: 'From enterprise value to value per share',
+      plain: 'Implied EV − debt − other claims + cash = equity value. Equity value ÷ shares = value per share.',
+      steps: ['Take the implied enterprise value.', 'Subtract debt, preferred stock, minority interest and other claims.', 'Add cash and non-operating assets.', 'Divide by shares (basic or diluted, the same basis used for peers).'],
+      ranges: [['Low-debt company', 'Equity value close to EV', ''], ['High-debt company', 'Equity much smaller than EV', 'Small changes in EV move the share value a lot']],
+      why: 'Shareholders get what is left after every senior claim. Using the same items for peers and the target keeps the comparison fair.',
+      links: [], vids: ['bridge', 'evItems'] },
+    upside: { t: 'Upside or downside',
+      plain: 'How far your value is above or below today\'s price: (value per share ÷ price) − 1.',
+      steps: ['Take your value per share.', 'Divide by the current price and subtract 1.', 'Compare with the sensitivity range: is the price inside your range?'],
+      ranges: [['Within ±10–15%', 'Roughly fairly priced', 'Inside normal model error'], ['Above +20–30%', 'Possibly cheap, or your assumptions are optimistic', 'Check the biggest drivers'], ['Below −20–30%', 'Possibly expensive, or assumptions are cautious', '']],
+      why: 'Every model has error. A small gap is not a signal; a large gap is a reason to check your assumptions before concluding the market is wrong.',
+      links: [], vids: ['sens', 'scen'] },
+    sens: { t: 'Sensitivity and ranges',
+      plain: 'Tables that show how the answer changes when key inputs change. They tell you which assumptions matter most.',
+      steps: ['Look at the grid of WACC against terminal growth (DCF) or multiple against metric (Comps).', 'Find the input that moves the value most for a small change.', 'Spend your research time on that input.'],
+      ranges: [['WACC ±1 point', 'Value often moves 10–20%', ''], ['Terminal growth ±0.5 point', 'Value often moves 5–10%', 'More when WACC − g is small']],
+      why: 'A single number looks precise but is not. A range shows honestly how uncertain the value is.',
+      links: [], vids: ['sens', 'scen'] },
+    dcfcomp: { t: 'DCF versus comps',
+      plain: 'The DCF values the company from its own cash flows; comps value it from how similar companies are priced. Comparing them is a powerful check.',
+      steps: ['Put the DCF value, the comps value and today\'s price side by side.', 'If the DCF is far above comps, check whether your growth and margins are higher than peers\' expectations.', 'If comps are far above, the whole sector may be priced richly.'],
+      ranges: [['Within about 15%', 'Consistent', ''], ['More than 30% apart', 'Explain the gap', 'Usually growth, margins or WACC']],
+      why: 'The two methods answer different questions: what is it worth on its own cash flows, and what would the market pay for similar businesses. A big gap tells you where to look.',
+      links: [], vids: ['relVal', 'four'] },
+    // ---------- three-statement ----------
+    revolver: { t: 'Revolver and minimum cash',
+      plain: 'A revolving credit facility is a bank line the company can draw when cash runs low. In a model it fills any shortfall below the minimum cash you set, and is repaid when cash is available.',
+      steps: ['Read the "Debt" note in the 10-K for the size of the credit facility and its interest rate.', 'Set a minimum cash balance (a few weeks of costs, or 2–5% of revenue).', 'The model draws on the revolver when cash would fall below the minimum and repays it with spare cash.', 'Interest on average balances creates a loop (circularity); the model handles it with an iterative or opening-balance method.'],
+      ranges: [['Large investment-grade company', 'Revolver usually undrawn', 'A safety line'], ['Leveraged company', 'Often drawn', 'Funds seasonal needs']],
+      why: 'The revolver makes the model balance automatically when the forecast runs out of cash, and shows when the company would need to borrow.',
+      links: ['edgar'], vids: ['revolver', 'debtSch'] },
+    buybacks: { t: 'Share buybacks and issuance',
+      plain: 'Companies buy back their own shares (reducing the count) or issue new ones (increasing it). Both change per-share figures.',
+      steps: ['Open the cash flow statement: "Repurchases of common stock" under financing activities.', 'Read the "Stockholders\' Equity" note for shares bought and the average price.', 'Forecast buybacks as a $ amount or a % of free cash flow; shares bought = amount ÷ expected share price.', 'Add shares issued to employees (from the stock compensation note).'],
+      ranges: [['Mature cash-rich companies', 'Net shares fall 1–4% a year', 'Big buyback programmes'], ['Tech companies with high SBC', 'Net change near 0 to +2%', 'Buybacks offset employee shares'], ['Young growth companies', '+3–10% a year', 'Issue shares to raise money']],
+      why: 'Buybacks return cash to shareholders. They raise EPS by reducing shares, but they do not make the whole company more valuable by themselves.',
+      links: ['edgar'], vids: ['link3', 'diluted'] },
+    dividends: { t: 'Dividends',
+      plain: 'Cash paid to shareholders. The payout ratio is dividends ÷ net income.',
+      steps: ['Open the cash flow statement: "Dividends paid" under financing activities.', 'Or read "Dividends declared per share" in the 10-K or on Yahoo Finance.', 'Payout ratio = dividends ÷ net income.', 'Check management\'s dividend policy in the 10-K ("Market for Registrant\'s Common Equity").'],
+      ranges: [['Utilities', 'Payout 60–80%', 'Stable earnings'], ['Consumer staples', '50–70%', ''], ['Technology', '0–30%', 'Reinvest or buy back instead'], ['REITs', '90%+ of taxable income', 'Required by tax rules']],
+      why: 'Dividends are part of an investor\'s return. A payout above 100% of earnings for long cannot last.',
+      links: ['damDiv'], vids: ['payout'] },
+    segments: { t: 'Segment revenue',
+      plain: 'Revenue split by business line or region, as the company reports it.',
+      steps: ['Open the "Segment Information" note in the 10-K.', 'Read revenue (and operating income) for each segment.', 'Forecast each segment\'s growth separately; total revenue is the sum.'],
+      ranges: [['Segments growing at different rates', 'Forecast separately', 'Mix changes total growth and margins']],
+      why: 'Total growth hides what is really happening. A fast-growing small segment can change the whole company over ten years.',
+      links: ['edgar'], vids: ['revFc', 'fsm'] },
+    fsmlink: { t: 'Linking the three statements to the DCF',
+      plain: 'The three-statement model forecasts the income statement, balance sheet and cash flow statement together. The DCF can take its revenue, margins, CapEx and working capital from it.',
+      steps: ['Build and check the three-statement model (balance check = 0).', 'Choose "Linked" as the DCF forecast source to use these numbers.', 'Compare the linked DCF with your original assumptions.'],
+      ranges: [['Quick valuation', 'Original DCF inputs', ''], ['Detailed analysis', 'Linked three-statement forecast', 'Every number ties out']],
+      why: 'A full three-statement model makes sure your cash flow forecast is consistent with a balance sheet that balances.',
+      links: [], vids: ['fsm', 'link3'] },
+    fsmset: { t: 'Model setting',
+      plain: '"{label}" is a setting that controls how the three-statement model calculates. It does not come from a filing.',
+      steps: ['Read the guide below to see what each choice does.', 'Keep the default unless you have a reason to change it.', 'Write your reason in the research notes.'],
+      ranges: [['Most first models', 'The default setting', '']],
+      why: 'Settings change the mechanics, not the economics. Make sure the choice matches how the company reports.',
+      links: [], vids: ['fsm', 'link3'] },
+    // ---------- ratios ----------
+    liquidity: { t: 'Liquidity ratios',
+      plain: 'Can the company pay its bills over the next year? Current ratio = current assets ÷ current liabilities. Quick ratio leaves out inventory. Cash ratio uses only cash.',
+      steps: ['From the balance sheet take total current assets and total current liabilities.', 'Current ratio = current assets ÷ current liabilities.', 'Quick ratio = (cash + short-term investments + receivables) ÷ current liabilities.', 'Compare with the company\'s history and its peers.'],
+      ranges: [['Typical manufacturer', 'Current ratio 1.2–2.0', ''], ['Retailers and restaurants', 'Below 1.0 can be normal', 'Fast cash sales, suppliers paid later'], ['Below 1.0 with weak cash flow', 'A warning sign', '']],
+      why: 'Liquidity ratios warn of short-term stress. A low ratio is fine for a business that collects cash quickly.',
+      links: ['damWc'], vids: ['ratios', 'bs'] },
+    leverage: { t: 'Leverage and coverage ratios',
+      plain: 'How much debt the company carries and how easily it can pay interest. Debt ÷ EBITDA, net debt ÷ EBITDA, debt ÷ equity and interest coverage (EBIT ÷ interest).',
+      steps: ['From the balance sheet: total debt and cash.', 'From the income statement: EBIT, and EBITDA (EBIT + D&A).', 'Net debt ÷ EBITDA = (debt − cash) ÷ EBITDA.', 'Interest coverage = EBIT ÷ interest expense.'],
+      ranges: [['Net debt ÷ EBITDA', 'Under 1× low; 1–3× normal; above 4× high', ''], ['Interest coverage', 'Above 8× strong; 3–8× fine; under 3× risky', 'Damodaran maps coverage to ratings']],
+      why: 'Debt increases risk for shareholders. These ratios also tell you what credit rating, and so what cost of debt, is realistic.',
+      links: ['damDebt', 'damRating'], vids: ['ratios', 'kd'] },
+    returns: { t: 'Return ratios (ROE, ROA)',
+      plain: 'Return on equity = net income ÷ shareholders\' equity. Return on assets = net income ÷ total assets.',
+      steps: ['Net income from the income statement.', 'Equity and total assets from the balance sheet (average of start and end of year).', 'Divide.'],
+      ranges: [['ROE, average company', '10–15%', ''], ['ROE, strong brands', '20%+', 'Can be inflated by buybacks and debt'], ['ROA, banks', '1–1.5%', 'Huge balance sheets']],
+      why: 'ROE can rise just by adding debt, so look at ROIC too, which is not affected by financing.',
+      links: ['damRoc'], vids: ['ratios', 'roic'] },
+    ratios: { t: 'Financial ratios',
+      plain: 'Ratios turn the statements into comparable percentages and multiples.',
+      steps: ['Pick the ratio you need.', 'Take both parts from the same period.', 'Compare with history and peers.'],
+      ranges: [['Any ratio', 'Compare with peers and history', '']],
+      why: 'Ratios are a check on the forecast: if a forecast ratio drifts far from history, ask why.',
+      links: ['damHome'], vids: ['ratios'] },
+    // ---------- stock price simulator ----------
+    epsgrowth: { t: 'Earnings (EPS) growth',
+      plain: 'How fast earnings per share grow each year. It comes from revenue growth, changing margins and a changing share count.',
+      steps: ['Calculate past growth in diluted EPS from five years of 10-Ks.', 'Read analyst estimates on Yahoo Finance ("Analysis" tab, "Growth Estimates").', 'Break it down: EPS growth ≈ revenue growth + margin change + share count change.'],
+      ranges: [['Mature company', '3–8% a year', ''], ['Large growth company', '10–20%', ''], ['Long-run market average', 'Roughly 6–8% nominal', 'Close to nominal GDP plus buybacks']],
+      why: 'Very high EPS growth for many years needs very high revenue growth or margins that keep rising, which is rare.',
+      links: ['damGrowth', 'yahoo'], vids: ['fpe', 'pe'] },
+    futuremult: { t: 'Future valuation multiple',
+      plain: 'The multiple (P/E, EV/EBITDA, price/sales) you expect the stock to trade at in the future. Future price ≈ future earnings × future multiple.',
+      steps: ['Look at the company\'s own multiple history (five or ten years).', 'Look at peers today (Trading Comps tab) and Damodaran\'s industry tables (link below).', 'For the end year, use a multiple that fits a company growing as you expect at that point: slower growth usually means a lower multiple.'],
+      ranges: [['P/E, mature company', '12–18×', ''], ['P/E, market long-run average', 'About 15–20×', ''], ['P/E, fast growth', '25–40×', 'Falls as growth slows'], ['EV/EBITDA, typical', '8–14×', '']],
+      why: 'Assuming today\'s high multiple lasts while growth slows is the most common reason price projections are too optimistic.',
+      links: ['damPE', 'damEbitda', 'damPS'], vids: ['fpe', 'pe', 'compsMult'] },
+    simmethod: { t: 'Projection method',
+      plain: 'How the simulator turns your assumptions into a future price: earnings × P/E, EBITDA × EV/EBITDA, revenue × a sales multiple, and so on.',
+      steps: ['Use P/E for profitable, steady companies.', 'Use EV/EBITDA when debt levels differ a lot between companies.', 'Use a revenue multiple only for companies not yet profitable.'],
+      ranges: [['Profitable mature company', 'P/E or EV/EBITDA', ''], ['Unprofitable growth company', 'EV/revenue or price/sales', '']],
+      why: 'The best metric is the one that best reflects what the company earns. Revenue multiples ignore profitability.',
+      links: [], vids: ['fpe', 'compsMult'] },
+    years: { t: 'Projection period',
+      plain: 'How many years ahead you project the share price.',
+      steps: ['Pick a period that matches your investment horizon (3–5 years is common).', 'Remember that forecasts become less reliable the further out they go.'],
+      ranges: [['Typical analyst price target', '1 year', ''], ['Long-term investor', '3–5 years', ''], ['Beyond 5 years', 'Very uncertain', 'Use a DCF instead']],
+      why: 'Short periods are dominated by multiple changes; longer ones by earnings growth.',
+      links: [], vids: ['fpe'] },
+    reqreturn: { t: 'Required return',
+      plain: 'The yearly return you need to make the investment worthwhile. Compare it with the annualised return the projection implies.',
+      steps: ['Start from the cost of equity: risk-free rate + beta × equity risk premium.', 'Or use a personal hurdle (many investors use 8–10% for stocks).', 'Annualised return = (future price + dividends ÷ today\'s price)^(1/years) − 1.'],
+      ranges: [['Stable large company', '7–9%', ''], ['Average stock', '8–10%', 'Long-run market return'], ['Risky small company', '12%+', '']],
+      why: 'A projected price is only useful when compared with the return you need for the risk you take.',
+      links: ['damErp'], vids: ['erp', 'scen'] },
+    reverse: { t: 'Reverse projection',
+      plain: 'Works backwards: what growth or multiple would justify today\'s price? Then you judge whether that is believable.',
+      steps: ['Enter today\'s price and your required return.', 'Read the implied growth or implied multiple.', 'Compare with history and with peers.'],
+      ranges: [['Implied growth below history', 'Market may be cautious', ''], ['Implied growth far above history', 'Market expects a lot', '']],
+      why: 'It is often easier to judge whether an expectation is reasonable than to forecast from scratch.',
+      links: [], vids: ['reverse'] },
+    split: { t: 'Stock splits',
+      plain: 'A split changes the number of shares (for example 2-for-1) without changing the company\'s value. Past per-share figures must be adjusted.',
+      steps: ['Read the 10-K or 8-K for any split and its ratio.', 'Divide past per-share numbers (EPS, dividends, price) by the ratio; multiply past share counts by it.'],
+      ranges: [['Most years', 'No split', ''], ['After a big price rise', 'Splits of 2:1 to 20:1 happen', '']],
+      why: 'Mixing pre-split and post-split numbers gives nonsense growth rates.',
+      links: ['edgar'], vids: ['diluted'] },
+  };
+
+  // Which topic each panel uses
+  const by = (o, topic) => Object.fromEntries(o.split(' ').map(k => [k, topic]));
+  const MAP = {
+    dcf: Object.assign({},
+      by('company.name company.ticker company.currency company.analyst', 'company'), { 'company.industry': 'industry', 'company.valDate': 'valdate' },
+      by('price hi52 lo52', 'price'), { basic: 'shares' },
+      by('options treasury dil.method dil.est dil.options dil.rsu dil.warrants dil.converts dil.proxy', 'dilution'),
+      { rev0: 'baserev' }, by('g1 g2 g3', 'growth'), by('gm1 gm5 gm10', 'gm'), by('em1 em5 em10', 'ebitdam'),
+      { da: 'da', tax: 'tax', nol: 'nol' }, by('capex1 capex2 capex3', 'capex'), { nwc: 'nwc', acq: 'acq', s2c: 's2c' },
+      { rf: 'rf', erp: 'erp', beta: 'beta', scp: 'premia', csrp: 'premia', kd: 'kd', we: 'weights' },
+      { tg: 'tg', tem: 'tem', troic: 'roic', tcapex: 'tcapex', tvMethod: 'tvmethod', exitMult: 'exitmult' },
+      { cash: 'cash', sti: 'cash', debt: 'debt', pension: 'pension', leases: 'leases', minority: 'nci', stakes: 'stakes', dtl: 'dtl', optVal: 'optval' },
+      { prob: 'prob', midYear: 'midyear' },
+      { 'hist.rev': 'baserev', 'hist.gp': 'gm', 'hist.opex': 'opex', 'hist.da': 'da', 'hist.interest': 'interest', 'hist.sbc': 'sbc', 'hist.dnwc': 'nwc', 'hist.capex': 'capex' }),
+    comps: { price: 'price', shares: 'shares', dilutive: 'dilution', mcap: 'mcap', fx: 'fx', opLease: 'leases', preferred: 'preferred', nci: 'nci', otherClaims: 'otherclaims', cash: 'cash', sti: 'cash', otherNonop: 'stakes', ev: 'ev',
+      rev: 'baserev', gp: 'gm', ebitda: 'ebitdam', ebit: 'ebit', ni: 'ni', eps: 'eps', capex: 'capex', fcf: 'fcf', equity: 'bookequity', ttm: 'ttm', ntm: 'ntm', growth: 'growth', margins: 'ebitdam',
+      nm: 'multiples', stats: 'stats', outlier: 'stats', peerSel: 'peers', relevance: 'peers', sotp: 'sotp', normalize: 'normalize', benchmark: 'stats', premium: 'premium', impliedEv: 'multiples',
+      bridge: 'bridge', perShare: 'bridge', upside: 'upside', range: 'sens', sens: 'sens', dcfComp: 'dcfcomp', leasePolicy: 'leases', shareBasis: 'dilution',
+      stBorrow: 'debt', ltdCurrent: 'debt', ltdNoncurrent: 'debt', finLease: 'leases', m_ev_rev: 'multiples', m_ev_ebitda: 'multiples', m_ev_ebit: 'multiples', m_pe: 'multiples', m_pb: 'multiples', m_p_fcf: 'multiples' },
+    sim: { price: 'price', shares: 'shares', dilutive: 'dilution', rev: 'baserev', ni: 'ni', eps: 'eps', ebitda: 'ebitdam', ebit: 'ebit', fcf: 'fcf', cash: 'cash', debt: 'debt', claims: 'nci', dps: 'dividends', base: 'ttm', split: 'split',
+      revGrowth: 'growth', netMargin: 'netmargin', ebitdaMargin: 'ebitdam', ebitMargin: 'ebit', fcfMargin: 'fcf', epsGrowth: 'epsgrowth', dilution: 'buybacks', cashChange: 'cash', debtChange: 'debt', payout: 'dividends', dpsGrowth: 'dividends',
+      pe: 'futuremult', evEbitda: 'futuremult', evEbit: 'futuremult', evRev: 'futuremult', ps: 'futuremult', pfcf: 'futuremult', method: 'simmethod', years: 'years', waBasis: 'shares', weights: 'prob', reqReturn: 'reqreturn', returns: 'reqreturn',
+      reverse: 'reverse', perYear: 'growth', leases: 'leases' },
+    fsm: Object.assign({
+      rev: 'baserev', cogs: 'gm', gp: 'gm', da: 'da', ebitda: 'ebitdam', ebit: 'ebit', nonop: 'nonop', pbt: 'tax', tax: 'tax', ni: 'ni', niCommon: 'ni', waBasic: 'shares', waDil: 'dilution', eps: 'eps', sbc: 'sbc',
+      cash: 'cash', sti: 'cash', ppe: 'ppe', rou: 'leases', gw: 'goodwill', intang: 'goodwill', dta: 'dtl', dtl: 'dtl', apic: 'equityacc', re: 'equityacc', treas: 'buybacks', aoci: 'equityacc', nci: 'nci', bscheck: 'bscheck',
+      deftax: 'dtl', dnwc: 'nwc', nwc: 'nwc', cfo: 'cfo', capex: 'capex', maint: 'capex', gcapex: 'capex', acq: 'acq', buyback: 'buybacks', div: 'dividends', fcff: 'fcf',
+      base: 'ttm', daPres: 'fsmset', daAlloc: 'fsmset', depMethod: 'da', interestMethod: 'revolver', revolver: 'revolver', nol: 'nol', sharesOpen: 'shares', price0: 'buybacks', treasMethod: 'buybacks', segments: 'segments', dcfLink: 'fsmlink',
+      a_g: 'growth', a_gm: 'gm', a_sbc: 'sbc', a_tax: 'tax', a_dso: 'days', a_dio: 'days', a_dpo: 'days', a_maint: 'capex', a_gcapex: 'capex', a_dep: 'da', a_acq: 'acq', a_amort: 'goodwill',
+      a_opl: 'leases', a_sti: 'cash', a_yield: 'interest', a_minCash: 'revolver', a_nonop: 'nonop', a_eqinc: 'stakes', a_aociChg: 'equityacc', a_defPct: 'dtl', a_div: 'dividends', a_divMode: 'dividends',
+      a_buyback: 'buybacks', a_issue: 'buybacks', a_awards: 'sbc', a_dilutive: 'dilution', a_pxg: 'buybacks', a_nciPct: 'nci', a_nciDist: 'nci', a_prefDiv: 'preferred', a_otherFin: 'otherlt', a_disposals: 'ppe', impair: 'goodwill', a_impair: 'goodwill',
+      r_gm: 'gm', r_ebitdaM: 'ebitdam', r_ebitM: 'ebit', r_npm: 'netmargin', r_roic: 'roic', r_roe: 'returns', r_roa: 'returns', r_cur: 'liquidity', r_quick: 'liquidity', r_cashR: 'liquidity',
+      r_de: 'leverage', r_dEbitda: 'leverage', r_ndEbitda: 'leverage', r_cov: 'leverage', r_arT: 'days', r_invT: 'days', r_apT: 'days', r_dso: 'days', r_dio: 'days', r_dpo: 'days', r_ccc: 'days', r_cfoM: 'cfo', r_conv: 'cfo', r_capexR: 'capex', r_fcfM: 'fcf' },
+      by('rnd sga oth a_rnd a_sga a_oth', 'opex'), by('intInc intExp', 'interest'), by('ar inv oca ap accr defrev ocl a_accr a_defrev a_oca a_ocl', 'wcline'),
+      by('olta oltl a_oltaChg a_oltlChg', 'otherlt'), by('std cltd ltd', 'debt'), by('opl finl a_flAdd a_flRepay a_flRate', 'leases')),
+  };
+  const topicFor = (tab, key) => { const m = MAP[tab] || {}; if (m[key]) return m[key]; if (tab === 'dcf' && String(key).startsWith('ttm.')) return 'ttm'; if (tab === 'fsm' && String(key).startsWith('r_')) return 'ratios'; return null; };
+  const videosFor = (tab, key) => { const t = T[topicFor(tab, key)]; return t ? t.vids.filter(v => V[v]) : []; };
+
+  // HTML for the top of a help panel. esc escapes text; label is the panel's own name (used by {label} steps).
+  function render(tab, key, esc, label) {
+    const id = topicFor(tab, key), t = T[id]; if (!t) return '';
+    const sub = s => esc(String(s).replace(/\{label\}/g, label || t.t));
+    const vids = t.vids.filter(v => V[v]);
+    const links = (t.links || []).map(k => L[k]).filter(Boolean);
+    return `<section class="lrn" aria-label="First-time guide">
+      <div class="lrn-head"><span class="lrn-badge">First time?</span><b>Beginner's guide${label && label !== t.t ? ': ' + esc(t.t) : ''}</b></div>
+      <h4>In plain English</h4><p>${sub(t.plain)}</p>
+      <h4>How to find it, step by step</h4><ol class="lrn-steps">${t.steps.map(s => `<li>${sub(s)}</li>`).join('')}</ol>
+      ${links.length ? `<p class="lrn-links">${links.map(([n, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(n)}</a>`).join(' · ')}</p>` : ''}
+      <h4>Typical values for different kinds of companies</h4>
+      <div class="tbl-wrap"><table class="lrn-tbl"><thead><tr><th>Kind of company</th><th>Typical</th><th>Why</th></tr></thead><tbody>${t.ranges.map(r => `<tr><td>${sub(r[0])}</td><td>${sub(r[1])}</td><td>${sub(r[2] || '')}</td></tr>`).join('')}</tbody></table></div>
+      <p class="footnote">${esc(NOTE_RANGES)}</p>
+      <h4>Why it is set this way</h4><p>${sub(t.why)}</p>
+      <h4>Watch</h4><ul class="lrn-vids">${vids.map(v => `<li><a href="${url(v)}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>${esc(V[v][0])}</b><br><span class="footnote">${esc(V[v][1])} · YouTube</span></span></a></li>`).join('')}</ul>
+      <p class="footnote">New to DCF models? Start with <a href="${url('dcf1')}" target="_blank" rel="noopener">Wall Street Prep's DCF lesson, part 1</a> and <a href="${url('four')}" target="_blank" rel="noopener">Damodaran's "Valuation in Four Lessons"</a>. Videos checked ${VERIFIED}.</p>
+    </section>`;
+  }
+  return { V, T, L, MAP, url, topicFor, videosFor, render, VERIFIED };
+})();
+if (typeof module !== 'undefined') module.exports = Learn;
+
 // ===== CHANGE IN NWC: TEACHING CONTENT (static text, no model state) =====
 // The written part of the Historical financials → Change in NWC guide. Every reported figure here was read from
 // the named SEC filing (Amazon's 2025 Form 10-K, accession 0001018724-26-000004, through its XBRL facts).
@@ -7370,7 +8121,7 @@ const CompsApp = (() => {
         else body = `<p>${esc(body)}</p>`;
         return `<details ${i < 2 || ui.open['h' + i] ? 'open' : ''} data-k="h${i}"><summary>${i + 1}. ${title}</summary>${body}</details>`;
       }).join('');
-      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2><div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
+      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2>${typeof Learn !== 'undefined' ? Learn.render('comps', drawer.key, esc, g.t) : ''}<div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
     } else {
       const c = byId(drawer.cid); const r = c && c.v[drawer.key];
       if (!r) { drawer = null; root.innerHTML = ''; return; }
@@ -10480,7 +11231,7 @@ const FsmApp = (() => {
     let h = '';
     if (drawer.type === 'help') {
       const g = H.G[drawer.key]; if (!g) { drawer = null; root.innerHTML = ''; return; }
-      h = `<h2 id="fs-dr-title">${esc(g.t)}</h2>` + H.render(drawer.key, esc, ui.open) + `<details open><summary>My research notes</summary><textarea data-fnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details>` + companyLinks(g.q);
+      h = `<h2 id="fs-dr-title">${esc(g.t)}</h2>` + (typeof Learn !== 'undefined' ? Learn.render('fsm', drawer.key, esc, g.t) : '') + H.render(drawer.key, esc, ui.open) + `<details open><summary>My research notes</summary><textarea data-fnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details>` + companyLinks(g.q);
     } else if (drawer.type === 'cell') {
       const { k, pid, label } = drawer;
       const c = histCellSrc(k, pid); const s = c && c.src || {};
@@ -12126,7 +12877,7 @@ const SimApp = (() => {
         const open = k === 'research' ? !!ui.open['sh' + i] : (i < 4 || ui.open['sh' + i]);
         return `<details ${open ? 'open' : ''} data-k="sh${i}"><summary>${i + 1}. ${title}${k === 'research' ? ' (optional)' : ''}</summary>${body}</details>`;
       }).join('');
-      h = `<h2 id="sim-dr-title">${esc(g.t)}</h2><div class="cx-guide">${sec}<details ${cur.notes['g-' + drawer.key] ? 'open' : ''}><summary>My research notes</summary><textarea data-snote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this simulation.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
+      h = `<h2 id="sim-dr-title">${esc(g.t)}</h2>${typeof Learn !== 'undefined' ? Learn.render('sim', drawer.key, esc, g.t) : ''}<div class="cx-guide">${sec}<details ${cur.notes['g-' + drawer.key] ? 'open' : ''}><summary>My research notes</summary><textarea data-snote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this simulation.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
     } else {
       const r = cur.company.v[drawer.key]; if (!r) { drawer = null; root.innerHTML = ''; return; }
       const s = r.src || {};
@@ -12362,7 +13113,6 @@ const SimApp = (() => {
   ];
   const UNIT_TXT = { pct: '%', usd: 'USD per share', usd_mm: '$ millions', shares: 'millions of shares', x: '×', text: 'text', date: 'date', choice: 'choice' };
   const KIND_TXT = { reported: 'Reported figure', forecast: 'Forecast assumption', market: 'Market data', company: 'Company info' };
-  const VIDEO = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
   const LINKS = {
     edgar: ['SEC EDGAR filings search', 'https://www.sec.gov/edgar/search/'],
     yahoo: ['Yahoo Finance quotes', 'https://finance.yahoo.com/'],
@@ -13141,7 +13891,7 @@ const SimApp = (() => {
     const g = DCFHelp.G[f.key] || {};
     const links = (DCFHelp.SRC_FORECAST[f.key] || []).map(([l, u]) => `<li><a href="${u}" target="_blank" rel="noopener">${esc(l)}</a></li>`).join('');
     const sub = (id, t, body) => `<details class="asub" data-aid="${f.key}:${id}" ${aidOpen[f.key + ':' + id] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, history and notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, history and notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}
       ${sub('calc', 'How to calculate', `${g.estimate ? `<ol>${g.estimate.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${exampleCalcHtml(f.key)}`)}
       ${sub('hist', 'Historical evidence', anchorHtml(f.key, true))}
       ${sub('notes', 'My research notes' + (hasNotes(f.key) ? ' ✓' : ''), notesHtml(f.key))}
@@ -13255,10 +14005,12 @@ const SimApp = (() => {
       ${sec('src', 'Sources', `<ul>${w.sources.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
       ${sec('notes', 'My research notes' + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, WNOTE_FIELDS))}`;
   }
+  // beginner's guide (js/learn.js) folded inside the inline guides on the input pages
+  const learnAid = key => { const h = Learn.render('dcf', key, esc, (FBY[key] || {}).label); return h ? `<details class="asub" data-aid="lrn-${key}" ${aidOpen['lrn-' + key] ? 'open' : ''}><summary>Beginner's guide: plain English, where to find it, typical values, videos</summary><div>${h}</div></details>` : ''; };
   function waccAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.W[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${waccSections(f.key, true)}
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}${waccSections(f.key, true)}
       ${f.key === 'scp' || f.key === 'csrp' ? `<div class="btns"><button class="btn tiny" data-zero-fill="${f.key}">Set empty scenarios to 0% (no premium)</button></div>` : ''}</details></div>`;
   }
   // tool state
@@ -13439,7 +14191,7 @@ const SimApp = (() => {
   function tvAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.T[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${tvSections(f.key, true)}</details></div>`;
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}${tvSections(f.key, true)}</details></div>`;
   }
   function tvState() {
     cur.tvTools = cur.tvTools || {}; const T = cur.tvTools;
@@ -13603,7 +14355,7 @@ const SimApp = (() => {
   function bAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.B[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, worksheet link and my notes ${bStatusPill(f.key)}</summary>${bSections(f.key, true)}</details></div>`;
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, worksheet link and my notes ${bStatusPill(f.key)}</summary>${learnAid(f.key)}${bSections(f.key, true)}</details></div>`;
   }
   function bt() { cur.bridgeTools = cur.bridgeTools || {}; const T = cur.bridgeTools; T.debt = T.debt || { rows: DCFAnalysis.DEBT_CATS.map(c => ({ cat: c })) }; T.pen = T.pen || {}; T.nci = T.nci || {}; T.inv = T.inv || [{}, {}, {}, {}]; T.dtl = T.dtl || { sched: [{}, {}, {}, {}, {}] }; T.opt = T.opt || { tr: [{}, {}, {}] }; T.drv = T.drv || { d1: {}, d2: {}, map: [['', ''], ['', '']] }; return T; }
   const bIn = (path, unit, label, ph = 'Enter') => {
@@ -14821,7 +15573,7 @@ const SimApp = (() => {
     const root = $('#drawer-root');
     root.dataset.owner = 'dcf';
     if (!drawerKey) { root.innerHTML = ''; return; }
-    if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
+    if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}${Learn.render('dcf', 'ttm.', esc)}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
     const isHist = drawerKey.startsWith('hist.');
     const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : (FBY[drawerKey] || DIL_HELP[drawerKey] || (drawerKey === 'dil.proxy' ? { key: 'dil.proxy', label: 'Reported net dilutive effect', group: 'market', unit: 'shares', kind: 'reported', required: false, what: 'The net number of shares that stock awards added to the diluted share count in the latest EPS calculation. It is already net of the treasury stock method.', enter: 'Millions of shares from the EPS note of the newest 10-Q, with the period it covers.' } : null));
     if (!f) { drawerKey = null; root.innerHTML = ''; return; }
@@ -14839,6 +15591,7 @@ const SimApp = (() => {
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
+      ${Learn.render('dcf', drawerKey, esc, f.label)}
       ${drawerKey === 'hist.dnwc' ? nwcGuideHtml() : DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.B[drawerKey] ? `<div class="wsecs">${bSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
@@ -14852,7 +15605,7 @@ const SimApp = (() => {
       <div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}${hh.verify ? `<p class="footnote"><b>Check:</b> ${esc(hh.verify)}</p>` : ''}</div>`}
       ${f.cell || isHist ? `<p class="footnote">Workbook cell: <code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></p>` : ''}
       ${f.guide ? guideHtml(f.guide) : ''}${String(drawerKey).startsWith('dil') || drawerKey === 'basic' ? '<a class="btn" href="#guide" data-close>Open the share dilution guide</a>' : ''}
-      <a class="video" href="${esc(custom || VIDEO(f.video || f.label + ' DCF'))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>Watch how to fill this in</b><br><span class="footnote">${custom ? 'Video chosen for this model' : 'YouTube videos on “' + esc(f.video || f.label) + '”'}</span></span></a>
+      ${(() => { const v = Learn.videosFor('dcf', drawerKey)[0]; if (!custom && !v) return ''; return `<a class="video" href="${esc(custom || Learn.url(v))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>${custom ? 'Watch how to fill this in' : esc(Learn.V[v][0])}</b><br><span class="footnote">${custom ? 'Video chosen for this model' : esc(Learn.V[v][1]) + ' · YouTube · more videos in the beginner\'s guide above'}</span></span></a>`; })()}
       ${links ? `<div><h3>Useful links</h3><ul style="margin:6px 0 0;padding-left:18px">${links}</ul></div>` : ''}
       <details><summary class="footnote">Section guide: why, think, watch out</summary><div class="guide-box" style="margin-top:8px;grid-template-columns:1fr"><div><b>Why</b>${esc(gs.why)}</div><div><b>Think</b>${esc(gs.think)}</div><div><b>Watch out</b>${esc(gs.watch)}</div></div></details>
       ${src.auto ? `<div class="notice ${src.review ? '' : 'info'}"><b>Imported automatically</b> from ${esc(src.provider || src.name)}${src.period ? ', ' + esc(src.period) : ''}, retrieved ${new Date(src.retrieved).toLocaleString()}.${(() => { const imp = cur.imported && cur.imported[drawerKey]; const v = isHist ? cur.hist[drawerKey.slice(5)] : (drawerKey.startsWith('company.') ? cur.inputs.company[drawerKey.split('.')[1]] : cur.inputs[drawerKey]); const pv = DCFData.provenance(cur, drawerKey, v); return pv === 'overridden' ? ` <b>You have changed it</b> from the imported ${esc(Array.isArray(imp.v) ? imp.v.map(x => isNum(x) ? Math.round(x) : '—').join(', ') : imp.v)}.` : ''; })()}${src.notes ? `<div class="footnote">${esc(src.notes)}</div>` : ''}${src.url ? ` <a href="${esc(src.url)}" target="_blank" rel="noopener">Open the filings to check it</a>` : ''}</div>` : ''}

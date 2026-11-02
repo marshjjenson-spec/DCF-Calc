@@ -79,6 +79,16 @@ Trading Comps or Three-Statement models.
 - Files: `js/sim-engine.js` (formulas), `js/sim-model.js` (storage, imports, proposals), `js/sim-help.js` (guides),
   `js/sim-app.js` (interface). Tests: `tests/sim.test.js` re-derives every formula independently.
 
+## Beginner's guides in every help panel
+
+Every help panel in all four models (Discounted Cash Flow, Trading Comps, Three-Statement Model, Stock Price Simulator)
+opens with a first-time guide from `js/learn.js`: the idea in plain English, step-by-step instructions for finding
+the number in the filings or free data sources, typical values for different kinds of companies, why the usual choice
+is made (for example why terminal growth stays at or below long-run nominal GDP and the risk-free rate), and real
+YouTube lessons (Damodaran, Wall Street Prep, Breaking Into Wall Street, CFI and others). Each video's title and
+channel were checked against YouTube's own record; there are no search links standing in for videos.
+`tests/learn.test.js` checks that every panel has a complete guide and at least one video.
+
 ## Structure
 
 | Path | What it is |
@@ -88,6 +98,7 @@ Trading Comps or Three-Statement models.
 | `js/data.js` | Data providers (FMP, Alpha Vantage, SEC company facts): fetch, map to model figures with sources, apply with provenance |
 | `js/charts.js` | SVG charts: football field, free cash flow, completion ring |
 | `js/fields.js` | Every input field: label, unit, scenario columns, workbook cell, help text from the workbook checklist |
+| `js/learn.js` | Beginner's guides and checked video links shown at the top of every help panel |
 | `js/excel.js` | Excel export (writes inputs into the workbook template) and import |
 | `js/app.js` | User interface only |
 | `templates/` | The original workbook and the corrected workbook used for export |

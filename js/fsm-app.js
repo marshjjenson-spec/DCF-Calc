@@ -720,7 +720,7 @@ const FsmApp = (() => {
     let h = '';
     if (drawer.type === 'help') {
       const g = H.G[drawer.key]; if (!g) { drawer = null; root.innerHTML = ''; return; }
-      h = `<h2 id="fs-dr-title">${esc(g.t)}</h2>` + H.render(drawer.key, esc, ui.open) + `<details open><summary>My research notes</summary><textarea data-fnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details>` + companyLinks(g.q);
+      h = `<h2 id="fs-dr-title">${esc(g.t)}</h2>` + (typeof Learn !== 'undefined' ? Learn.render('fsm', drawer.key, esc, g.t) : '') + H.render(drawer.key, esc, ui.open) + `<details open><summary>My research notes</summary><textarea data-fnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details>` + companyLinks(g.q);
     } else if (drawer.type === 'cell') {
       const { k, pid, label } = drawer;
       const c = histCellSrc(k, pid); const s = c && c.src || {};

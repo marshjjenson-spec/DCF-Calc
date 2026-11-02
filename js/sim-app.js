@@ -522,7 +522,7 @@ const SimApp = (() => {
         const open = k === 'research' ? !!ui.open['sh' + i] : (i < 4 || ui.open['sh' + i]);
         return `<details ${open ? 'open' : ''} data-k="sh${i}"><summary>${i + 1}. ${title}${k === 'research' ? ' (optional)' : ''}</summary>${body}</details>`;
       }).join('');
-      h = `<h2 id="sim-dr-title">${esc(g.t)}</h2><div class="cx-guide">${sec}<details ${cur.notes['g-' + drawer.key] ? 'open' : ''}><summary>My research notes</summary><textarea data-snote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this simulation.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
+      h = `<h2 id="sim-dr-title">${esc(g.t)}</h2>${typeof Learn !== 'undefined' ? Learn.render('sim', drawer.key, esc, g.t) : ''}<div class="cx-guide">${sec}<details ${cur.notes['g-' + drawer.key] ? 'open' : ''}><summary>My research notes</summary><textarea data-snote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this simulation.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
     } else {
       const r = cur.company.v[drawer.key]; if (!r) { drawer = null; root.innerHTML = ''; return; }
       const s = r.src || {};

@@ -32,7 +32,6 @@
   ];
   const UNIT_TXT = { pct: '%', usd: 'USD per share', usd_mm: '$ millions', shares: 'millions of shares', x: '×', text: 'text', date: 'date', choice: 'choice' };
   const KIND_TXT = { reported: 'Reported figure', forecast: 'Forecast assumption', market: 'Market data', company: 'Company info' };
-  const VIDEO = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
   const LINKS = {
     edgar: ['SEC EDGAR filings search', 'https://www.sec.gov/edgar/search/'],
     yahoo: ['Yahoo Finance quotes', 'https://finance.yahoo.com/'],
@@ -811,7 +810,7 @@
     const g = DCFHelp.G[f.key] || {};
     const links = (DCFHelp.SRC_FORECAST[f.key] || []).map(([l, u]) => `<li><a href="${u}" target="_blank" rel="noopener">${esc(l)}</a></li>`).join('');
     const sub = (id, t, body) => `<details class="asub" data-aid="${f.key}:${id}" ${aidOpen[f.key + ':' + id] ? 'open' : ''}><summary>${t}</summary><div>${body}</div></details>`;
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, history and notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, history and notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}
       ${sub('calc', 'How to calculate', `${g.estimate ? `<ol>${g.estimate.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}${exampleCalcHtml(f.key)}`)}
       ${sub('hist', 'Historical evidence', anchorHtml(f.key, true))}
       ${sub('notes', 'My research notes' + (hasNotes(f.key) ? ' ✓' : ''), notesHtml(f.key))}
@@ -925,10 +924,12 @@
       ${sec('src', 'Sources', `<ul>${w.sources.map(x => `<li>${srcLink(x)}</li>`).join('')}</ul>`)}
       ${sec('notes', 'My research notes' + (hasNotes(key) ? ' ✓' : ''), notesHtml(key, WNOTE_FIELDS))}`;
   }
+  // beginner's guide (js/learn.js) folded inside the inline guides on the input pages
+  const learnAid = key => { const h = Learn.render('dcf', key, esc, (FBY[key] || {}).label); return h ? `<details class="asub" data-aid="lrn-${key}" ${aidOpen['lrn-' + key] ? 'open' : ''}><summary>Beginner's guide: plain English, where to find it, typical values, videos</summary><div>${h}</div></details>` : ''; };
   function waccAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.W[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${waccSections(f.key, true)}
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}${waccSections(f.key, true)}
       ${f.key === 'scp' || f.key === 'csrp' ? `<div class="btns"><button class="btn tiny" data-zero-fill="${f.key}">Set empty scenarios to 0% (no premium)</button></div>` : ''}</details></div>`;
   }
   // tool state
@@ -1109,7 +1110,7 @@
   function tvAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.T[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${tvSections(f.key, true)}</details></div>`;
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Research guide and my notes${hasNotes(f.key) ? ' <span class="saved">notes saved</span>' : ''}</summary>${learnAid(f.key)}${tvSections(f.key, true)}</details></div>`;
   }
   function tvState() {
     cur.tvTools = cur.tvTools || {}; const T = cur.tvTools;
@@ -1273,7 +1274,7 @@
   function bAidRow(f) {
     if (cur.ui && cur.ui.learn === false) return '';
     if (!DCFHelp.B[f.key]) return '';
-    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, worksheet link and my notes ${bStatusPill(f.key)}</summary>${bSections(f.key, true)}</details></div>`;
+    return `<div class="aidrow"><details class="aid" data-aid="${f.key}" ${aidOpen[f.key] ? 'open' : ''}><summary>Guide, worksheet link and my notes ${bStatusPill(f.key)}</summary>${learnAid(f.key)}${bSections(f.key, true)}</details></div>`;
   }
   function bt() { cur.bridgeTools = cur.bridgeTools || {}; const T = cur.bridgeTools; T.debt = T.debt || { rows: DCFAnalysis.DEBT_CATS.map(c => ({ cat: c })) }; T.pen = T.pen || {}; T.nci = T.nci || {}; T.inv = T.inv || [{}, {}, {}, {}]; T.dtl = T.dtl || { sched: [{}, {}, {}, {}, {}] }; T.opt = T.opt || { tr: [{}, {}, {}] }; T.drv = T.drv || { d1: {}, d2: {}, map: [['', ''], ['', '']] }; return T; }
   const bIn = (path, unit, label, ph = 'Enter') => {
@@ -2491,7 +2492,7 @@
     const root = $('#drawer-root');
     root.dataset.owner = 'dcf';
     if (!drawerKey) { root.innerHTML = ''; return; }
-    if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
+    if (drawerKey.startsWith('ttm.')) { root.innerHTML = `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title"><button class="btn close" data-close aria-label="Close">Close</button>${ttmDrawerHtml(drawerKey.slice(4))}${Learn.render('dcf', 'ttm.', esc)}</aside>`; const c = root.querySelector('.close'); if (c) c.focus(); return; }
     const isHist = drawerKey.startsWith('hist.');
     const f = isHist ? Object.assign({ unit: 'usd_mm', kind: 'reported', group: 'hist', required: drawerKey === 'hist.rev', what: 'A reported figure for each of the last five fiscal years.', enter: '$ millions, as reported. Cash outflows are negative.' }, HBY[drawerKey.slice(5)]) : (FBY[drawerKey] || DIL_HELP[drawerKey] || (drawerKey === 'dil.proxy' ? { key: 'dil.proxy', label: 'Reported net dilutive effect', group: 'market', unit: 'shares', kind: 'reported', required: false, what: 'The net number of shares that stock awards added to the diluted share count in the latest EPS calculation. It is already net of the treasury stock method.', enter: 'Millions of shares from the EPS note of the newest 10-Q, with the period it covers.' } : null));
     if (!f) { drawerKey = null; root.innerHTML = ''; return; }
@@ -2509,6 +2510,7 @@
       <button class="btn close" data-close aria-label="Close help">Close</button>
       <div><h3>${isHist ? 'Historical financials' : GROUPS[f.group].title}</h3><h2 id="dr-title">${esc(f.label)}</h2></div>
       <div class="tags">${f.group === 'wacc' && !isHist ? ({ required: '<span class="tag req">Required</span>', optional: '<span class="tag opt">Optional adjustment · 0% is valid</span>', na: '<span class="tag">Not applicable</span>' }[DCFModel.inputStatus(f, cur)] || '') : f.required ? '<span class="tag req">Required</span>' : '<span class="tag">Optional</span>'}<span class="tag ${f.kind === 'reported' ? 'rep' : ''}">${KIND_TXT[f.kind]}</span><span class="tag">${UNIT_TXT[f.unit] || f.unit}</span>${f.tri ? '<span class="tag">One value per scenario</span>' : ''}</div>
+      ${Learn.render('dcf', drawerKey, esc, f.label)}
       ${drawerKey === 'hist.dnwc' ? nwcGuideHtml() : DCFHelp.W[drawerKey] ? `<div class="wsecs">${waccSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.B[drawerKey] ? `<div class="wsecs">${bSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : DCFHelp.T[drawerKey] ? `<div class="wsecs">${tvSections(drawerKey, false)}</div><div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}</div>` : isFc ? forecastDrawerHtml(drawerKey, f) : `<dl>
         <div><dt>What it is</dt><dd>${esc(f.what)}</dd></div>
         ${hh.why ? `<div><dt>Why it matters</dt><dd>${esc(hh.why)}</dd></div>` : ''}
@@ -2522,7 +2524,7 @@
       <div><h3>Source and verification</h3>${sourceVerifHtml(drawerKey, curVal)}${hh.verify ? `<p class="footnote"><b>Check:</b> ${esc(hh.verify)}</p>` : ''}</div>`}
       ${f.cell || isHist ? `<p class="footnote">Workbook cell: <code>${esc(isHist ? 'Historicals row ' + f.row : f.cell)}</code></p>` : ''}
       ${f.guide ? guideHtml(f.guide) : ''}${String(drawerKey).startsWith('dil') || drawerKey === 'basic' ? '<a class="btn" href="#guide" data-close>Open the share dilution guide</a>' : ''}
-      <a class="video" href="${esc(custom || VIDEO(f.video || f.label + ' DCF'))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>Watch how to fill this in</b><br><span class="footnote">${custom ? 'Video chosen for this model' : 'YouTube videos on “' + esc(f.video || f.label) + '”'}</span></span></a>
+      ${(() => { const v = Learn.videosFor('dcf', drawerKey)[0]; if (!custom && !v) return ''; return `<a class="video" href="${esc(custom || Learn.url(v))}" target="_blank" rel="noopener"><span class="play" aria-hidden="true">▶</span><span><b>${custom ? 'Watch how to fill this in' : esc(Learn.V[v][0])}</b><br><span class="footnote">${custom ? 'Video chosen for this model' : esc(Learn.V[v][1]) + ' · YouTube · more videos in the beginner\'s guide above'}</span></span></a>`; })()}
       ${links ? `<div><h3>Useful links</h3><ul style="margin:6px 0 0;padding-left:18px">${links}</ul></div>` : ''}
       <details><summary class="footnote">Section guide: why, think, watch out</summary><div class="guide-box" style="margin-top:8px;grid-template-columns:1fr"><div><b>Why</b>${esc(gs.why)}</div><div><b>Think</b>${esc(gs.think)}</div><div><b>Watch out</b>${esc(gs.watch)}</div></div></details>
       ${src.auto ? `<div class="notice ${src.review ? '' : 'info'}"><b>Imported automatically</b> from ${esc(src.provider || src.name)}${src.period ? ', ' + esc(src.period) : ''}, retrieved ${new Date(src.retrieved).toLocaleString()}.${(() => { const imp = cur.imported && cur.imported[drawerKey]; const v = isHist ? cur.hist[drawerKey.slice(5)] : (drawerKey.startsWith('company.') ? cur.inputs.company[drawerKey.split('.')[1]] : cur.inputs[drawerKey]); const pv = DCFData.provenance(cur, drawerKey, v); return pv === 'overridden' ? ` <b>You have changed it</b> from the imported ${esc(Array.isArray(imp.v) ? imp.v.map(x => isNum(x) ? Math.round(x) : '—').join(', ') : imp.v)}.` : ''; })()}${src.notes ? `<div class="footnote">${esc(src.notes)}</div>` : ''}${src.url ? ` <a href="${esc(src.url)}" target="_blank" rel="noopener">Open the filings to check it</a>` : ''}</div>` : ''}

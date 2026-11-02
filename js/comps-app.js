@@ -684,7 +684,7 @@ const CompsApp = (() => {
         else body = `<p>${esc(body)}</p>`;
         return `<details ${i < 2 || ui.open['h' + i] ? 'open' : ''} data-k="h${i}"><summary>${i + 1}. ${title}</summary>${body}</details>`;
       }).join('');
-      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2><div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
+      h = `<h2 id="cx-dr-title">${esc(g.t)}</h2>${typeof Learn !== 'undefined' ? Learn.render('comps', drawer.key, esc, g.t) : ''}<div class="cx-guide">${sec}<details open><summary>10. My research notes</summary><textarea data-cnote="g-${esc(drawer.key)}" rows="4" placeholder="Saved with this comps model.">${esc(cur.notes['g-' + drawer.key] || '')}</textarea></details></div>`;
     } else {
       const c = byId(drawer.cid); const r = c && c.v[drawer.key];
       if (!r) { drawer = null; root.innerHTML = ''; return; }
