@@ -145,7 +145,10 @@
   function loadSecFile(el) {
     const file = el.files[0]; if (!file) return;
     file.text().then(t => {
-      const imp = DCFData.mapSEC(JSON.parse(t));
+      const json = JSON.parse(t);
+      const imp = DCFData.mapSEC(json);
+      // keep the file on this device so the Three-Statement Model can import the same company without asking for it again
+      if (typeof SecCache !== 'undefined') SecCache.put(json, null);
       modal = null; renderModal();
       finishImport(imp, m => m.meta && m.meta.cik && m.meta.cik === imp.company.cik, imp.company.name);
     }).catch(e => { toast(e.message && e.message.length < 160 ? e.message : 'That file could not be read as SEC company facts.'); });
@@ -198,13 +201,24 @@
   function calc() {
     if (calcCache) return calcCache;
     const mode = cur.mode;
-    const { inp, invalid } = DCFModel.engineInputs(cur);
+    const { inp, invalid, link } = DCFModel.engineInputs(cur);
     const all = DCF.runAll(inp, mode);
     const act = all.scen[cur.active];
     const wb = DCF.waccBuilder(inp, cur.wb, mode);
     const comp = DCFModel.completion(cur);
-    calcCache = { mode, inp, invalid, all, act, wb, comp, anchors: DCFAnalysis.anchors(cur) };
+    calcCache = { mode, inp, invalid, all, act, wb, comp, link, anchors: DCFAnalysis.anchors(cur) };
     return calcCache;
+  }
+  // DCF Forecast Source banner: shown whenever this DCF is linked to a three-statement model
+  function linkBanner() {
+    const { link } = calc();
+    if (!link) return '';
+    const fs = cur.forecastSource || {};
+    const ov = (link.overrides || []).map(o => `<li>${esc(o.why)}: ${o.key === 'stub' ? fmt.n(o.from, 2) + ' → ' + fmt.n(o.to, 2) + ' years' : fmt.mm(o.from) + ' → ' + fmt.mm(o.to)}</li>`).join('');
+    const probs = (link.problems || []).map(p => `<li>${esc(p)}</li>`).join('');
+    return `<div class="notice ${link.ok ? 'info' : 'warn'}"><b>DCF Forecast Source: Linked</b> to the three-statement model "${esc(link.fsmName || fs.fsmName || '')}"${link.fsmVersion ? ' (version ' + esc(link.fsmVersion) + ')' : ''}${fs.linkedAt ? ', linked ' + esc(String(fs.linkedAt).slice(0, 10)) : ''}. ${link.ok ? 'Revenue, EBITDA, D&A, EBIT, taxes, CapEx, change in NWC and free cash flow for years 1–10 come from that model; the terminal year grows year 10. Your own forecast inputs are kept unchanged and are used again if you switch back.' : 'The linked model cannot be used right now, so the DCF\'s own drivers are used.'}
+      ${ov ? `<details><summary>Equity bridge and timing taken from the three-statement opening balance sheet (${(link.overrides || []).length})</summary><ul class="footnote">${ov}</ul></details>` : ''}${probs ? `<ul class="footnote">${probs}</ul>` : ''}
+      <div class="btns"><button class="btn" data-fsrc-original>Use the original DCF assumptions</button><a class="btn" href="#fsm/dcf">Open the three-statement model</a></div></div>`;
   }
   function blockers() {
     const { comp } = calc(); const out = [];
@@ -213,9 +227,12 @@
   }
 
   // ---------- routing ----------
-  const compsOn = () => /^#comps(\/|$)/.test(location.hash);
+  const compsOn = () => /^#(comps|fsm)(\/|$)/.test(location.hash); // another workspace (Trading Comps or the Three-Statement Model) owns the page
+  const fsmOn = () => /^#fsm(\/|$)/.test(location.hash);
   function page() { const h = location.hash.slice(1); return PAGES.find(p => p.id === h) ? h : 'dashboard'; }
-  window.addEventListener('hashchange', () => { if (compsOn()) return; render(); $('#main').scrollTop = 0; });
+  // another workspace (the Three-Statement Model's DCF link) may have saved this model while it was away: pick up the stored copy
+  function refreshFromStorage() { if (!cur) return; try { const all = DCFModel.loadAll(); const st = all[cur.id]; if (st && st.updated && st.updated !== cur.updated) { models = all; cur = st; calcCache = null; } } catch (e) {} }
+  window.addEventListener('hashchange', () => { if (compsOn()) return; refreshFromStorage(); render(); $('#main').scrollTop = 0; });
   function goField(pageId, elId) { pendingFocus = elId; if (page() === pageId) render(); else location.hash = pageId; }
   function fieldPage(key) {
     if (key.startsWith('hist')) return 'historicals';
@@ -293,7 +310,7 @@
     top.querySelector('#search-sel').innerHTML = selName ? `<span class="chip">${esc(selName)}</span>` : '<span class="chip muted">No company selected</span>';
     renderSearchResults();
     $('#hdr-sub').innerHTML = `
-      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a></div>
+      <div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard" aria-current="page">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm">Three-Statement Model</a></div>
       <div class="model-pick"><label for="model-select" class="footnote">Model</label>
         <select id="model-select" class="plain">${opts}</select></div>
       <div class="model-pick"><label for="mode-select" class="footnote">Method</label>
@@ -1436,6 +1453,7 @@
     else if (importStatus && importStatus.ok) status = `<div class="notice good"><b>${importStatus.isNew ? 'New model created. ' : ''}Imported ${importStatus.changed} figures for ${esc(importStatus.label || '')}</b> from ${esc(importStatus.provider)} at ${new Date(importStatus.at).toLocaleString()}. Each one has its source on the <a href="#record">Sources</a> page. Review them, then fill in the inputs marked as yours.
       ${importStatus.pending ? `<div class="footnote"><b>${importStatus.pending} value${importStatus.pending > 1 ? 's' : ''} differ from what you have.</b> Nothing was replaced: review them below.</div>` : ''}
       ${importStatus.notes && importStatus.notes.length ? `<ul class="footnote">${importStatus.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''} <button class="linkbtn" data-dismiss-import>Dismiss</button></div>`;
+    status = linkBanner() + status;
     const empty = !C.name && !M.retrieved;
     const header = `<section class="card hero" style="grid-area:hero">
       <div class="logo" aria-hidden="true">${esc(initials)}</div>
@@ -1831,7 +1849,7 @@
   P.assumptions = () => {
     const learn = !(cur.ui && cur.ui.learn === false);
     const bar = `<div class="learnbar"><button class="btn" data-learn-toggle aria-pressed="${learn}">${learn ? 'Hide' : 'Show'} guides and notes</button>${learn ? '<button class="btn" data-aid-all="open">Expand all</button><button class="btn" data-aid-all="close">Collapse all</button>' : ''}<span class="footnote">Click ? on any row for the full guide: what it is, how to estimate it, history, examples, scenarios, common mistakes, effect on value and sources.</span></div>`;
-    return `<div><h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${basePanel()}${bar}${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}${checksPanelHtml()}${learn ? toolsHtml() : ''}${scenarioAssistHtml()}`;
+    return `<div>${linkBanner()}<h1>Forecast assumptions</h1><p class="lead">The drivers of the ten-year forecast, one column per scenario. Revenue grows in three phases, margins move in a straight line between years 1, 5 and 10, and reinvestment scales with revenue.</p></div>${basePanel()}${bar}${groupPanel('revenue')}${groupPanel('margins')}${groupPanel('reinvest')}${checksPanelHtml()}${learn ? toolsHtml() : ''}${scenarioAssistHtml()}`;
   };
   P.terminal = () => {
     const learn = !(cur.ui && cur.ui.learn === false), work = !!(cur.ui && cur.ui.tvWork);
@@ -2523,6 +2541,7 @@
 
   // ---------- render ----------
   function render() {
+    if (fsmOn()) { if (typeof FsmApp !== 'undefined') FsmApp.render(); return; }
     if (compsOn()) { if (typeof CompsApp !== 'undefined') CompsApp.render(); return; }
     ['drawer-root', 'modal-root'].forEach(id => { const r = document.getElementById(id); if (r && r.dataset.owner === 'comps') { r.innerHTML = ''; r.dataset.owner = 'dcf'; } });
     calcCache = null;
@@ -2633,6 +2652,7 @@
     if (b.matches('[data-close-modal]')) { modal = null; renderModal(); return; }
     if (b.dataset.openData !== undefined || b.id === 'open-data') { searchState.open = false; renderSearchResults(); modal = 'data'; renderModal(); return; }
     if (b.dataset.import) { importSymbol(b.dataset.import); return; }
+    if (b.dataset.fsrcOriginal !== undefined) { const f = cur.forecastSource || {}; cur.forecastSource = { mode: 'original', fsmId: f.fsmId || null }; cur.fsmLog = [{ at: new Date().toISOString(), text: 'Forecast source set back to the original DCF assumptions (from the DCF tab)' }].concat(cur.fsmLog || []).slice(0, 100); persist(); calcCache = null; render(); toast('The DCF now uses its own forecast assumptions.'); return; }
     if (b.dataset.themeSet) { setTheme(b.dataset.themeSet); renderTop(); return; }
     if (b.id === 'save-model' || b.dataset.saveModel !== undefined) { saveModel(); return; }
     if (b.id === 'new-dcf') { newDcf(); return; }

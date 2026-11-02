@@ -134,7 +134,7 @@ const CompsApp = (() => {
     const { b, imp } = calc();
     const live = isNum(imp.perShare) ? `<div><div class="lbl">Implied (${esc(b.label)})</div><div class="big">${f.px(imp.perShare, t.priceCurrency)}</div></div><div><div class="lbl">vs price ${plain(f.px(E.val(t, 'price'), t.priceCurrency))}</div><div>${f.up(imp.upside)}</div></div>`
       : `<a class="pill bad" href="#comps/checklist">Valuation incomplete</a>`;
-    $('#cx-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps" aria-current="true">Trading Comps</a></div>
+    $('#cx-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps" aria-current="true">Trading Comps</a><a href="#fsm">Three-Statement Model</a></div>
       <div class="model-pick"><label for="cx-model" class="footnote">Comps model</label><select id="cx-model" class="plain">${list.map(m => opt(m.id, m.name, cur.id)).join('')}</select></div>
       <div class="model-pick"><label for="cx-group" class="footnote">Peer group</label><select id="cx-group" class="plain">${groupOptions(cur.selection.group)}</select></div>
       <button class="btn ghost" id="cx-data">${icon('db')} Data source: ${fmpKey() ? 'Financial Modeling Prep' : 'not connected'}</button>

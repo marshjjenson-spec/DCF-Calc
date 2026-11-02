@@ -79,7 +79,7 @@ const FsmData = (() => {
     finlC: { st: 'BS', i: true, l: 'Finance lease liabilities, current', alt: [['FinanceLeaseLiabilityCurrent']] },
     tcl: { st: 'BS', i: true, l: 'Total current liabilities (as reported)', alt: [['LiabilitiesCurrent']] },
     ltdNC: { st: 'BS', i: true, l: 'Long-term debt, noncurrent', alt: [['LongTermDebtNoncurrent'], ['LongTermDebtAndCapitalLeaseObligations']] },
-    ltdTot: { st: 'BS', i: true, l: 'Long-term debt including current portion', alt: [['LongTermDebt']] },
+    ltdTot: { st: 'BS', i: true, l: 'Long-term debt including current portion', alt: [['LongTermDebt'], ['LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities']] },
     opl: { st: 'BS', i: true, l: 'Operating lease liabilities', alt: [['OperatingLeaseLiability'], ['OperatingLeaseLiabilityCurrent', 'OperatingLeaseLiabilityNoncurrent']] },
     finl: { st: 'BS', i: true, l: 'Finance lease liabilities', alt: [['FinanceLeaseLiability'], ['FinanceLeaseLiabilityCurrent', 'FinanceLeaseLiabilityNoncurrent']] },
     dtl: { st: 'BS', i: true, l: 'Deferred tax liabilities', alt: [['DeferredIncomeTaxLiabilitiesNet'], ['DeferredTaxLiabilitiesNoncurrent']] },
@@ -227,6 +227,8 @@ const FsmData = (() => {
     const refs = {};
     Object.entries(REFS).forEach(([k, c]) => {
       const x = Sec.pick(json, [c], 'USD', 'instant');
+      // a footnote figure last reported long before the latest fiscal year is stale: leave it out
+      if (x && periods.length && x.end < periods[0].end) return;
       if (x) { const r = Sec.record(json, x, { L, metric: c, unit: '$ millions' }); refs[k] = { v: r.value, src: base({ cat: 'sec', concept: r.concept, form: r.form, accn: r.accn, filed: r.filed, period: r.periodText, end: r.end, url: r.url, raw: r.raw, rawUnit: r.rawUnit, unit: '$ millions', statement: 'Note' }) };
       }
     });
@@ -290,7 +292,9 @@ const FsmData = (() => {
     const tl = isNum(g('tl')) ? g('tl') : isNum(g('tle')) && isNum(te) ? g('tle') - te : isNum(te) ? g('ta') - te : null;
     if (isNum(tl) && !isNum(g('tl'))) set('tl', tl, isNum(g('tle')) ? 'Total liabilities and equity − total equity (total liabilities are not tagged)' : 'Total assets − total equity', ['tle', 'te']);
     // long-term debt: noncurrent, or total less the current portion
-    if (!isNum(g('ltdNC')) && isNum(g('ltdTot'))) set('ltdNC', g('ltdTot') - nz(g('cltd')), 'Long-term debt including the current portion − current portion', ['ltdTot', 'cltd']);
+    // only total debt is tagged and no current portion: the split is reported by segment only, so the debt stays inside the residual lines
+    const ltdFromTotal = !isNum(g('ltdNC')) && isNum(g('ltdTot')) && !isNum(g('cltd'));
+if (!isNum(g('ltdNC')) && isNum(g('ltdTot'))) set('ltdNC', g('ltdTot') - nz(g('cltd')), 'Long-term debt including the current portion − current portion', ['ltdTot', 'cltd']);
     if (isNum(g('ltdNC'))) set('ltd', g('ltdNC'), 'Long-term debt, noncurrent', ['ltdNC']);
     if (isNum(g('tcl'))) {
       // tagged current lines, including current lease portions (moved to the lease lines in this model)
@@ -320,7 +324,13 @@ const FsmData = (() => {
       // noncurrent: other long-term liabilities = total liabilities − current − LTD − leases − deferred taxes
       if (isNum(tl)) {
         const curShown = g('tcl') - nz(g('oplC')) - nz(g('finlC'));
-        const oltl = tl - curShown - nz(g('ltd')) - nz(g('opl')) - nz(g('finl')) - nz(g('dtl'));
+        let oltl = tl - curShown - nz(g('ltd')) - nz(g('opl')) - nz(g('finl')) - nz(g('dtl'));
+        // only total debt is tagged: treating it all as noncurrent is fine unless the totals show part of it is current (split reported by segment only)
+        if (ltdFromTotal && oltl < -tol) {
+          ['ltdNC', 'ltd'].forEach(k => { if (cells[k]) delete cells[k][pid]; });
+          oltl = tl - curShown - nz(g('opl')) - nz(g('finl')) - nz(g('dtl'));
+          notes.push(`${label}: the company tags only total debt including current maturities (${g('ltdTot').toFixed(0)}), and the totals show part of it is current, but the split is reported only by segment. Debt is left inside other current and other long-term liabilities; enter the debt and its current portion from the debt note (Debt & interest page) so interest and repayments are modelled.`);
+        }
         set('oltl', oltl, 'Total liabilities − current liabilities − long-term debt − lease liabilities (current and noncurrent) − deferred tax liabilities', ['tl', 'tcl', 'ltd', 'opl', 'finl', 'dtl']);
         if (oltl < -tol) notes.push(`${label}: tagged noncurrent liabilities exceed the total by ${(-oltl).toFixed(0)}. A lease or debt line may be included in long-term debt; check the debt note.`);
       }

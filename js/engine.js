@@ -15,10 +15,13 @@ const DCF = (() => {
     if (mode !== 'workbook' && isNum(inp.debt) && inp.debt === 0 && (inp.leasesInWacc === false || (isNum(inp.leases) && inp.leases === 0))) tri.splice(tri.indexOf('kd'), 1);
     if (inp.tvMethod && inp.tvMethod[s] === 'Exit Multiple') tri.push('exitMult');
     const single = SINGLE.slice();
+    // linked forecast (three-statement model): years 1-10 and the terminal margin come from the linked model
+    if (linkedOf(inp, s, mode)) { ['g1','g2','g3','em1','em5','em10','da','nol','capex1','capex2','capex3','nwc','acq','s2c','tem'].forEach(k => { const i = tri.indexOf(k); if (i >= 0) tri.splice(i, 1); }); single.splice(single.indexOf('rev0'), 1); }
     // leases unused when they are neither subtracted in the bridge nor counted in the weights
     if (inp.leasesInBridge === false && inp.leasesInWacc === false) single.splice(single.indexOf('leases'), 1);
     return { tri, single };
   }
+  const linkedOf = (inp, s, mode) => mode === 'corrected' && inp.linked && inp.linked[s] && inp.linked[s].ok && Array.isArray(inp.linked[s].years) && inp.linked[s].years.length === 10 ? inp.linked[s] : null;
   function missing(inp, s, mode) {
     const r = required(inp, s, mode), out = [];
     r.tri.forEach(k => { const v = inp[k] && inp[k][s]; if (k === 'tvMethod') { if (v !== 'Gordon Growth' && v !== 'Exit Multiple') out.push(k); } else if (!isNum(v)) out.push(k); });
@@ -53,13 +56,23 @@ const DCF = (() => {
     const tvMethod = v('tvMethod');
     if (tvMethod === 'Gordon Growth' && !(w > g)) errors.push(`WACC (${(w*100).toFixed(2)}%) must be higher than terminal growth (${(g*100).toFixed(2)}%) for Gordon Growth.`);
     if (mode === 'corrected' && !(v('troic') > 0)) errors.push('Terminal ROIC must be greater than zero.');
-    if (!(v('s2c') > 0)) errors.push('Sales-to-capital ratio must be greater than zero.');
+    const LK = linkedOf(inp, s, mode);
+    if (!LK && !(v('s2c') > 0)) errors.push('Sales-to-capital ratio must be greater than zero.');
     if (errors.length) return { ok: false, missing: [], errors };
     const growth = [v('g1'), v('g1'), v('g1'), v('g2'), v('g2'), v('g2'), v('g2'), v('g3'), v('g3'), v('g3'), g];
     const path = (a, b, c, i) => i < 5 ? a + i / 4 * (b - a) : b + (i - 4) / 5 * (c - b);
     const capxPct = [v('capex1'), v('capex1'), v('capex1'), v('capex2'), v('capex2'), v('capex2'), v('capex2'), v('capex3'), v('capex3'), v('capex3'), v('tcapex')];
     const years = []; let prev = inp.rev0, lossBal = 0;
-    for (let i = 0; i < 11; i++) {
+    if (LK) {
+      // years 1-10 exactly as projected by the three-statement model; terminal year from year 10
+      LK.years.forEach((q, i) => { const y = { linked: true, lossUsed: 0, lossLeft: 0, gmPct: null, gp: null, t: i + 1, growth: q.growth, rev: q.rev, emPct: q.emPct, ebitda: q.ebitda, da: q.da, ebit: q.ebit, ebitPct: q.ebitPct, taxRate: q.taxRate, taxes: q.taxes, nopat: q.nopat, capex: q.capex, dnwc: q.dnwc, acq: q.acq, fcff: q.fcff, ic: q.ic }; y.fcffPct = y.fcff / y.rev; years.push(y); });
+      const Y = years[9], rev = Y.rev * (1 + g), ebit = rev * Y.ebitPct, tr = isNum(LK.termTax) ? LK.termTax : Y.taxRate;
+      const taxes = ebit > 0 ? ebit * tr : 0, nopat = ebit - taxes;
+      const T = { linked: true, t: 11, growth: g, rev, emPct: Y.emPct, ebitda: rev * Y.emPct, da: null, ebit, ebitPct: Y.ebitPct, taxRate: tr, taxes, nopat, capex: null, dnwc: null, acq: null, gmPct: null, gp: null, lossUsed: 0, lossLeft: 0 };
+      T.reinvestRate = g / v('troic'); T.fcff = nopat * (1 - T.reinvestRate); T.reinvestment = nopat * T.reinvestRate; T.fcffPct = T.fcff / rev;
+      years.push(T);
+    }
+    for (let i = 0; i < 11 && !LK; i++) {
       const rev = prev * (1 + growth[i]);
       const emPct = i < 10 ? path(v('em1'), v('em5'), v('em10'), i) : v('tem');
       const ebitda = rev * emPct, da = rev * v('da'), ebit = ebitda - da;
@@ -84,8 +97,14 @@ const DCF = (() => {
       years.push(y); prev = rev;
     }
     // invested capital & ROIC (workbook rows 33-34)
-    let ic = years[0].rev / v('s2c');
-    years.forEach((y, i) => {
+    let ic = LK ? null : years[0].rev / v('s2c');
+    if (LK) years.forEach((y, i) => {
+      // invested capital from the linked balance sheet (operating NWC + PP&E + goodwill + intangibles)
+      if (i < 10) { const prior = i ? years[i - 1].ic : LK.ic0; y.roic = isNum(prior) && prior !== 0 ? y.nopat / prior : null; }
+      else { y.ic = years[9].ic; y.roic = isNum(y.ic) && y.ic !== 0 ? y.nopat / y.ic : null; }
+      y.reinvRateModel = 1 - y.fcff / y.nopat;
+    });
+    else years.forEach((y, i) => {
       if (i === 0) { y.ic = ic; y.roic = y.nopat / ic; }
       else if (i < 10) { y.roic = y.nopat / years[i - 1].ic; ic = ic + (y.capex + y.dnwc + y.acq - y.da); y.ic = ic; }
       else { y.ic = y.rev / v('s2c'); y.roic = y.nopat / years[9].ic; }
@@ -117,7 +136,7 @@ const DCF = (() => {
     const termRoic = T.roic;
     const impliedReinv = g / (mode === 'corrected' ? v('troic') : termRoic);
     const res = {
-      ok: true, scenario: s, mode, stub: off, years, W, waccUsed: w, g, tvMethod, tv, tvGordon, tvExit, tvPeriod, pvTV, sumPV, ev, bridge, equity, perShare,
+      ok: true, scenario: s, mode, linked: !!LK, stub: off, years, W, waccUsed: w, g, tvMethod, tv, tvGordon, tvExit, tvPeriod, pvTV, sumPV, ev, bridge, equity, perShare,
       upside: perShare / inp.price - 1, tvShare: pvTV / ev,
       evEbitda1: ev / years[0].ebitda, evRev1: ev / years[0].rev,
       impliedExitMultiple: tv / Y10.ebitda,

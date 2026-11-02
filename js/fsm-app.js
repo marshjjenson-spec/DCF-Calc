@@ -324,7 +324,7 @@ const FsmApp = (() => {
     renderResults();
     const list = Object.values(models).sort((a, b) => b.updated.localeCompare(a.updated)); if (!models[cur.id]) list.unshift(cur);
     const { runs } = calc();
-    const st = SC.map(s => { const r = runs[s]; const f = r.ok ? r.checks.filter(c => c.status === 'fail').length : null; return `<span class="pill ${!r.ok ? 'neutral' : f ? 'bad' : 'good'}" title="${s}: ${!r.ok ? 'assumptions incomplete' : f ? f + ' failing check(s)' : 'all checks pass'}">${s[0]}${r.ok ? (f ? ' ✕' : ' ✓') : ' …'}</span>`; }).join('');
+    const st = SC.map(s => { const r = runs[s]; const f = r.ok ? r.checks.filter(c => c.status === 'fail').length : null; return `<span class="pill ${!r.ok ? 'neutral' : f ? 'bad' : 'good'}" title="${s}: ${!r.ok ? 'assumptions incomplete' : f ? f + ' failing check(s)' : 'all checks pass'}">${s}${r.ok ? (f ? ' ✕' : ' ✓') : ' …'}</span>`; }).join('');
     $('#fs-sub').innerHTML = `<div class="seg model-switch" role="group" aria-label="Valuation model"><a href="#dashboard">Discounted Cash Flow</a><a href="#comps">Trading Comps</a><a href="#fsm" aria-current="true">Three-Statement Model</a></div>
       <div class="model-pick"><label for="fs-model" class="footnote">Model</label><select id="fs-model" class="plain">${list.map(m => opt(m.id, m.name, cur.id)).join('')}</select></div>
       <div class="seg" role="group" aria-label="Scenario">${SC.map(s => `<button data-fscen="${s}" aria-pressed="${s === scen()}">${s}</button>`).join('')}</div>
@@ -448,7 +448,7 @@ const FsmApp = (() => {
   function cachedList() {
     const list = typeof SecCache !== 'undefined' ? SecCache.listSync() : [];
     if (!list.length) return '';
-    return `<p class="footnote">SEC files saved in this browser: ${list.map(x => `<button class="btn tiny" data-fs-cache="${esc(x.cik)}">${esc(x.name)} (CIK ${esc(String(+x.cik))}, saved ${esc(String(x.savedAt).slice(0, 10))})</button>`).join(' ')}</p>`;
+    return `<p class="footnote">SEC files saved in this browser: ${list.map(x => `<button class="btn tiny" data-fs-cache="${esc(x.cik)}">${esc(x.name)} (CIK ${esc(String(+x.cik))}, saved ${esc(String(x.saved).slice(0, 10))})</button>`).join(' ')}</p>`;
   }
 
   P.historical = () => {
@@ -795,6 +795,7 @@ const FsmApp = (() => {
   // ---------- imports ----------
   function afterImport(imp, label) {
     const res = D.apply(cur, imp);
+    if (cur.name === M.blank().name && (cur.company.ticker || cur.company.name)) cur.name = (cur.company.ticker || cur.company.name) + ' three-statement model';
     const ini = M.initFromHistory(cur);
     change('imported', null, `${label} (${imp.meta.provider})`);
     msg = { level: 'good', text: `${label}: ${imp.periods.length} fiscal years${imp.ttm ? ' and a TTM column (' + imp.ttm.end + ')' : ''} imported from ${imp.meta.provider}. ${res.kept ? res.kept + ' manual figure(s) kept' + (res.proposed ? ', ' + res.proposed + ' differ from the import (review on Historical data)' : '') + '. ' : ''}${ini.notes.join(' ')} Forecast assumptions were not changed.` };

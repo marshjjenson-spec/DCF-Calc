@@ -246,7 +246,25 @@ const DCFModel = (() => {
     return out;
   }
   // Build the flat engine input, dropping invalid values (they count as missing, never as zero)
-  function engineInputs(model) {
+  // DCF forecast source: 'original' (this model's drivers) or 'linked' (a saved three-statement model).
+  // Linking never changes the DCF's stored inputs; the linked figures are applied here, at calculation time,
+  // and every replaced input is listed in `link.overrides` so the valuation can be traced.
+  function linkOf(model, opts) {
+    const fs = model.forecastSource;
+    if (!fs || fs.mode !== 'linked') return null;
+    const link = { mode: 'linked', fsmId: fs.fsmId, fsmName: fs.fsmName, ok: false, problems: [], overrides: [] };
+    if (model.mode !== 'corrected') { link.problems.push('Linked forecasts are used only in the corrected calculation mode. The original drivers are used in the workbook mode.'); return link; }
+    const FM = typeof FsmModel !== 'undefined' ? FsmModel : null, FE = typeof FsmEngine !== 'undefined' ? FsmEngine : null;
+    if (!FE) { link.problems.push('The three-statement model is not loaded.'); return link; }
+    const fsm = (opts && opts.fsm && opts.fsm.id === fs.fsmId ? opts.fsm : null) || (FM ? FM.get(fs.fsmId) : null);
+    if (!fsm) { link.problems.push(`The linked three-statement model "${fs.fsmName || fs.fsmId}" was not found in this browser. The DCF's own drivers are used until you link a model again.`); return link; }
+    const L = FE.dcfLink(fsm);
+    link.fsmName = fsm.name; link.fsmVersion = FM && FM.versionNo ? FM.versionNo(fsm) : null; link.base = L.base; link.bridge = L.bridge;
+    link.scen = {}; SC.forEach(s => { const q = L.scen[s]; link.scen[s] = q; if (!q || !q.ok) link.problems.push(`${s}: the three-statement model is incomplete (${q && q.missing ? q.missing.slice(0, 4).join('; ') : 'not run'}); this scenario uses the DCF's own drivers.`); else if (q.failing && q.failing.length) link.problems.push(`${s}: three-statement checks failing: ${q.failing.join('; ')}.`); });
+    link.ok = SC.some(s => link.scen[s] && link.scen[s].ok);
+    return link;
+  }
+  function engineInputs(model, opts) {
     const out = {}, invalid = [];
     F.forEach(f => {
       if (f.key.startsWith('company.')) return;
@@ -262,7 +280,23 @@ const DCFModel = (() => {
     out.leasesInWacc = lm === 'debt' && !(model.waccCfg && model.waccCfg.leases === 'exclude');
     const d = dilution(model);
     if (d.method && d.method !== 'totals') { out.options = d.ok ? d.gross : null; out.treasury = d.ok ? d.buyback : null; }
-    return { inp: out, invalid, dilution: d };
+    const link = linkOf(model, opts);
+    if (link && link.ok) {
+      out.linked = {}; SC.forEach(s => { const q = link.scen[s]; if (q && q.ok) out.linked[s] = { ok: true, years: q.years, ic0: q.ic0, termTax: q.termTax }; });
+      // balance sheet items at the three-statement model's opening date replace the DCF's bridge inputs
+      const B = link.bridge || {};
+      const ov = (k, v, why) => { if (!isNum(v)) return; if (out[k] !== v) link.overrides.push({ key: k, from: out[k], to: v, why }); out[k] = v; };
+      ov('cash', B.cash, 'Cash on the three-statement opening balance sheet');
+      ov('sti', B.sti, 'Short-term investments on the opening balance sheet');
+      ov('debt', B.debt, 'Short-term debt + current portion + long-term debt + finance lease liabilities on the opening balance sheet');
+      ov('leases', B.opLeases, 'Operating lease liabilities on the opening balance sheet');
+      if (isNum(B.minority) || isNum(B.preferred)) ov('minority', (isNum(B.minority) ? B.minority : 0) + (isNum(B.preferred) ? B.preferred : 0), 'Noncontrolling interests' + (isNum(B.preferred) ? ' + temporary (mezzanine) equity' : '') + ' on the opening balance sheet');
+      // timing: years run from the three-statement model's base date
+      const vd = model.inputs.company.valDate, end = link.base && (link.base.bsEnd || link.base.end);
+      if (model.timing === 'dated' && isDate(vd) && isDate(end)) { const st = Math.max(0, days(end, vd) / 365.25); if (out.stub !== st) link.overrides.push({ key: 'stub', from: out.stub, to: st, why: `Years counted from the three-statement base date ${end}` }); out.stub = st; }
+      out.rev0 = out.rev0 || (link.scen.Base && link.scen.Base.ok ? link.scen.Base.years[0].rev / (1 + link.scen.Base.years[0].growth) : null);
+    }
+    return { inp: out, invalid, dilution: d, link };
   }
   // Completion status per group. Required = needed by the valuation in the current mode.
   function completion(model) {
@@ -365,6 +399,7 @@ const DCFModel = (() => {
     out.inputs = Object.assign(blank().inputs, m.inputs || {});
     ['sources', 'reviewed', 'imported', 'ref', 'meta'].forEach(k => out[k] = m[k] || {}); ['log', 'snapshots', 'importNotes'].forEach(k => out[k] = m[k] || []);
     out.defaults = m.defaults || {}; // older files: their choices were made by the analyst
+    out.forecastSource = m.forecastSource && m.forecastSource.mode ? m.forecastSource : { mode: 'original' }; out.fsmLog = m.fsmLog || [];
     out.asOf = Object.assign({ price: null, range: null, basic: null }, m.asOf || {});
     // older files typed the workbook's two totals directly: keep that method
     out.dilution = m.dilution ? Object.assign(blankDilution(), m.dilution) : blankDilution(isNum(out.inputs.options) || isNum(out.inputs.treasury) ? 'totals' : null);
