@@ -23,7 +23,12 @@ const DCFModel = (() => {
       dilution: blankDilution(),
       // forecast starting point: 'fy' (latest completed fiscal year) or 'ttm'; timing 'dated' discounts from the valuation date
       base: { mode: 'fy', fyEnd: null }, timing: 'dated',
-      notes: {}, ui: { learn: true } };
+      notes: {}, ui: { learn: true },
+      // the written conclusion: recommendation, margin of safety, reasons, risks (see js/conclusion.js)
+      thesis: blankThesis() };
+  }
+  function blankThesis() {
+    return { rec: null, hurdle: null, horizon: null, points: ['', '', ''], risks: ['', '', ''], changeMind: '', catalysts: '', variant: '', saved: null };
   }
   function blankDilution(method = null) {
     const row = () => ({ label: null, n: null, k: null });
@@ -407,9 +412,10 @@ const DCFModel = (() => {
     out.timing = m.timing || 'workbook';
     out.base = Object.assign({ mode: 'fy', fyEnd: null }, m.base || {});
     out.notes = m.notes || {};
+    out.thesis = Object.assign(blankThesis(), m.thesis || {});
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, ttmCalc, ttmOverrides, TTM_OVR_KEYS, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { blankThesis, noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, ttmCalc, ttmOverrides, TTM_OVR_KEYS, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;
