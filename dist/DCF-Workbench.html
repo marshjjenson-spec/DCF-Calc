@@ -834,6 +834,60 @@ table.lrn-tbl td:nth-child(2) { font-weight: 600; min-width: 90px; }
 .lrn-vids a:hover, .lrn-vids a:focus-visible { border-color: var(--accent); }
 .lrn-vids .play { width: 28px; height: 28px; border-radius: 50%; background: var(--bad); color: #fff; display: grid; place-items: center; flex: none; font-size: 11px; }
 @media (max-width: 560px) { .lrn { padding: 8px 10px 4px; } table.lrn-tbl th, table.lrn-tbl td { padding: 4px 6px; } }
+
+/* ---------- conclusion & thesis ---------- */
+.verdict { border-left: 4px solid var(--line-strong); }
+.verdict.v-good { border-left-color: var(--good); }
+.verdict.v-warn { border-left-color: var(--warn); }
+.verdict.v-bad { border-left-color: var(--bad); }
+.verdict p { margin: 10px 0; }
+.vgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; }
+.vcall { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.vcall .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.vcall .call { font: 700 34px var(--font-num); line-height: 1.1; }
+.v-good .vcall .call { color: var(--good); }
+.v-warn .vcall .call { color: var(--warn); }
+.v-bad .vcall .call { color: var(--bad); }
+.vrob { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+.vfoot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); }
+.vfoot .footnote { flex: 1 1 260px; }
+label.inl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+label.inl .inwrap.sm { width: 90px; }
+label.inl input.txt { width: 140px; }
+.tornado { display: flex; flex-direction: column; gap: 6px; }
+.tornado .trow { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(100px, 2fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.tornado .tbar { position: relative; height: 16px; background: var(--surface-2); border-radius: 3px; }
+.tornado .tbar span { position: absolute; top: 0; bottom: 0; }
+.tornado .neg-seg { background: var(--bad); opacity: 0.55; border-radius: 3px 0 0 3px; }
+.tornado .pos-seg { background: var(--good); opacity: 0.55; border-radius: 0 3px 3px 0; }
+.tornado .mid { width: 2px; margin-left: -1px; background: var(--ink); top: -3px !important; bottom: -3px !important; }
+.tornado .tv { font-family: var(--font-num); font-size: 12px; white-space: nowrap; }
+.tornado .trow.foot { margin-top: 4px; }
+table.imp td.key { font-weight: 600; }
+table.imp tr.sub td { padding-top: 0; border-top: 0; }
+.threc { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.threc > span:first-child { font-weight: 600; }
+.thgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 8px; }
+.thgrid h3 { margin: 0 0 2px; }
+label.thf { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; margin: 8px 0; }
+label.thf textarea { width: 100%; box-sizing: border-box; font: inherit; font-weight: 400; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--ink); resize: vertical; }
+pre.memo { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--font-num); background: var(--surface-2); padding: 12px; border-radius: 6px; max-height: 480px; overflow: auto; }
+/* step bar at the foot of each page in the build order */
+.stepnav { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-top: 28px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.stepnav a { text-decoration: none; font-weight: 600; }
+.stepnav .sn-next { text-align: right; }
+.stepnav .sn-mid { text-align: center; }
+.sn-dots { display: flex; gap: 5px; justify-content: center; margin-top: 4px; }
+.sn-dots a { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); }
+.sn-dots a.past { background: var(--accent); opacity: 0.5; }
+.sn-dots a.now { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+@media (max-width: 700px) {
+  .vgrid { grid-template-columns: 1fr; }
+  .tornado .trow { grid-template-columns: 1fr; gap: 2px; }
+  .stepnav { grid-template-columns: 1fr 1fr; }
+  .stepnav .sn-mid { grid-column: 1 / -1; order: -1; }
+}
+input.plain-in { border: 1px solid var(--line-strong); border-radius: 5px; padding: 6px 8px; background: var(--surface); color: var(--ink); font: inherit; }
 </style></head><body>
 <div class="app"><header class="topbar" id="topbar"></header><nav class="rail" id="rail" aria-label="Model sections"></nav><main class="main" id="main"></main></div>
 <div id="drawer-root"></div><div id="modal-root"></div>
@@ -2407,7 +2461,12 @@ const DCFModel = (() => {
       dilution: blankDilution(),
       // forecast starting point: 'fy' (latest completed fiscal year) or 'ttm'; timing 'dated' discounts from the valuation date
       base: { mode: 'fy', fyEnd: null }, timing: 'dated',
-      notes: {}, ui: { learn: true } };
+      notes: {}, ui: { learn: true },
+      // the written conclusion: recommendation, margin of safety, reasons, risks (see js/conclusion.js)
+      thesis: blankThesis() };
+  }
+  function blankThesis() {
+    return { rec: null, hurdle: null, horizon: null, points: ['', '', ''], risks: ['', '', ''], changeMind: '', catalysts: '', variant: '', saved: null };
   }
   function blankDilution(method = null) {
     const row = () => ({ label: null, n: null, k: null });
@@ -2791,10 +2850,11 @@ const DCFModel = (() => {
     out.timing = m.timing || 'workbook';
     out.base = Object.assign({ mode: 'fy', fyEnd: null }, m.base || {});
     out.notes = m.notes || {};
+    out.thesis = Object.assign(blankThesis(), m.thesis || {});
     out.ui = Object.assign({ learn: true }, m.ui || {});
     return out;
   }
-  return { noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, ttmCalc, ttmOverrides, TTM_OVR_KEYS, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
+  return { blankThesis, noDebt, leaseMode, inputStatus, OPTIONAL_ADJ, baseInfo, ttmOf, ttmCalc, ttmOverrides, TTM_OVR_KEYS, SC, SECTIONS, blank, blankDilution, dilution, syncDilution, marketChecks, fromSample, fieldError, relevant, engineInputs, completion, tracker, labelOf, logChange, loadAll, save, remove, upgrade, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFModel;
 
@@ -4454,6 +4514,238 @@ const DCFAnalysis = (() => {
   return { DEBT_CATS, debtRecon, pensionCalc, nciCalc, investCalc, dtlCalc, ncdf, blackScholes, optionTranches, midYearCompare, driverProbs, probCheck, nominalGrowth, stats, histRoic, segMargin, tvCompare, impliedG, tvChecks, parsePrices, regressionBeta, relever, unlever, weightedKd, coverage, histRate, sizeLabel, waccParts, ttmColumn, manualTTM, manualTTMChecks, MANUAL_KEYS, series, anchors, consistency, effect, revenuePath, marginPath, nolBenefit, scenarioTable, isNum };
 })();
 if (typeof module !== 'undefined') module.exports = DCFAnalysis;
+
+// ===== CONCLUSION (pure functions; no UI) =====
+// Turns a finished model into a conclusion a learner can defend:
+//  - verdict: value vs price against the analyst's own margin of safety, and how robust that call is
+//  - implied: what today's price assumes (reverse DCF), solved with the full engine, one lever at a time
+//  - drivers: which inputs move value most (a tornado), each bumped by a standard amount
+//  - review: checks that the written thesis agrees with the numbers
+//  - memo: a one-page investment memo in Markdown
+// Nothing here changes the model: every calculation re-runs the engine with temporary overrides.
+const DCFConclusion = (() => {
+  const isNum = v => typeof v === 'number' && isFinite(v);
+  const eng = () => (typeof DCF !== 'undefined' ? DCF : require('./engine.js'));
+  const SC = ['Base', 'Bear', 'Bull'];
+  const REC = ['Buy', 'Hold', 'Sell'];
+
+  // the analyst's margin of safety: the gap between value and price needed before acting
+  const DEFAULT_HURDLE = 0.15;
+  function blankThesis() {
+    return { rec: null, hurdle: null, horizon: null, points: ['', '', ''], risks: ['', '', ''], changeMind: '', catalysts: '', variant: '', saved: null };
+  }
+
+  // ---- verdict ----
+  // value: the value per share the conclusion rests on (probability-weighted, or the Base case if weights are missing)
+  function verdict(all, price, hurdle, grid) {
+    const h = isNum(hurdle) && hurdle >= 0 ? hurdle : DEFAULT_HURDLE;
+    const useW = isNum(all.weighted);
+    const value = useW ? all.weighted : (all.scen.Base && all.scen.Base.ok ? all.scen.Base.perShare : null);
+    if (!isNum(value) || !isNum(price) || price <= 0) return { ok: false, reason: useW || (all.scen.Base && all.scen.Base.ok) ? 'Enter the current share price.' : 'The Base case must calculate first.' };
+    const gap = value / price - 1;
+    // the price at which the value clears the margin of safety (a buy-below price) and the price above which it is overvalued
+    const buyBelow = value / (1 + h), sellAbove = value / (1 - Math.min(h, 0.95));
+    let call, tone, text;
+    if (gap >= h - 1e-12) { call = 'Buy'; tone = 'good'; text = `Your value is ${pct(gap)} above the price, more than your ${pct(h, 0)} margin of safety. On your assumptions the shares look undervalued.`; }
+    else if (gap <= -h + 1e-12) { call = 'Sell'; tone = 'bad'; text = `Your value is ${pct(-gap)} below the price, more than your ${pct(h, 0)} margin of safety. On your assumptions the shares look overvalued.`; }
+    else { call = 'Hold'; tone = 'warn'; text = `Your value is within ${pct(h, 0)} of the price (${gap >= 0 ? '+' : '−'}${pct(Math.abs(gap))}). That gap is smaller than the error in any DCF, so the shares look roughly fairly valued.`; }
+    const scen = SC.filter(s => all.scen[s] && all.scen[s].ok).map(s => ({ s, perShare: all.scen[s].perShare, above: all.scen[s].perShare > price }));
+    const above = scen.filter(x => x.above).length;
+    let gridShare = null, gridN = 0;
+    if (grid) { const cells = grid.flat().filter(isNum); gridN = cells.length; if (gridN) gridShare = cells.filter(v => v > price).length / gridN; }
+    // robustness: the same answer across scenarios and most of the WACC x growth grid
+    let robust;
+    if (scen.length < 3 || gridShare === null) robust = { level: 'unknown', text: 'Fill in all three scenarios to test how robust the call is.' };
+    else if ((above === 3 || above === 0) && (gridShare >= 0.8 || gridShare <= 0.2)) robust = { level: 'high', text: `${above === 3 ? 'All three scenarios are above' : 'All three scenarios are below'} the price, and ${pct(above === 3 ? gridShare : 1 - gridShare, 0)} of the sensitivity grid agrees. The call does not depend on one assumption.` };
+    else if (above === 1 || above === 2) robust = { level: 'low', text: `${above} of 3 scenarios ${above === 1 ? 'is' : 'are'} above the price and ${pct(gridShare, 0)} of the sensitivity grid is. The answer depends on which story plays out, so the probabilities and the Bear/Bull drivers deserve the most evidence.` };
+    else robust = { level: 'medium', text: `${above === 3 ? 'All three scenarios are above' : 'All three scenarios are below'} the price, but only ${pct(above === 3 ? gridShare : 1 - gridShare, 0)} of the sensitivity grid agrees. A modest change in WACC or terminal growth flips the answer.` };
+    return { ok: true, value, basis: useW ? 'probability-weighted value' : 'Base case (scenario weights are incomplete)', price, gap, hurdle: h, call, tone, text, buyBelow, sellAbove, scen, above, gridShare, gridN, robust };
+  }
+  const pct = (v, d = 1) => (v * 100).toFixed(d) + '%';
+
+  // grid of value per share around the scenario's WACC and terminal input, for robustness
+  function grid(inp, s, mode) {
+    const base = eng().run(inp, s, mode);
+    if (!base.ok) return null;
+    const w0 = base.waccUsed;
+    const ws = [-0.02, -0.01, 0, 0.01, 0.02].map(d => w0 + d);
+    if (base.tvMethod === 'Exit Multiple') {
+      const m0 = inp.exitMult[s]; const ms = [-4, -2, 0, 2, 4].map(d => m0 + d).filter(m => m > 0);
+      const g = eng().sensitivityExit(inp, s, mode, ws, ms);
+      return g ? g.map(r => r.map(c => (c ? c.perShare : null))) : null;
+    }
+    const gs = [-0.01, -0.005, 0, 0.005, 0.01].map(d => base.g + d);
+    return eng().sensitivity(inp, s, mode, ws, gs);
+  }
+
+  // ---- reverse DCF: what the price implies ----
+  // Finds the shift that makes value per share equal the price, holding everything else at the scenario's inputs.
+  // Searches outward from no change and takes the nearest crossing, then bisects. Returns null if none in range.
+  function solve(f, lo, hi, step) {
+    const f0 = f(0);
+    if (!isNum(f0)) return null;
+    if (Math.abs(f0) < 1e-9) return 0;
+    const scan = dir => {
+      let a = 0, fa = f0;
+      for (let x = step; x <= (dir > 0 ? hi : -lo) + 1e-12; x += step) {
+        const b = dir * x, fb = f(b);
+        if (!isNum(fb)) { a = b; fa = null; continue; }
+        if (isNum(fa) && Math.sign(fa) !== Math.sign(fb)) return [a, b, fa];
+        a = b; fa = fb;
+      }
+      return null;
+    };
+    const up = scan(1), dn = scan(-1);
+    const pick = [up, dn].filter(Boolean).sort((p, q) => Math.min(Math.abs(p[0]), Math.abs(p[1])) - Math.min(Math.abs(q[0]), Math.abs(q[1])))[0];
+    if (!pick) return null;
+    let [a, b, fa] = pick;
+    for (let i = 0; i < 80 && Math.abs(b - a) > 1e-8; i++) { const m = (a + b) / 2, fm = f(m); if (!isNum(fm)) break; if (Math.sign(fm) === Math.sign(fa)) { a = m; fa = fm; } else b = m; }
+    return (a + b) / 2;
+  }
+  function cagr(r) { const y = r.years; return isNum(y[9].rev) && isNum(y[0].rev) && y[0].growth > -1 ? Math.pow(y[9].rev / (y[0].rev / (1 + y[0].growth)), 1 / 10) - 1 : null; }
+  function implied(inp, s, mode) {
+    const E = eng(), base = E.run(inp, s, mode);
+    if (!base.ok) return null;
+    const price = inp.price;
+    const v = k => inp[k] && inp[k][s];
+    const per = ov => { const r = E.run(inp, s, mode, ov); return r.ok ? r.perShare - price : null; };
+    const out = { price, value: base.perShare, linked: base.linked, baseCagr: base.linked ? null : cagr(base), baseEm10: base.years[9].emPct, wacc: base.waccUsed };
+    // 1. growth: every forecast year's revenue growth moves by the same amount
+    if (!base.linked) {
+      const gov = d => ({ g1: v('g1') + d, g2: v('g2') + d, g3: v('g3') + d });
+      const d = solve(d => (v('g1') + d <= -0.95 || v('g2') + d <= -0.95 || v('g3') + d <= -0.95 ? null : per(gov(d))), -0.5, 0.6, 0.01);
+      if (d === null) out.growth = { ok: false, reason: 'No revenue growth between −50 and +60 points from yours gives the price.' };
+      else { const r = E.run(inp, s, mode, gov(d)); out.growth = { ok: true, shift: d, rates: [v('g1') + d, v('g2') + d, v('g3') + d], cagr: cagr(r) }; }
+      // 2. margins: EBITDA margin in every year (1, 5, 10 and terminal) moves by the same amount
+      const mov = d => ({ em1: v('em1') + d, em5: v('em5') + d, em10: v('em10') + d, tem: v('tem') + d });
+      const m = solve(d => per(mov(d)), -0.5, 0.5, 0.01);
+      if (m === null) out.margin = { ok: false, reason: 'No EBITDA margin between −50 and +50 points from yours gives the price.' };
+      else out.margin = { ok: true, shift: m, em: [v('em1') + m, v('em5') + m, v('em10') + m, v('tem') + m] };
+    } else {
+      out.growth = out.margin = { ok: false, reason: 'This scenario uses the linked three-statement forecast, so revenue and margins come from that model. Change them there.' };
+    }
+    // 3. discount rate: the return you earn if you buy at today's price and the forecast comes true
+    const floor = base.tvMethod === 'Gordon Growth' ? base.g + 0.0005 : 0.001;
+    const w = solve(d => (base.waccUsed + d <= floor ? null : per({ wacc: base.waccUsed + d })), floor - base.waccUsed, 0.4, 0.0025);
+    out.irr = w === null ? { ok: false, reason: 'No discount rate in range gives the price.' } : { ok: true, rate: base.waccUsed + w, spread: w };
+    return out;
+  }
+
+  // ---- value drivers (tornado) ----
+  const DRIVERS = [
+    { id: 'growth', label: 'Revenue growth, years 1–10', bump: 0.02, unit: 'pts', keys: ['g1', 'g2', 'g3'], forecast: true },
+    { id: 'margin', label: 'EBITDA margin, every year', bump: 0.02, unit: 'pts', keys: ['em1', 'em5', 'em10', 'tem'], forecast: true },
+    { id: 'capex', label: 'CapEx, % of revenue', bump: 0.01, unit: 'pts', keys: ['capex1', 'capex2', 'capex3', 'tcapex'], forecast: true },
+    { id: 'tax', label: 'Tax rate', bump: 0.03, unit: 'pts', keys: ['tax'], forecast: true },
+    { id: 'wacc', label: 'WACC', bump: 0.01, unit: 'pts', ov: 'wacc' },
+    { id: 'tg', label: 'Terminal growth', bump: 0.005, unit: 'pts', keys: ['tg'], gordon: true },
+    { id: 'exit', label: 'Exit multiple', bump: 2, unit: 'x', keys: ['exitMult'], exit: true },
+  ];
+  function drivers(inp, s, mode) {
+    const E = eng(), base = E.run(inp, s, mode);
+    if (!base.ok) return null;
+    const out = [];
+    DRIVERS.forEach(d => {
+      if (d.gordon && base.tvMethod !== 'Gordon Growth') return;
+      if (d.exit && base.tvMethod !== 'Exit Multiple') return;
+      if (d.forecast && base.linked) return;
+      const run = sign => {
+        const ov = {};
+        if (d.ov === 'wacc') ov.wacc = base.waccUsed + sign * d.bump;
+        else d.keys.forEach(k => { if (inp[k] && isNum(inp[k][s])) ov[k] = inp[k][s] + sign * d.bump; });
+        const r = E.run(inp, s, mode, ov);
+        return r.ok ? r.perShare : null;
+      };
+      const lo = run(-1), hi = run(1);
+      if (!isNum(lo) || !isNum(hi)) return;
+      if (Math.abs(lo - base.perShare) < 1e-9 && Math.abs(hi - base.perShare) < 1e-9) return;
+      out.push({ id: d.id, label: d.label, bump: d.bump, unit: d.unit, down: lo, up: hi, range: Math.abs(hi - lo) });
+    });
+    out.sort((a, b) => b.range - a.range);
+    return { base: base.perShare, list: out };
+  }
+
+  // ---- does the written thesis agree with the numbers? ----
+  function review(thesis, V, imp, ctx = {}) {
+    const t = thesis || blankThesis(), out = [];
+    const filled = a => (a || []).filter(x => x && String(x).trim().length >= 8).length;
+    const add = (level, text) => out.push({ level, text });
+    if (!t.rec) add('todo', 'Choose a recommendation: Buy, Hold or Sell.');
+    else if (V && V.ok && t.rec !== V.call) {
+      const why = { Buy: 'buying', Hold: 'holding', Sell: 'selling' }[t.rec];
+      add('bad', `You chose ${t.rec}, but your own numbers point to ${V.call} (value ${V.gap >= 0 ? 'above' : 'below'} price by ${pct(Math.abs(V.gap))}, margin of safety ${pct(V.hurdle, 0)}). Either explain in your reasons why ${why} still makes sense, or revisit the assumptions.`);
+    }
+    if (filled(t.points) < 3) add('todo', `Write three reasons for your view (${filled(t.points)} of 3 so far). Each should name a driver in the model, such as growth, margins or reinvestment, and the evidence for it.`);
+    if (filled(t.risks) < 2) add('todo', `List at least two risks (${filled(t.risks)} so far): what would make your Base case wrong?`);
+    if (!t.changeMind || t.changeMind.trim().length < 8) add('todo', 'Say what would change your mind: a measurable signal, such as "revenue growth below 8% for two quarters".');
+    if (!t.variant || t.variant.trim().length < 8) add('todo', 'Say where you differ from the market: which number in the "what the price implies" panel do you disagree with, and why?');
+    if (V && V.ok && V.robust.level === 'low') add('warn', 'Your scenarios disagree about whether the shares are cheap. A high-conviction recommendation needs a clear reason to weight one story over the others.');
+    if (V && V.ok && V.scen.length === 3 && V.above === 3 && t.rec !== 'Sell') add('warn', 'Even your Bear case is above the price. Check that the Bear case is genuinely pessimistic: a real downside case usually sits below the price.');
+    if (V && V.ok && V.scen.length === 3 && V.above === 0 && t.rec !== 'Buy') add('warn', 'Even your Bull case is below the price. Check that the Bull case is genuinely optimistic, or the market may know something your model does not.');
+    if (isNum(ctx.tvShare) && ctx.tvShare > 0.85) add('warn', `Terminal value is ${pct(ctx.tvShare, 0)} of enterprise value, so the conclusion rests mostly on what happens after year 10. Mention this in your risks.`);
+    if (ctx.failing > 0) add('warn', `${ctx.failing} sanity check${ctx.failing > 1 ? 's fail' : ' fails'} on the Valuation summary. Fix ${ctx.failing > 1 ? 'them' : 'it'} before relying on the conclusion.`);
+    if (isNum(ctx.pct) && ctx.pct < 100) add('info', `The model is ${ctx.pct}% complete. A conclusion from an incomplete model is a draft.`);
+    if (imp && imp.growth && imp.growth.ok && isNum(ctx.histCagr) && isNum(imp.growth.cagr)) {
+      const d = imp.growth.cagr - ctx.histCagr;
+      if (d > 0.05) add('info', `The price implies about ${pct(imp.growth.cagr)} a year of revenue growth for ten years, well above the ${pct(ctx.histCagr)} the company managed recently. A Sell case can point to this.`);
+      else if (d < -0.05) add('info', `The price implies only about ${pct(imp.growth.cagr)} a year of revenue growth, well below the ${pct(ctx.histCagr)} the company managed recently. A Buy case can point to this.`);
+    }
+    const blocking = out.filter(x => x.level === 'todo' || x.level === 'bad').length;
+    return { items: out, ready: blocking === 0, blocking };
+  }
+
+  // ---- one-page investment memo (Markdown) ----
+  function memo(m) {
+    const L = [], f$ = v => (isNum(v) ? '$' + v.toFixed(2) : 'n/a'), fp = (v, d = 1) => (isNum(v) ? (v >= 0 ? '' : '−') + (Math.abs(v) * 100).toFixed(d) + '%' : 'n/a');
+    const c = m.company || {}, V = m.verdict, t = m.thesis || blankThesis();
+    L.push(`# ${c.name || 'Company'}${c.ticker ? ' (' + c.ticker + ')' : ''}: ${t.rec || (V && V.ok ? V.call : 'No recommendation')}`);
+    L.push('');
+    L.push(`${c.analyst ? 'Analyst: ' + c.analyst + ' · ' : ''}${c.valDate ? 'Valued as of ' + c.valDate + ' · ' : ''}${t.horizon ? 'Horizon: ' + t.horizon + ' · ' : ''}Discounted cash flow, ${m.mode === 'corrected' ? 'corrected method' : 'original workbook method'}`);
+    L.push('');
+    if (V && V.ok) {
+      L.push('## Valuation');
+      L.push('');
+      L.push('| | Value per share | vs price |');
+      L.push('|---|---:|---:|');
+      V.scen.forEach(x => L.push(`| ${x.s} case${m.probs && isNum(m.probs[x.s]) ? ' (' + (m.probs[x.s] * 100).toFixed(0) + '%)' : ''} | ${f$(x.perShare)} | ${fp(x.perShare / V.price - 1)} |`));
+      L.push(`| **${V.basis[0].toUpperCase() + V.basis.slice(1)}** | **${f$(V.value)}** | **${fp(V.gap)}** |`);
+      L.push(`| Current price | ${f$(V.price)} | |`);
+      L.push('');
+      L.push(`Model view: **${V.call}**. ${V.text} Buy below ${f$(V.buyBelow)}; overvalued above ${f$(V.sellAbove)} (margin of safety ${fp(V.hurdle, 0)}).`);
+      L.push('');
+      L.push(`Robustness: ${V.robust.text}`);
+      L.push('');
+    }
+    const I = m.implied;
+    if (I) {
+      L.push('## What the price implies');
+      L.push('');
+      if (I.growth && I.growth.ok) L.push(`- Revenue growth: about ${fp(I.growth.cagr)} a year for ten years (my Base case: ${fp(I.baseCagr)}${isNum(m.histCagr) ? '; recent history: ' + fp(m.histCagr) : ''}).`);
+      if (I.margin && I.margin.ok) L.push(`- EBITDA margin: ${fp(I.margin.em[2])} by year 10 (my Base case: ${fp(I.baseEm10)}).`);
+      if (I.irr && I.irr.ok) L.push(`- Return from buying today if my forecast comes true: ${fp(I.irr.rate, 2)} a year, vs a WACC of ${fp(I.wacc, 2)}.`);
+      L.push('');
+    }
+    if (m.drivers && m.drivers.list.length) {
+      L.push('## What matters most');
+      L.push('');
+      m.drivers.list.slice(0, 4).forEach(d => L.push(`- ${d.label} ${d.unit === 'x' ? '±' + d.bump + '×' : '±' + (d.bump * 100).toFixed(1) + ' pts'}: ${f$(Math.min(d.down, d.up))} to ${f$(Math.max(d.down, d.up))}`));
+      L.push('');
+    }
+    const list = (h, a) => { const xs = (a || []).filter(x => x && String(x).trim()); if (!xs.length) return; L.push('## ' + h); L.push(''); xs.forEach((x, i) => L.push(`${i + 1}. ${String(x).trim()}`)); L.push(''); };
+    const para = (h, x) => { if (!x || !String(x).trim()) return; L.push('## ' + h); L.push(''); L.push(String(x).trim()); L.push(''); };
+    list('Thesis', t.points);
+    para('Where I differ from the market', t.variant);
+    list('Risks', t.risks);
+    para('Catalysts', t.catalysts);
+    para('What would change my mind', t.changeMind);
+    if (m.reviewItems && m.reviewItems.length) { L.push('## Open review points'); L.push(''); m.reviewItems.forEach(x => L.push(`- ${x.text}`)); L.push(''); }
+    L.push('_Prepared with DCF Pro. A DCF is only as good as its assumptions; every figure above can be traced to the model inputs._');
+    return L.join('\n');
+  }
+
+  return { REC, DEFAULT_HURDLE, blankThesis, verdict, grid, solve, implied, DRIVERS, drivers, review, memo };
+})();
+if (typeof module !== 'undefined') module.exports = DCFConclusion;
 
 // ===== FIELD HELP =====
 // The "?" help for every editable field: what it is, why it matters, where to find it (filing, statement,
@@ -13107,6 +13399,7 @@ const SimApp = (() => {
     { id: 'valuation', title: 'DCF engine', grp: 'Model', icon: 'calc' },
     { id: 'sensitivity', title: 'Sensitivity', grp: 'Model', icon: 'grid' },
     { id: 'summary', title: 'Valuation summary', grp: 'Results', icon: 'target' },
+    { id: 'conclusion', title: 'Conclusion & thesis', grp: 'Results', icon: 'scale' },
     { id: 'method', title: 'Fixes & reconciliation', grp: 'Results', icon: 'shield' },
     { id: 'files', title: 'Saved models library', grp: 'Your work', icon: 'folder' },
     { id: 'record', title: 'Sources & change log', grp: 'Your work', icon: 'list' },
@@ -13333,6 +13626,7 @@ const SimApp = (() => {
     sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
     pct: '<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
     flag: '<path d="M5 21V4h11l-2 4 2 4H5"/>',
+    scale: '<path d="M12 3v18M7 21h10M5 7h14"/><path d="M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z"/>',
     layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
     stack: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/>',
     trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
@@ -14658,7 +14952,7 @@ const SimApp = (() => {
       <div class="tbl-wrap"><table class="kv num scen"><thead><tr><th>Scenario</th><th>Weight</th><th>Equity value ($ mm)</th><th>Value / share</th><th>Upside</th></tr></thead><tbody>
       ${['Bear', 'Base', 'Bull'].map(scenRow).join('')}
       <tr class="tot"><th scope="row">Probability-weighted</th><td>${isNum(all.probSum) ? (all.probSum * 100).toFixed(0) + '%' : '—'}</td><td>${isNum(wEq) ? fmt.mm(wEq) : '—'}</td><td>${isNum(all.weighted) ? fmt.usd(all.weighted) : '—'}</td><td>${isNum(up) ? (up < 0 ? `<span class="neg">(${(-up * 100).toFixed(1)}%)</span>` : `<span class="pos">+${(up * 100).toFixed(1)}%</span>`) : '—'}</td></tr>
-      </tbody></table></div><a class="more" href="#summary">Full scenario comparison</a></section>`;
+      </tbody></table></div><a class="more" href="#summary">Full scenario comparison</a> <a class="more" href="#conclusion">Reach a conclusion</a></section>`;
     // FCF chart
     const fy = isNum(+H.years[4]) && H.years[4] ? +H.years[4] : null;
     const fcfChart = act.ok ? DCFCharts.fcf(act.years.slice(0, 10).map((y, i) => ({ label: fy ? `${String(fy + i + 1).slice(2)}E` : 'Y' + (i + 1), fcff: y.fcff, margin: y.rev ? y.fcff / y.rev : null })), { label: `Projected free cash flow, ${s} case` }) : '<p class="footnote">The chart appears once the active case calculates.</p>';
@@ -14856,6 +15150,7 @@ const SimApp = (() => {
       ['Fill in the Base case', 'Work down the Base column of the assumption pages, using history as your guide.', 'assumptions'],
       ['Fill in Bear and Bull', 'Make them plausible stories, not just ±20%. Then set the probabilities.', 'bridge'],
       ['Review the results', 'Read the summary, clear every red check, and stress-test on Sensitivity.', 'summary'],
+      ['Reach a conclusion', 'See what the price implies, which inputs decide the answer, then write and check your thesis and export the memo.', 'conclusion'],
     ];
     const s = cur.sample ? `<div class="notice">This model holds the example figures from your workbook <b>dcf-model-amzn-CMGs6046.xlsx</b> (Amazon, valuation date 1 Jul 2026). Replace them with your own sourced figures, or start a blank model on <a href="#files">Saved models & Excel</a>.</div>` : '';
     return `<div><h1>Build a DCF valuation, one input at a time</h1><p class="lead">This calculator reproduces the workbook's ten-year free-cash-flow model with Base, Bear and Bull scenarios. It guides you through each input, explains where to find it, and checks the result. Nothing is calculated from a blank: an empty box stays empty until you fill it.</p></div>${s}
@@ -15213,6 +15508,113 @@ const SimApp = (() => {
       <section class="panel"><h2>Street consensus vs model</h2><p class="footnote">Optional. Type the consensus figures and where they came from.</p>${street}</section></div>
       <section class="panel"><div class="panel-head"><h2>Saved versions</h2><div class="btns"><input type="text" class="plain" id="snap-name" placeholder="Version name, e.g. Lower margins" style="border:1px solid var(--line-strong);border-radius:5px;padding:6px 8px;background:var(--surface);color:var(--ink)"><button class="btn primary" id="snap-save">Save this version</button></div></div>${snapTbl}</section>`;
   };
+  // ---------- conclusion: from a value to a defensible recommendation ----------
+  const thesis = () => { if (!cur.thesis) cur.thesis = DCFModel.blankThesis(); return cur.thesis; };
+  function conclusionData() {
+    const { all, inp, anchors } = calc();
+    const T = thesis(), mode = cur.mode;
+    const G = DCFConclusion.grid(inp, 'Base', mode);
+    const V = DCFConclusion.verdict(all, inp.price, T.hurdle, G);
+    const I = all.scen.Base.ok ? DCFConclusion.implied(inp, 'Base', mode) : null;
+    const D = all.scen.Base.ok ? DCFConclusion.drivers(inp, 'Base', mode) : null;
+    const a = anchors && anchors.g1 ? anchors.g1 : {};
+    const histCagr = isNum(a.cagr4) ? a.cagr4 : isNum(a.cagr3) ? a.cagr3 : null;
+    const histLabel = isNum(a.cagr4) ? '4-year revenue CAGR' : isNum(a.cagr3) ? '3-year revenue CAGR' : null;
+    const em = anchors && anchors.em1 ? anchors.em1 : {};
+    const histEm = isNum(em.avg3) ? em.avg3 : em.latestFY;
+    const failing = checksList().filter(c => c[2] === 'bad').length;
+    const R = DCFConclusion.review(T, V, I, { tvShare: all.scen.Base.ok ? all.scen.Base.tvShare : null, failing, pct: track().pct, histCagr });
+    return { all, inp, T, V, I, D, histCagr, histLabel, histEm, R };
+  }
+  function tornadoHtml(D) {
+    if (!D || !D.list.length) return '<p class="footnote">Appears once the Base case calculates.</p>';
+    const lo = Math.min(...D.list.map(d => Math.min(d.down, d.up)), D.base), hi = Math.max(...D.list.map(d => Math.max(d.down, d.up)), D.base);
+    const X = v => ((v - lo) / (hi - lo || 1)) * 100;
+    const bump = d => d.unit === 'x' ? `±${d.bump}×` : `±${+(d.bump * 100).toFixed(1)} pts`;
+    return `<div class="tornado" role="table" aria-label="Value per share when each input moves">
+      ${D.list.map(d => { const a = Math.min(d.down, d.up), b = Math.max(d.down, d.up); return `<div class="trow" role="row"><div class="tl" role="cell">${esc(d.label)} <span class="footnote">${bump(d)}</span></div>
+        <div class="tbar" role="cell"><span class="neg-seg" style="left:${X(a)}%;width:${Math.max(0, X(D.base) - X(a))}%"></span><span class="pos-seg" style="left:${X(D.base)}%;width:${Math.max(0, X(b) - X(D.base))}%"></span><span class="mid" style="left:${X(D.base)}%"></span></div>
+        <div class="tv" role="cell">${plain(fmt.usd(a))} – ${plain(fmt.usd(b))}</div></div>`; }).join('')}
+      <div class="trow foot"><div></div><div class="footnote">Line = Base case ${plain(fmt.usd(D.base))}. Bars run from the low to the high value when that one input moves; everything else stays put.</div><div></div></div></div>`;
+  }
+  P.conclusion = () => {
+    const { all, inp, T, V, I, D, histCagr, histLabel, histEm, R } = conclusionData();
+    const head = `<div><h1>Conclusion${cur.inputs.company.name ? ': ' + esc(cur.inputs.company.name) : ''}</h1><p class="lead">A DCF gives a number; an analyst gives a view. This page turns your model into a recommendation you can defend: how far value is from price, what the market is already assuming, which inputs decide the answer, and a written thesis that has to agree with your numbers.</p></div>`;
+    if (!V.ok) return head + `<div class="notice bad"><b>Not ready for a conclusion yet.</b> ${esc(V.reason)} <a href="#checklist">See what is missing</a>.</div>`;
+    const pctTxt = (v, d = 1) => plain(fmt.pct(v, d));
+    const hurdleIn = `<label class="inl">Margin of safety <span class="inwrap sm"><input type="text" inputmode="decimal" data-t="th" data-k="hurdle" data-unit="pct" id="th-hurdle" value="${esc(toInputText(T.hurdle, 'pct'))}" placeholder="${DCFConclusion.DEFAULT_HURDLE * 100}"><span class="unit">%</span></span></label>`;
+    const verdict = `<section class="panel verdict v-${V.tone}">
+      <div class="vgrid"><div class="vcall"><span class="k">Model view</span><span class="call">${V.call}</span><span class="footnote">${esc(V.basis)}</span></div>
+      <div class="stats mini"><div class="stat"><span class="k">Value</span><span class="v">${plain(fmt.usd(V.value))}</span></div><div class="stat"><span class="k">Price</span><span class="v">${plain(fmt.usd(V.price))}</span></div><div class="stat"><span class="k">Gap</span><span class="v">${V.gap >= 0 ? '+' : '−'}${pctTxt(Math.abs(V.gap))}</span></div><div class="stat"><span class="k">Buy below</span><span class="v">${plain(fmt.usd(V.buyBelow))}</span></div><div class="stat"><span class="k">Overvalued above</span><span class="v">${plain(fmt.usd(V.sellAbove))}</span></div></div></div>
+      <p>${esc(V.text)}</p>
+      <div class="vrob"><span class="pill ${{ high: 'good', medium: 'warn', low: 'bad', unknown: 'neutral' }[V.robust.level]}">Robustness: ${V.robust.level}</span> <span class="footnote">${esc(V.robust.text)}</span></div>
+      <div class="vfoot">${hurdleIn}<span class="footnote">How far value must be from price before you act. DCF values carry wide error bars, so analysts rarely act on a gap under 10–20%. A larger margin suits riskier or less predictable companies.</span></div>
+      <details class="mini"><summary>How to read this</summary><div class="footnote">The model view is mechanical: <b>Buy</b> when your value exceeds the price by more than your margin of safety, <b>Sell</b> when it is below by more than the margin, otherwise <b>Hold</b>. Robustness asks whether the answer survives other reasonable inputs: it looks at your three scenarios and a 5 × 5 grid of WACC ±2 points and ${all.scen.Base.tvMethod === 'Exit Multiple' ? 'exit multiple ±4×' : 'terminal growth ±1 point'} around the Base case. Your own recommendation can differ from the model view, but then your thesis must explain why.</div></details>
+    </section>`;
+    const scenRows = V.scen.map(x => `<tr><th scope="row">${x.s}${isNum(inp.prob[x.s]) ? ` <span class="footnote">${(inp.prob[x.s] * 100).toFixed(0)}%</span>` : ''}</th><td>${fmt.usd(x.perShare)}</td><td>${fmt.pct(x.perShare / V.price - 1)}</td><td><span class="pill ${x.above ? 'good' : 'bad'}">${x.above ? 'Above price' : 'Below price'}</span></td></tr>`).join('');
+    const scen = `<section class="panel"><h2>Scenarios against the price</h2><div class="tbl-wrap"><table class="fin"><thead><tr><th>Scenario</th><th>Value / share</th><th>vs price</th><th></th></tr></thead><tbody>${scenRows}</tbody></table></div>${isNum(V.gridShare) ? `<p class="footnote">${pctTxt(V.gridShare, 0)} of ${V.gridN} sensitivity cells around the Base case are above the price. <a href="#sensitivity">Open the full grid</a>.</p>` : ''}</section>`;
+    // what the price implies
+    const impRow = (lab, mkt, mine, hist, histL, note) => `<tr><th scope="row">${lab}</th><td class="key">${mkt}</td><td>${mine}</td><td>${hist}${histL ? `<div class="footnote">${histL}</div>` : ''}</td></tr><tr class="sub"><td colspan="4" class="footnote">${note}</td></tr>`;
+    let imp = '';
+    if (I) {
+      const g = I.growth, m = I.margin, r = I.irr;
+      imp = `<section class="panel"><h2>What today's price implies</h2><p class="footnote">A reverse DCF: the same model, solved backwards. Each row moves one lever, with everything else at your Base case, until the value equals the ${plain(fmt.usd(I.price))} price. Compare the market's number with yours and with history: the row where you disagree most is your thesis.</p>
+        <div class="tbl-wrap"><table class="fin imp"><thead><tr><th>Lever</th><th>Priced in</th><th>Your Base case</th><th>History</th></tr></thead><tbody>
+        ${g.ok ? impRow('Revenue growth, 10-year average', pctTxt(g.cagr), pctTxt(I.baseCagr), isNum(histCagr) ? pctTxt(histCagr) : '<span class="na">n/a</span>', histLabel || 'Enter historicals', `Each growth phase moves by ${g.shift >= 0 ? '+' : '−'}${(Math.abs(g.shift) * 100).toFixed(1)} points (years 1–3 ${pctTxt(g.rates[0])}, 4–7 ${pctTxt(g.rates[1])}, 8–10 ${pctTxt(g.rates[2])}).${isNum(histCagr) ? (g.cagr > histCagr + 0.03 ? ' The market expects faster growth than the company has delivered.' : g.cagr < histCagr - 0.03 ? ' The market expects slower growth than the company has delivered.' : ' Roughly in line with recent history.') : ''}`) : `<tr><th scope="row">Revenue growth</th><td colspan="3" class="footnote">${esc(g.reason)}</td></tr>`}
+        ${m.ok ? impRow('EBITDA margin, year 10', pctTxt(m.em[2]), pctTxt(I.baseEm10), isNum(histEm) ? pctTxt(histEm) : '<span class="na">n/a</span>', isNum(histEm) ? 'Recent EBITDA margin' : 'Enter historicals', `Every year's margin moves by ${m.shift >= 0 ? '+' : '−'}${(Math.abs(m.shift) * 100).toFixed(1)} points, including the terminal margin.`) : `<tr><th scope="row">EBITDA margin</th><td colspan="3" class="footnote">${esc(m.reason)}</td></tr>`}
+        ${r.ok ? impRow('Annual return if you buy today', pctTxt(r.rate, 2), `WACC ${pctTxt(I.wacc, 2)}`, '—', '', `The discount rate that makes your forecast worth exactly the price: an internal rate of return. ${r.rate > I.wacc ? `It beats your required return by ${((r.rate - I.wacc) * 100).toFixed(2)} points a year.` : `It falls short of your required return by ${((I.wacc - r.rate) * 100).toFixed(2)} points a year.`}`) : `<tr><th scope="row">Return</th><td colspan="3" class="footnote">${esc(r.reason)}</td></tr>`}
+        </tbody></table></div></section>`;
+    }
+    const drv = `<section class="panel"><h2>What decides the answer</h2><p class="footnote">Base case value when each input moves by a standard step. The longest bars are where your research time pays off, and what your risks should be about.</p>${tornadoHtml(D)}</section>`;
+    // thesis
+    const ta = (k, label, ph, rows = 2) => `<label class="thf">${label}<textarea data-t="th" data-k="${k}" data-unit="text" id="th-${k.replace('.', '-')}" rows="${rows}" placeholder="${esc(ph)}">${esc(k.includes('.') ? T[k.split('.')[0]][+k.split('.')[1]] : T[k])}</textarea></label>`;
+    const recBtns = DCFConclusion.REC.map(r => `<button class="btn ${T.rec === r ? 'primary' : ''}" data-th-rec="${r}" aria-pressed="${T.rec === r}">${r}</button>`).join('');
+    const thesisP = `<section class="panel" id="thesis"><div class="panel-head"><h2>Your thesis</h2><span class="footnote">${T.saved ? 'Saved with the model ' + new Date(T.saved).toLocaleString() : 'Saved with the model as you type'}</span></div>
+      <div class="threc"><span>Recommendation</span><div class="btns">${recBtns}</div>${T.rec && T.rec !== V.call ? `<span class="pill warn">Differs from the model view (${V.call})</span>` : T.rec ? '<span class="pill good">Agrees with the model view</span>' : ''}
+      <label class="inl">Horizon <input type="text" class="txt plain-in" data-t="th" data-k="horizon" data-unit="text" id="th-horizon" value="${esc(T.horizon || '')}" placeholder="e.g. 3 years"></label></div>
+      <div class="thgrid"><div><h3>Three reasons</h3><p class="footnote">Tie each to a driver above and to evidence: "Margins reach 25% because…", not "great company".</p>${[0, 1, 2].map(i => ta('points.' + i, `Reason ${i + 1}`, ['e.g. Cloud keeps growing above 15% for five years because backlog is up 30%', 'e.g. EBITDA margin rises from 21% to 27% as capex intensity falls', 'e.g. The market prices in only 6% growth, below every year in the last decade'][i])).join('')}</div>
+      <div><h3>Risks</h3><p class="footnote">What would make your Base case wrong? Start with the biggest bars in the chart above.</p>${[0, 1, 2].map(i => ta('risks.' + i, `Risk ${i + 1}`, ['e.g. A price war in retail holds margins flat', 'e.g. Capex stays above 15% of revenue for longer', 'e.g. Rates rise and WACC moves up a point'][i])).join('')}</div></div>
+      <div class="thgrid">${ta('variant', 'Where I differ from the market', 'Which line in "What today\'s price implies" do you disagree with, and why?', 3)}${ta('changeMind', 'What would change my mind', 'A measurable signal, e.g. two quarters of revenue growth below 8%', 3)}</div>
+      ${ta('catalysts', 'Catalysts (optional)', 'Events that could close the gap between value and price, and when')}
+    </section>`;
+    const lvl = { bad: ['bad', 'Contradiction'], todo: ['neutral', 'To do'], warn: ['warn', 'Check'], info: ['neutral', 'Note'] };
+    const review = `<section class="panel"><div class="panel-head"><h2>Thesis review</h2>${R.ready ? '<span class="pill good">Ready to present</span>' : `<span class="pill warn">${R.blocking} item${R.blocking === 1 ? '' : 's'} to finish</span>`}</div>
+      ${R.items.length ? `<div class="checks">${R.items.map(x => `<div class="row"><div>${esc(x.text)}</div><span class="pill ${lvl[x.level][0]}">${lvl[x.level][1]}</span></div>`).join('')}</div>` : '<p class="footnote">Your thesis agrees with your numbers. Nothing to flag.</p>'}</section>`;
+    const memoP = `<section class="panel"><div class="panel-head"><h2>Investment memo</h2><div class="btns"><button class="btn" data-memo="copy">Copy</button><button class="btn primary" data-memo="download">Download (.md)</button></div></div>
+      <p class="footnote">One page that combines your numbers and your words, ready to paste into an email, a document or a class submission.</p>
+      <details class="mini"><summary>Preview</summary><pre class="memo">${esc(memoText())}</pre></details></section>`;
+    return head + verdict + `<div class="grid2">${scen}${drv}</div>` + imp + thesisP + review + memoP;
+  };
+  function memoText() {
+    const { inp, T, V, I, D, histCagr, R } = conclusionData();
+    return DCFConclusion.memo({ company: cur.inputs.company, mode: cur.mode, verdict: V, thesis: T, implied: I, drivers: D, probs: inp.prob, histCagr, reviewItems: R.items.filter(x => x.level !== 'info' && x.level !== 'todo') });
+  }
+  // the order a DCF is built in: shown as a step bar at the foot of each page
+  const STEPS = ['company', 'historicals', 'assumptions', 'wacc', 'terminal', 'bridge', 'projections', 'valuation', 'sensitivity', 'summary', 'conclusion'];
+  const STEP_WHY = {
+    company: 'Who you are valuing, the share price and the share count.',
+    historicals: 'Five years of history: the anchor for every forecast.',
+    assumptions: 'Growth, margins and reinvestment for each scenario.',
+    wacc: 'The return investors require: the discount rate.',
+    terminal: 'The value of everything after year 10.',
+    bridge: 'From enterprise value to equity value per share, and scenario weights.',
+    projections: 'Check the ten-year forecast reads like a believable business.',
+    valuation: 'See how the cash flows are discounted and added up.',
+    sensitivity: 'How the value moves with WACC and terminal assumptions.',
+    summary: 'All scenarios side by side, with sanity checks.',
+    conclusion: 'Turn the value into a recommendation you can defend.',
+  };
+  function stepNav(p) {
+    const i = STEPS.indexOf(p);
+    if (i < 0) return '';
+    const t = id => (PAGES.find(x => x.id === id) || {}).title;
+    const prev = STEPS[i - 1], next = STEPS[i + 1];
+    return `<nav class="stepnav" aria-label="Model steps">
+      <div class="sn-prev">${prev ? `<a href="#${prev}">← ${esc(t(prev))}</a>` : ''}</div>
+      <div class="sn-mid"><span class="footnote">Step ${i + 1} of ${STEPS.length}</span><div class="sn-dots">${STEPS.map((s, j) => `<a href="#${s}" class="${j < i ? 'past' : j === i ? 'now' : ''}" title="${esc(t(s))}" aria-label="Step ${j + 1}: ${esc(t(s))}"></a>`).join('')}</div></div>
+      <div class="sn-next">${next ? `<a href="#${next}"><span class="footnote">Next</span> ${esc(t(next))} →</a><div class="footnote">${esc(STEP_WHY[next])}</div>` : '<span class="footnote">Last step. Save your model, then export the memo.</span>'}</div>
+    </nav>`;
+  }
   P.method = () => {
     const { inp } = calc();
     const both = mode => { const m = JSON.parse(JSON.stringify(cur)); m.mode = mode; const e = DCFModel.engineInputs(m).inp; return DCF.runAll(e, mode); };
@@ -15634,7 +16036,7 @@ const SimApp = (() => {
     renderTop(); renderRail();
     const p = page();
     document.body.dataset.page = p;
-    $('#main').innerHTML = `<div class="page">${P[p]()}</div>`;
+    $('#main').innerHTML = `<div class="page">${P[p]()}${stepNav(p)}</div>`;
     document.title = (cur.inputs.company.name ? cur.inputs.company.name + ' · ' : '') + 'DCF Pro';
     const target = pendingFocus || active;
     pendingFocus = null;
@@ -15706,6 +16108,13 @@ const SimApp = (() => {
     if (el.id === 'tm-use') { cur.ttmManual = cur.ttmManual || {}; DCFModel.logChange(cur, 'TTM source', null, cur.ttmManual.use ? 'built by hand' : 'from filings', el.checked ? 'built by hand' : 'from filings'); cur.ttmManual.use = el.checked; persist(); render(); toast(el.checked ? 'Using the TTM you built by hand' : 'Using the TTM calculated from the filings'); return; }
     if (el.id === 'wacc-leases' || el.id === 'lease-mode') { const from = DCFModel.leaseMode(cur); if (from === el.value) return; DCFModel.logChange(cur, 'operating lease treatment', null, from, el.value); cur.leaseMode = el.value; if (cur.waccCfg) delete cur.waccCfg.leases; persist(); render(); toast(el.value === 'debt' ? 'Operating leases are now treated as debt: subtracted in the bridge and counted in the WACC weights. Make sure your margins exclude lease cost.' : 'Operating leases are now treated as operating costs: lease cost stays in the cash flows, and the liability is not subtracted or counted in the weights.'); return; }
     if (el.id === 'base-timing') { DCFModel.logChange(cur, 'forecast timing', null, cur.timing, el.value); cur.timing = el.value; persist(); render(); toast(el.value === 'dated' ? 'Forecast years now line up with the valuation date' : 'Using the workbook timing'); return; }
+    if (el.dataset && el.dataset.t === 'th') {
+      const T = thesis(), k = el.dataset.k;
+      let v = el.value;
+      if (k === 'hurdle') { const p = parse(v, 'pct'); if (p.error || (isNum(p.v) && (p.v < 0 || p.v >= 1))) { parseErrors[el.id] = p.error || 'Enter a margin between 0% and 99%.'; toast(parseErrors[el.id]); return; } v = p.v; }
+      if (k.includes('.')) { const [a, i] = k.split('.'); T[a][+i] = v; } else T[k] = v;
+      T.saved = new Date().toISOString(); persist(); render(); return;
+    }
     if (el.dataset && el.dataset.t) return setInput(el);
     if (el.id === 'model-select') { cur = models[el.value]; try { localStorage.setItem('dcfcalc.current', cur.id); } catch (x) {} parseErrors = {}; render(); return; }
     if (el.id === 'mode-select') { DCFModel.logChange(cur, 'method', null, cur.mode, el.value); cur.mode = el.value; persist(); render(); toast(el.value === 'corrected' ? 'Using the corrected method' : 'Using the exact original workbook method'); return; }
@@ -15735,6 +16144,8 @@ const SimApp = (() => {
     if (searchState.open && !e.target.closest('.search')) { searchState.open = false; renderSearchResults(); }
     if (!b) return;
     if (b.matches('[data-close-modal]')) { modal = null; renderModal(); return; }
+    if (b.dataset.thRec) { const T = thesis(); const to = T.rec === b.dataset.thRec ? null : b.dataset.thRec; DCFModel.logChange(cur, 'thesis recommendation', null, T.rec, to); T.rec = to; T.saved = new Date().toISOString(); persist(); render(); return; }
+    if (b.dataset.memo) { const md = memoText(); if (b.dataset.memo === 'download') { download(new Blob([md], { type: 'text/markdown' }), safeName(cur.name) + ' investment memo.md'); return; } (navigator.clipboard ? navigator.clipboard.writeText(md) : Promise.reject()).then(() => toast('Memo copied'), () => toast('Copy failed: use Download instead')); return; }
     if (b.dataset.openData !== undefined || b.id === 'open-data') { searchState.open = false; renderSearchResults(); modal = 'data'; renderModal(); return; }
     if (b.dataset.import) { importSymbol(b.dataset.import); return; }
     if (b.dataset.fsrcOriginal !== undefined) { const f = cur.forecastSource || {}; cur.forecastSource = { mode: 'original', fsmId: f.fsmId || null }; cur.fsmLog = [{ at: new Date().toISOString(), text: 'Forecast source set back to the original DCF assumptions (from the DCF tab)' }].concat(cur.fsmLog || []).slice(0, 100); persist(); calcCache = null; render(); toast('The DCF now uses its own forecast assumptions.'); return; }

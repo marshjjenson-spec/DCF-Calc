@@ -17,6 +17,27 @@ valuation summary, key drivers with reference values from data, the analyst inpu
 advanced), a football field, a WACC × growth sensitivity grid, scenario results, projected free cash flow and the
 model completion tracker. Light and dark mode are remembered per computer.
 
+## Conclusion & thesis
+
+The last step of the model (Results → **Conclusion & thesis**) turns the value into a recommendation a learner can defend:
+
+- **Model view**: Buy, Hold or Sell from the probability-weighted value against the price and the analyst's own margin of
+  safety (15% by default), with buy-below and overvalued-above prices.
+- **Robustness**: whether all three scenarios and a 5 × 5 grid of WACC ±2 points and terminal growth ±1 point (or exit
+  multiple ±4×) around the Base case agree with the call.
+- **What today's price implies** (reverse DCF): the revenue growth, EBITDA margin and annual return that make the full
+  model equal the price, one lever at a time, next to the Base case and history.
+- **What decides the answer**: a tornado of the Base value when growth, margins, CapEx, tax, WACC and the terminal input
+  each move by a standard step.
+- **Your thesis**: recommendation, horizon, three reasons, risks, where you differ from the market, what would change
+  your mind and catalysts, saved with the model. A **thesis review** flags contradictions (for example Sell when the
+  numbers say Buy), missing parts, a Bear case above the price, a terminal value over 85% of EV and failing checks.
+- **Investment memo**: one page in Markdown combining the numbers and the thesis, to copy or download.
+
+Every page in the build order also ends with a step bar (Step 3 of 11, previous, next and why the next step matters).
+The calculations live in `js/conclusion.js` (pure functions, tested in `tests/conclusion.test.js`); nothing on the
+page changes model inputs.
+
 ## Company data import
 
 Search a company or ticker in the top bar. The import fills **reported figures and market data only**: company
@@ -100,6 +121,7 @@ channel were checked against YouTube's own record; there are no search links sta
 | `js/fields.js` | Every input field: label, unit, scenario columns, workbook cell, help text from the workbook checklist |
 | `js/learn.js` | Beginner's guides and checked video links shown at the top of every help panel |
 | `js/excel.js` | Excel export (writes inputs into the workbook template) and import |
+| `js/conclusion.js` | Conclusion: verdict, reverse DCF, value drivers, thesis review, memo. No UI code |
 | `js/app.js` | User interface only |
 | `templates/` | The original workbook and the corrected workbook used for export |
 | `data/amzn-sample.json` | The workbook's Amazon figures, used as the example model |
